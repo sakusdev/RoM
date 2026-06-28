@@ -1,0 +1,11 @@
+[package]
+name = "ferrum-version-26-1-2"
+description = "Built-in Minecraft Java Edition 26.1.2 protocol profile for Ferrum"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ferrum-configuration = { path = "../ferrum-configuration" }
+ferrum-protocol = { path = "../ferrum-protocol" }

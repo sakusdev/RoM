@@ -226,7 +226,16 @@ dependencies = [
  "clap",
  "ferrum-configuration",
  "ferrum-protocol",
+ "ferrum-version-26-1-2",
  "serde_json",
+]
+
+[[package]]
+name = "ferrum-version-26-1-2"
+version = "0.1.0"
+dependencies = [
+ "ferrum-configuration",
+ "ferrum-protocol",
 ]
 
 [[package]]

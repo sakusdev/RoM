@@ -132,6 +132,12 @@ impl<'a> PacketReader<'a> {
         ]))
     }
 
+    pub(crate) fn take_remaining(&mut self) -> &'a [u8] {
+        let remaining = &self.bytes[self.cursor..];
+        self.cursor = self.bytes.len();
+        remaining
+    }
+
     #[cfg(test)]
     pub(crate) fn read_uuid_bytes(&mut self) -> Result<[u8; 16]> {
         let bytes = self.read_bytes(16)?;
