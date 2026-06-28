@@ -1,0 +1,42 @@
+name: Apply protocol 775 implementation
+
+on:
+  push:
+    branches:
+      - feature/protocol-775
+  pull_request:
+    branches:
+      - master
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/protocol-775
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Apply implementation patch
+        run: |
+          base64 --decode tools/protocol-775.patch.gz.b64 | gzip --decompress > /tmp/protocol-775.patch
+          git apply --check /tmp/protocol-775.patch
+          git apply /tmp/protocol-775.patch
+      - name: Validate workspace
+        run: |
+          cargo fmt --all
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+      - name: Commit validated implementation
+        run: |
+          rm tools/protocol-775.patch.gz.b64
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "Target Minecraft 26.1.2 protocol 775"
+          git push origin HEAD:feature/protocol-775
