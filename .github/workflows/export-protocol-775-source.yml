@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - feature/protocol-775
+  pull_request:
+    branches:
+      - master
 
 jobs:
   export:
