@@ -4,6 +4,7 @@ members = [
     "crates/ferrum-importer",
     "crates/ferrum-cli",
     "crates/ferrum-server",
+    "crates/ferrum-nbt",
 ]
 resolver = "2"
 
@@ -13,7 +14,7 @@ edition = "2024"
 license = "MIT"
 rust-version = "1.85"
 authors = ["Ferrum contributors"]
-repository = "https://example.invalid/ferrum-porting-kit"
+repository = "https://github.com/sakusdev/RoM"
 
 [workspace.dependencies]
 anyhow = "1.0.102"
