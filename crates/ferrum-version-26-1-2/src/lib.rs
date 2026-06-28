@@ -68,17 +68,27 @@ mod tests {
     fn uses_the_documented_configuration_packet_ids() {
         let profile = protocol_profile().unwrap();
         let packets = profile.packets();
-        assert_eq!(packets.require(PacketKind::LoginAcknowledged).unwrap(), 0x03);
-        assert_eq!(packets.require(PacketKind::FinishConfiguration).unwrap(), 0x03);
+        assert_eq!(
+            packets.require(PacketKind::LoginAcknowledged).unwrap(),
+            0x03
+        );
+        assert_eq!(
+            packets.require(PacketKind::FinishConfiguration).unwrap(),
+            0x03
+        );
         assert_eq!(packets.require(PacketKind::RegistryData).unwrap(), 0x07);
         assert_eq!(packets.require(PacketKind::FeatureFlags).unwrap(), 0x0c);
         assert_eq!(packets.require(PacketKind::UpdateTags).unwrap(), 0x0d);
         assert_eq!(
-            packets.require(PacketKind::SelectKnownPacksRequest).unwrap(),
+            packets
+                .require(PacketKind::SelectKnownPacksRequest)
+                .unwrap(),
             0x0e
         );
         assert_eq!(
-            packets.require(PacketKind::SelectKnownPacksResponse).unwrap(),
+            packets
+                .require(PacketKind::SelectKnownPacksResponse)
+                .unwrap(),
             0x07
         );
     }

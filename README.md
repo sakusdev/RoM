@@ -99,46 +99,38 @@ ferrum-server.exe --config server.toml
 Current server runtime scope:
 
 - Native Rust binary only; no Java or JVM at runtime
-- Minecraft Java status handshake
-- Status response JSON
-- Ping/pong latency packet
-- Login intent handling with offline-mode player identity generation, optional Login Success, and an explicit JSON disconnect fallback
-- Per-connection worker threads so status pings do not block each other
-- Shared Minecraft packet codec module for VarInt, strings, framed packets, and packet readers
-- Vanilla-style server list metadata: favicon, sample players, secure-chat flags, and hidden player counts
-- Configurable `version.name`, protocol number, and packet IDs for Minecraft Java Edition `26.*.*` experiments
+- Built-in Minecraft Java Edition `26.1.2` profile (protocol `775`)
+- Status response and ping/pong latency handling
+- Offline-mode Login Success with Java-compatible offline UUIDs
+- Login Acknowledged and Configuration-state transitions
+- Vanilla core Known Packs negotiation
+- Feature Flags, Tags, and Finish Configuration packets
+- Strict protocol mismatch disconnects for built-in profiles
+- Manual packet-ID profiles remain available for protocol experiments
 
-Minimal `server.toml`:
+Recommended `server.toml`:
 
 ```toml
 [server]
+profile = "26.1.2"
 bind = "127.0.0.1:25565"
-version_name = "Minecraft Java Edition 26.*.*"
-protocol = 0
 motd = "Ferrum native Rust server"
 max_players = 20
 online_players = 0
-login_disconnect_message = "Ferrum native server currently implements status ping only"
-allow_offline_login = false
+allow_offline_login = true
 online_mode = false
 hide_online_players = false
 enforces_secure_chat = false
 previews_chat = false
-server_icon = "data:image/png;base64,iVBORw0KGgo="
-sample_players = "Ferrum:00000000-0000-0000-0000-000000000000"
 
-[protocol]
-handshake_serverbound = 0
-status_request_serverbound = 0
-status_response_clientbound = 0
-ping_request_serverbound = 1
-pong_response_clientbound = 1
-login_start_serverbound = 0
-login_disconnect_clientbound = 0
-login_success_clientbound = 2
+[configuration]
+enabled = true
+features = "minecraft:vanilla"
 ```
 
-Set `allow_offline_login = true` to answer login intent with a Java-compatible offline UUID and a minimal Login Success packet. This only admits the client past the login gate; configuration/play-state packets are still intentionally not implemented.
+The same configuration is available at `examples/server-26.1.2.toml`. A built-in profile owns its version name, protocol number, and packet IDs, so a `[protocol]` section must not be added alongside `profile = "26.1.2"`.
+
+The current server reaches the Play protocol state after Configuration, but it does **not** yet send the mandatory registry dataset, Join Game, chunks, or player-position packets. A matching vanilla client therefore cannot enter a playable world yet.
 
 Tagged releases matching `v*` run `.github/workflows/release.yml`, build `ferrum-server` with Cargo's `release` profile on each supported native runner, package the binary with README and LICENSE, and attach the archives to the GitHub Release.
 

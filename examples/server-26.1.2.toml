@@ -1,0 +1,15 @@
+[server]
+profile = "26.1.2"
+bind = "127.0.0.1:25565"
+motd = "Ferrum native Rust server"
+max_players = 20
+online_players = 0
+allow_offline_login = true
+online_mode = false
+hide_online_players = false
+enforces_secure_chat = false
+previews_chat = false
+
+[configuration]
+enabled = true
+features = "minecraft:vanilla"

@@ -18,9 +18,10 @@ The current server milestone provides:
 - Deterministic binary NBT encoding and decoding
 - Protocol-anonymous NBT encoding and decoding
 - Versioned protocol profiles and deterministic connection state validation
-- Configuration-state Registry Data, Feature Flags, and Tags payload encoders
+- Configuration-state Registry Data, Feature Flags, Tags, and Known Packs codecs
+- A built-in Minecraft Java Edition 26.1.2 profile (protocol 775)
 
-The socket runtime now uses `ProtocolProfile` and `ProtocolSession` from Handshake through Configuration. With Configuration explicitly enabled, it consumes Login Acknowledged, sends the configured Feature Flags and Tags payloads, sends Finish Configuration, validates the client acknowledgement, and reaches the Play state. It does not yet send Join Game or world data.
+The socket runtime now uses `ProtocolProfile` and `ProtocolSession` from Handshake through Configuration. The 26.1.2 profile validates the handshake protocol, negotiates the vanilla core known pack, sends Feature Flags and Tags, sends Finish Configuration, validates the client acknowledgement, and reaches the Play state. It does not yet send the mandatory registry dataset, Join Game, or world data.
 
 ## M9 — Binary NBT foundation
 
@@ -51,12 +52,11 @@ Status: complete for the implemented wire states.
 
 Remaining cross-cutting work:
 
-- Add a protocol-version mismatch disconnect before Login Success.
 - Expand malformed-packet isolation tests as Play handlers grow.
 
 ## M11 — Minimal Configuration state
 
-Status: wire-flow foundation implemented; version data remains.
+Status: protocol profile and Known Packs negotiation implemented; registry data remains.
 
 Completed:
 
@@ -67,14 +67,16 @@ Completed:
 - Send configured Feature Flags and an empty Tags payload.
 - Send Finish Configuration and wait for the client acknowledgement.
 - Transition the authoritative connection session to Play.
-- Keep the new flow opt-in until a complete target-version registry set exists.
+- Keep the manual flow opt-in until a complete target-version registry set exists.
+- Select Minecraft Java Edition 26.1.2 / protocol 775 as the first concrete target.
+- Add an exact built-in packet table for the implemented states.
+- Disconnect mismatched clients before Login Start is consumed.
+- Negotiate the vanilla `minecraft/core/26.1.2` known pack with bounded response decoding.
 
 Remaining:
 
-- Select exactly one documented Minecraft Java Edition protocol version.
-- Add its required registry datasets and packet IDs.
-- Send Registry Data packets in the required order.
-- Implement known-packs negotiation when required by the selected version.
+- Add the required 26.1.2 registry datasets.
+- Send Registry Data packets in the required order after Known Packs negotiation.
 - Add captured-client integration fixtures for the complete Configuration exchange.
 
 ## M12 — Minimal Play state

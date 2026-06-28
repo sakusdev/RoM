@@ -7,11 +7,16 @@ use codec::read_varint_io;
 use codec::{
     PacketReader, build_packet, read_packet, write_packet, write_string, write_varint_vec,
 };
-use ferrum_configuration::{encode_feature_flags, encode_tags};
+use ferrum_configuration::{
+    KnownPack, KnownPackDecodeLimits, decode_known_packs, encode_feature_flags, encode_known_packs,
+    encode_tags,
+};
 use ferrum_protocol::{HandshakeIntent, PacketKind, PacketTable, ProtocolProfile, ProtocolSession};
+use ferrum_version_26_1_2 as version_26_1_2;
 use identity::offline_player_identity;
 use serde_json::{Map, Value, json};
 use std::{
+    collections::BTreeSet,
     fs,
     io::{self, Read, Write},
     net::{TcpListener, TcpStream},
@@ -39,6 +44,7 @@ struct Cli {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ServerConfig {
+    profile_name: Option<String>,
     bind: String,
     version_name: String,
     protocol: i32,
@@ -140,6 +146,7 @@ fn run(cli: Cli) -> Result<()> {
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
+            profile_name: None,
             bind: DEFAULT_BIND.to_owned(),
             version_name: DEFAULT_VERSION_NAME.to_owned(),
             protocol: DEFAULT_PROTOCOL,
@@ -191,7 +198,8 @@ impl ServerConfig {
     }
 
     fn from_toml_like_with_base(text: &str, base_dir: Option<&PathBuf>) -> Result<Self> {
-        let mut config = Self::default();
+        let profile_name = find_profile_name(text)?;
+        let mut config = Self::for_profile(profile_name.as_deref())?;
         let mut section = String::new();
         for (line_index, raw_line) in text.lines().enumerate() {
             let line = raw_line.split('#').next().unwrap_or_default().trim();
@@ -208,8 +216,20 @@ impl ServerConfig {
             let key = key.trim();
             let value = value.trim();
             match (section.as_str(), key) {
+                ("server", "profile") => {
+                    let parsed = parse_string(value);
+                    if config.profile_name.as_deref() != Some(parsed.as_str()) {
+                        bail!("profile changed while parsing configuration")
+                    }
+                }
                 ("server", "bind") => config.bind = parse_string(value),
+                ("server", "version_name") if config.profile_name.is_some() => {
+                    bail!("version_name cannot be overridden when server.profile is set")
+                }
                 ("server", "version_name") => config.version_name = parse_string(value),
+                ("server", "protocol") if config.profile_name.is_some() => {
+                    bail!("protocol cannot be overridden when server.profile is set")
+                }
                 ("server", "protocol") => config.protocol = parse_i32(value, line_index + 1)?,
                 ("server", "motd") => config.motd = parse_string(value),
                 ("server", "max_players") => config.max_players = parse_i32(value, line_index + 1)?,
@@ -249,6 +269,9 @@ impl ServerConfig {
                 }
                 ("server", "sample_players") => {
                     config.sample_players = parse_sample_players(&parse_string(value))?
+                }
+                ("protocol", _) if config.profile_name.is_some() => {
+                    bail!("manual [protocol] packet IDs cannot be used with server.profile")
                 }
                 ("protocol", "handshake_serverbound") => {
                     config.packets.handshake_serverbound = parse_i32(value, line_index + 1)?
@@ -307,7 +330,7 @@ impl ServerConfig {
         if config.online_players > config.max_players {
             bail!("online_players cannot exceed max_players");
         }
-        if config.configuration_enabled {
+        if config.configuration_enabled && config.profile_name.is_none() {
             for (name, packet_id) in [
                 (
                     "login_acknowledged_serverbound",
@@ -328,6 +351,22 @@ impl ServerConfig {
             }
         }
         Ok(config)
+    }
+
+    fn for_profile(profile_name: Option<&str>) -> Result<Self> {
+        let mut config = Self::default();
+        match profile_name {
+            None => Ok(config),
+            Some(version_26_1_2::PROFILE_NAME) => {
+                config.profile_name = Some(version_26_1_2::PROFILE_NAME.to_owned());
+                config.version_name = version_26_1_2::VERSION_NAME.to_owned();
+                config.protocol = version_26_1_2::PROTOCOL_VERSION;
+                config.configuration_enabled = true;
+                config.configuration_features = version_26_1_2::default_features();
+                Ok(config)
+            }
+            Some(other) => bail!("unknown built-in server profile {other}"),
+        }
     }
 
     fn status_json(&self) -> String {
@@ -385,7 +424,28 @@ impl ServerConfig {
         .to_string()
     }
 
+    fn protocol_mismatch_json(&self, received: i32) -> String {
+        json!({
+            "text": format!(
+                "Unsupported protocol {received}; this server requires {} (protocol {})",
+                self.version_name, self.protocol
+            ),
+        })
+        .to_string()
+    }
+
+    fn known_packs(&self) -> Vec<KnownPack> {
+        match self.profile_name.as_deref() {
+            Some(version_26_1_2::PROFILE_NAME) => version_26_1_2::known_packs(),
+            _ => Vec::new(),
+        }
+    }
+
     fn protocol_profile(&self) -> Result<ProtocolProfile> {
+        if self.profile_name.as_deref() == Some(version_26_1_2::PROFILE_NAME) {
+            return version_26_1_2::protocol_profile().context("invalid 26.1.2 protocol profile");
+        }
+
         let mut packets = PacketTable::new();
         packets.insert(PacketKind::Handshake, self.packets.handshake_serverbound)?;
         packets.insert(
@@ -446,6 +506,31 @@ impl ServerConfig {
         ProtocolProfile::new(self.version_name.clone(), self.protocol, packets)
             .context("invalid protocol profile")
     }
+}
+
+fn find_profile_name(text: &str) -> Result<Option<String>> {
+    let mut section = String::new();
+    let mut profile = None;
+    for (line_index, raw_line) in text.lines().enumerate() {
+        let line = raw_line.split('#').next().unwrap_or_default().trim();
+        if line.is_empty() {
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            section = line[1..line.len() - 1].trim().to_owned();
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            bail!("invalid config line {}: {}", line_index + 1, raw_line);
+        };
+        if section == "server" && key.trim() == "profile" {
+            let value = parse_string(value.trim());
+            if profile.replace(value).is_some() {
+                bail!("server.profile may only be specified once")
+            }
+        }
+    }
+    Ok(profile)
 }
 
 fn parse_string(value: &str) -> String {
@@ -645,6 +730,19 @@ fn handle_login_protocol<R: Read, W: Write>(
     profile: &ProtocolProfile,
     session: &mut ProtocolSession,
 ) -> Result<()> {
+    if config.profile_name.is_some() && !profile.supports(handshake.protocol) {
+        write_packet(
+            &mut writer,
+            &build_packet(
+                profile.packets().require(PacketKind::LoginDisconnect)?,
+                |body| write_string(body, &config.protocol_mismatch_json(handshake.protocol)),
+            )?,
+        )?;
+        session.disconnect();
+        writer.flush()?;
+        return Ok(());
+    }
+
     let expected_login_id = profile.packets().require(PacketKind::LoginStart)?;
     let login_packet = read_packet(&mut reader).context("cannot read login start packet")?;
     let mut login_reader = PacketReader::new(&login_packet);
@@ -715,6 +813,8 @@ fn handle_configuration_protocol<R: Read, W: Write>(
     }
     session.login_acknowledged()?;
 
+    negotiate_known_packs(reader, writer, config, profile)?;
+
     if let Some(packet_id) = profile.packets().id(PacketKind::FeatureFlags) {
         let body = encode_feature_flags(&config.configuration_features)?;
         write_packet(
@@ -761,6 +861,58 @@ fn handle_configuration_protocol<R: Read, W: Write>(
     session.configuration_acknowledged()?;
     println!("configuration completed; connection entered Play state");
     Ok(())
+}
+
+fn negotiate_known_packs<R: Read, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    config: &ServerConfig,
+    profile: &ProtocolProfile,
+) -> Result<Vec<KnownPack>> {
+    let offered = config.known_packs();
+    if offered.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let packet_id = profile
+        .packets()
+        .require(PacketKind::SelectKnownPacksRequest)?;
+    let body = encode_known_packs(&offered)?;
+    write_packet(
+        writer,
+        &build_packet(packet_id, |output| {
+            output.extend_from_slice(&body);
+            Ok(())
+        })?,
+    )?;
+    writer.flush()?;
+
+    let response = read_packet(reader).context("cannot read Select Known Packs response")?;
+    let mut response_reader = PacketReader::new(&response);
+    let expected_id = profile
+        .packets()
+        .require(PacketKind::SelectKnownPacksResponse)?;
+    let received_id = response_reader.read_varint()?;
+    if received_id != expected_id {
+        bail!("expected Select Known Packs packet id {expected_id}, got {received_id}");
+    }
+    let accepted = decode_known_packs(
+        response_reader.take_remaining(),
+        KnownPackDecodeLimits::default(),
+    )?;
+    let unique: BTreeSet<_> = accepted.iter().collect();
+    if unique.len() != accepted.len() {
+        bail!("Select Known Packs response contains duplicate entries");
+    }
+    if let Some(unknown) = accepted.iter().find(|pack| !offered.contains(pack)) {
+        bail!(
+            "client accepted an unoffered known pack {}/{}/{}",
+            unknown.namespace,
+            unknown.id,
+            unknown.version
+        );
+    }
+    Ok(accepted)
 }
 
 fn parse_handshake_packet(packet: &[u8], packets: &PacketTable) -> Result<Handshake> {
@@ -864,6 +1016,56 @@ mod tests {
         assert_eq!(config.sample_players[0].name, "Steve");
         assert_eq!(config.packets.ping_request_serverbound, 1);
         assert_eq!(config.packets.login_success_clientbound, 2);
+    }
+
+    #[test]
+    fn parses_builtin_26_1_2_profile() {
+        let config = ServerConfig::from_toml_like_with_base(
+            r#"
+            [server]
+            profile = "26.1.2"
+            bind = "127.0.0.1:25565"
+            allow_offline_login = true
+            online_mode = false
+            "#,
+            None,
+        )
+        .expect("built-in profile should parse");
+
+        assert_eq!(config.profile_name.as_deref(), Some("26.1.2"));
+        assert_eq!(config.version_name, version_26_1_2::VERSION_NAME);
+        assert_eq!(config.protocol, 775);
+        assert!(config.configuration_enabled);
+        assert_eq!(config.configuration_features, ["minecraft:vanilla"]);
+
+        let profile = config.protocol_profile().unwrap();
+        assert_eq!(
+            profile
+                .packets()
+                .require(PacketKind::SelectKnownPacksRequest)
+                .unwrap(),
+            0x0e
+        );
+    }
+
+    #[test]
+    fn builtin_profile_rejects_manual_packet_overrides() {
+        let error = ServerConfig::from_toml_like_with_base(
+            r#"
+            [server]
+            profile = "26.1.2"
+
+            [protocol]
+            login_success_clientbound = 99
+            "#,
+            None,
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("manual [protocol] packet IDs cannot be used")
+        );
     }
 
     #[test]
@@ -1034,6 +1236,33 @@ mod tests {
     }
 
     #[test]
+    fn builtin_profile_disconnects_mismatched_protocol_before_login_start() {
+        let config = ServerConfig::for_profile(Some("26.1.2")).unwrap();
+        let mut input = Vec::new();
+        write_packet(
+            &mut input,
+            &build_packet(0, |body| {
+                write_varint_vec(body, 774);
+                write_string(body, "localhost")?;
+                body.extend_from_slice(&25565u16.to_be_bytes());
+                write_varint_vec(body, 2);
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        let mut output = Vec::new();
+        handle_connection_protocol(Cursor::new(input), &mut output, &config).unwrap();
+        let disconnect = read_packet(&mut Cursor::new(output)).unwrap();
+        let mut reader = PacketReader::new(&disconnect);
+        assert_eq!(reader.read_varint().unwrap(), 0x00);
+        let reason = reader.read_string().unwrap();
+        assert!(reason.contains("Unsupported protocol 774"));
+        assert!(reason.contains("protocol 775"));
+    }
+
+    #[test]
     fn can_accept_offline_login_with_login_success() {
         let mut input = Vec::new();
         write_packet(
@@ -1135,6 +1364,102 @@ mod tests {
 
         let finish = read_packet(&mut cursor).unwrap();
         assert_eq!(PacketReader::new(&finish).read_varint().unwrap(), 5);
+    }
+
+    #[test]
+    fn completes_builtin_26_1_2_known_pack_configuration_sequence() {
+        let mut config = ServerConfig::for_profile(Some("26.1.2")).unwrap();
+        config.allow_offline_login = true;
+
+        let mut input = Vec::new();
+        write_packet(
+            &mut input,
+            &build_packet(0, |body| {
+                write_varint_vec(body, 775);
+                write_string(body, "localhost")?;
+                body.extend_from_slice(&25565u16.to_be_bytes());
+                write_varint_vec(body, 2);
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        write_packet(
+            &mut input,
+            &build_packet(0, |body| {
+                write_string(body, "Steve")?;
+                body.extend_from_slice(&[0; 16]);
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        write_packet(&mut input, &build_packet(0x03, |_| Ok(())).unwrap()).unwrap();
+        let accepted = encode_known_packs(&version_26_1_2::known_packs()).unwrap();
+        write_packet(
+            &mut input,
+            &build_packet(0x07, |body| {
+                body.extend_from_slice(&accepted);
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        write_packet(&mut input, &build_packet(0x03, |_| Ok(())).unwrap()).unwrap();
+
+        let mut output = Vec::new();
+        handle_connection_protocol(Cursor::new(input), &mut output, &config).unwrap();
+        let mut cursor = Cursor::new(output);
+
+        let login_success = read_packet(&mut cursor).unwrap();
+        assert_eq!(
+            PacketReader::new(&login_success).read_varint().unwrap(),
+            0x02
+        );
+
+        let known_packs = read_packet(&mut cursor).unwrap();
+        let mut known_packs_reader = PacketReader::new(&known_packs);
+        assert_eq!(known_packs_reader.read_varint().unwrap(), 0x0e);
+        assert_eq!(
+            decode_known_packs(
+                known_packs_reader.take_remaining(),
+                KnownPackDecodeLimits::default(),
+            )
+            .unwrap(),
+            version_26_1_2::known_packs()
+        );
+
+        let features = read_packet(&mut cursor).unwrap();
+        let mut features_reader = PacketReader::new(&features);
+        assert_eq!(features_reader.read_varint().unwrap(), 0x0c);
+        assert_eq!(features_reader.read_varint().unwrap(), 1);
+        assert_eq!(features_reader.read_string().unwrap(), "minecraft:vanilla");
+
+        let tags = read_packet(&mut cursor).unwrap();
+        let mut tags_reader = PacketReader::new(&tags);
+        assert_eq!(tags_reader.read_varint().unwrap(), 0x0d);
+        assert_eq!(tags_reader.read_varint().unwrap(), 0);
+
+        let finish = read_packet(&mut cursor).unwrap();
+        assert_eq!(PacketReader::new(&finish).read_varint().unwrap(), 0x03);
+    }
+
+    #[test]
+    fn rejects_unoffered_known_pack_response() {
+        let config = ServerConfig::for_profile(Some("26.1.2")).unwrap();
+        let profile = config.protocol_profile().unwrap();
+        let body = encode_known_packs(&[KnownPack::new("example", "unknown", "1")]).unwrap();
+        let response = build_packet(0x07, |packet| {
+            packet.extend_from_slice(&body);
+            Ok(())
+        })
+        .unwrap();
+        let mut framed = Vec::new();
+        write_packet(&mut framed, &response).unwrap();
+        let mut output = Vec::new();
+        let error = negotiate_known_packs(&mut Cursor::new(framed), &mut output, &config, &profile)
+            .unwrap_err();
+        assert!(error.to_string().contains("unoffered known pack"));
     }
 
     #[test]

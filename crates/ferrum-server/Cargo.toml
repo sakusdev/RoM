@@ -15,4 +15,5 @@ anyhow.workspace = true
 clap.workspace = true
 ferrum-configuration = { path = "../ferrum-configuration" }
 ferrum-protocol = { path = "../ferrum-protocol" }
+ferrum-version-26-1-2 = { path = "../ferrum-version-26-1-2" }
 serde_json.workspace = true

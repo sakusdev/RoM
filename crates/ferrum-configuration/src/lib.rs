@@ -324,10 +324,7 @@ impl<'a> Decoder<'a> {
     }
 
     fn read_u8(&mut self) -> Result<u8, ConfigurationDecodeError> {
-        Ok(*self
-            .read_bytes(1)?
-            .first()
-            .expect("one byte was just read"))
+        Ok(*self.read_bytes(1)?.first().expect("one byte was just read"))
     }
 
     fn read_bytes(&mut self, length: usize) -> Result<&'a [u8], ConfigurationDecodeError> {
