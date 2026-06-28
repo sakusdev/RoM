@@ -23,7 +23,9 @@ jobs:
         with:
           components: rustfmt, clippy
       - name: Apply configuration flow transform
-        run: python3 tools/apply_configuration_flow.py
+        run: |
+          python3 tools/apply_configuration_flow.py
+          python3 tools/fix_configuration_fixture.py
       - name: Validate
         run: |
           cargo fmt --all
@@ -32,7 +34,9 @@ jobs:
       - name: Commit validated implementation
         run: |
           rm tools/apply_configuration_flow.py
+          rm tools/fix_configuration_fixture.py
           rm .github/workflows/apply-configuration-flow.yml
+          rm .github/workflows/debug-configuration-flow.yml
           rm -f tools/.configuration-flow-trigger
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
