@@ -143,13 +143,11 @@ fn validate_resource_location(value: &str) -> Result<(), ConfigurationEncodeErro
     Ok(())
 }
 
-fn write_string(
-    output: &mut Vec<u8>,
-    value: &str,
-) -> Result<(), ConfigurationEncodeError> {
-    let length = i32::try_from(value.len()).map_err(|_| ConfigurationEncodeError::StringTooLong {
-        length: value.len(),
-    })?;
+fn write_string(output: &mut Vec<u8>, value: &str) -> Result<(), ConfigurationEncodeError> {
+    let length =
+        i32::try_from(value.len()).map_err(|_| ConfigurationEncodeError::StringTooLong {
+            length: value.len(),
+        })?;
     write_varint(output, length);
     output.extend_from_slice(value.as_bytes());
     Ok(())
