@@ -15,12 +15,14 @@ The current server milestone provides:
 - Explicit login disconnect fallback
 - Independent connection workers
 - VarInt, framed-packet, string, and packet-reader primitives
+- Deterministic binary NBT encoding and decoding
+- A standalone protocol profile and connection-state model
 
-The server does not yet enter Configuration or Play state.
+The socket runtime does not yet enter Configuration or Play state.
 
 ## M9 — Binary NBT foundation
 
-Status: implemented on `feature/server-nbt-foundation`.
+Status: merged into `master`.
 
 - Add a standalone `ferrum-nbt` workspace crate.
 - Support all standard binary NBT tag types.
@@ -34,9 +36,23 @@ This milestone is required before registry data, dimension data, chunk data, and
 
 ## M10 — Protocol state machine
 
-- Split the server connection flow into Handshake, Status, Login, Configuration, and Play states.
-- Add version-specific packet tables behind a protocol adapter.
-- Handle Login Acknowledged and Configuration Acknowledged packets.
+Status: state-machine foundation implemented in `ferrum-protocol`; socket integration remains.
+
+Completed foundation:
+
+- Model Handshake, Status, Login, Configuration, Play, and Closed phases.
+- Keep version-specific packet IDs in `ProtocolProfile` and `PacketTable`.
+- Resolve packet IDs by phase and direction.
+- Reject packet-ID collisions inside the same phase and direction.
+- Validate Login Acknowledged and Configuration Acknowledged ordering.
+- Track pending Keep Alive requests and validate responses.
+- Reject invalid phase transitions without mutating the connection state.
+- Cover the complete Login → Configuration → Play sequence with unit tests.
+
+Remaining integration:
+
+- Replace the ad-hoc packet ID fields in `ferrum-server` with a `ProtocolProfile`.
+- Drive the socket connection handlers through `ProtocolSession`.
 - Add a deterministic disconnect path for unsupported protocol versions.
 - Keep malformed packets isolated to the originating connection.
 
