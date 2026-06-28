@@ -155,9 +155,7 @@ pub enum NbtError {
     CollectionTooLong { length: usize },
     #[error("invalid UTF-8 in NBT string: {0}")]
     InvalidUtf8(#[from] std::string::FromUtf8Error),
-    #[error(
-        "heterogeneous TAG_List at index {index}: expected {expected:?}, found {found:?}"
-    )]
+    #[error("heterogeneous TAG_List at index {index}: expected {expected:?}, found {found:?}")]
     HeterogeneousList {
         expected: TagType,
         found: TagType,
@@ -377,11 +375,7 @@ fn write_len<W: Write>(writer: &mut W, length: usize) -> Result<(), NbtError> {
     write_all(writer, &encoded.to_be_bytes())
 }
 
-fn read_len<R: Read>(
-    reader: &mut R,
-    kind: &'static str,
-    limit: usize,
-) -> Result<usize, NbtError> {
+fn read_len<R: Read>(reader: &mut R, kind: &'static str, limit: usize) -> Result<usize, NbtError> {
     let length = i32::from_be_bytes(read_array(reader)?);
     if length < 0 {
         return Err(NbtError::NegativeLength { kind, length });
@@ -539,10 +533,7 @@ mod tests {
             ..DecodeLimits::default()
         };
         let error = decode_named_with_limits(Cursor::new(encoded), limits).unwrap_err();
-        assert!(matches!(
-            error,
-            NbtError::DepthLimitExceeded { limit: 0 }
-        ));
+        assert!(matches!(error, NbtError::DepthLimitExceeded { limit: 0 }));
     }
 
     #[test]
