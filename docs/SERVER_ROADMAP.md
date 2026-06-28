@@ -1,0 +1,75 @@
+# Ferrum Server Roadmap
+
+Ferrum Server is a native Rust implementation of a Minecraft Java Edition-compatible server. It is distributed as platform-native binaries and must not require Java or a JVM at runtime.
+
+## Current implementation
+
+The current server milestone provides:
+
+- Handshake parsing
+- Server-list status response
+- Ping/pong latency response
+- Configurable packet IDs and protocol metadata
+- Offline-mode UUID derivation
+- Minimal Login Success support
+- Explicit login disconnect fallback
+- Independent connection workers
+- VarInt, framed-packet, string, and packet-reader primitives
+
+The server does not yet enter Configuration or Play state.
+
+## M9 — Binary NBT foundation
+
+Status: implemented on `feature/server-nbt-foundation`.
+
+- Add a standalone `ferrum-nbt` workspace crate.
+- Support all standard binary NBT tag types.
+- Encode named and unnamed roots.
+- Decode untrusted input with depth, string, and collection limits.
+- Keep compound encoding deterministic with `BTreeMap` ordering.
+- Reject heterogeneous lists, invalid tag IDs, negative lengths, invalid named `TAG_End`, truncated input, and limit violations.
+- Include exact-byte and round-trip tests.
+
+This milestone is required before registry data, dimension data, chunk data, and Anvil world compatibility can be implemented cleanly.
+
+## M10 — Protocol state machine
+
+- Split the server connection flow into Handshake, Status, Login, Configuration, and Play states.
+- Add version-specific packet tables behind a protocol adapter.
+- Handle Login Acknowledged and Configuration Acknowledged packets.
+- Add a deterministic disconnect path for unsupported protocol versions.
+- Keep malformed packets isolated to the originating connection.
+
+## M11 — Minimal Configuration state
+
+- Send known-packs negotiation where required by the selected protocol version.
+- Send registry data backed by `ferrum-nbt`.
+- Send enabled features and tags.
+- Finish Configuration and wait for the client acknowledgement.
+- Target exactly one documented Minecraft Java Edition version before adding adapters for other versions.
+
+## M12 — Minimal Play state
+
+- Send Login/Join Game data for one static dimension.
+- Send spawn position and player-position synchronization.
+- Send one static in-memory chunk.
+- Implement Keep Alive.
+- Implement system messages and graceful disconnect.
+- Add integration fixtures that replay a real client packet sequence.
+
+## M13 — Persistent world foundation
+
+- Add region-independent world coordinates and block-state IDs.
+- Implement chunk sections and palette containers.
+- Add NBT-backed Anvil region reading.
+- Add safe asynchronous loading and saving.
+- Preserve deterministic world mutation through the authoritative tick loop.
+
+## Development policy
+
+- Do not attempt all Minecraft versions at once.
+- Do not scatter packet IDs throughout gameplay code.
+- Do not treat generated Mojang code as publishable original source.
+- Network I/O may be asynchronous, but authoritative world mutations must be ordered and deterministic.
+- Every externally supplied length must have a limit before allocation.
+- Add tests for exact wire bytes in addition to round-trip tests.
