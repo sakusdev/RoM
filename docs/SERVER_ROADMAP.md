@@ -16,29 +16,27 @@ The current server milestone provides:
 - Independent connection workers
 - VarInt, framed-packet, string, and packet-reader primitives
 - Deterministic binary NBT encoding and decoding
+- Protocol-anonymous NBT encoding and decoding
 - Versioned protocol profiles and deterministic connection state validation
+- Configuration-state Registry Data, Feature Flags, and Tags payload encoders
 
-The socket runtime now uses `ProtocolProfile` and `ProtocolSession` for Handshake, Status, and Login. It does not yet consume Login Acknowledged or enter Configuration and Play on the wire.
+The socket runtime now uses `ProtocolProfile` and `ProtocolSession` from Handshake through Configuration. With Configuration explicitly enabled, it consumes Login Acknowledged, sends the configured Feature Flags and Tags payloads, sends Finish Configuration, validates the client acknowledgement, and reaches the Play state. It does not yet send Join Game or world data.
 
 ## M9 — Binary NBT foundation
 
-Status: merged into `master`.
+Status: complete.
 
 - Add a standalone `ferrum-nbt` workspace crate.
 - Support all standard binary NBT tag types.
-- Encode named and unnamed roots.
+- Encode named roots, empty-name roots, and protocol-anonymous roots.
 - Decode untrusted input with depth, string, and collection limits.
 - Keep compound encoding deterministic with `BTreeMap` ordering.
-- Reject heterogeneous lists, invalid tag IDs, negative lengths, invalid named `TAG_End`, truncated input, and limit violations.
+- Reject heterogeneous lists, invalid tag IDs, negative lengths, invalid `TAG_End` roots, truncated input, and limit violations.
 - Include exact-byte and round-trip tests.
-
-This milestone is required before registry data, dimension data, chunk data, and Anvil world compatibility can be implemented cleanly.
 
 ## M10 — Protocol state machine
 
-Status: core model and existing socket-flow integration implemented.
-
-Completed:
+Status: complete for the implemented wire states.
 
 - Model Handshake, Status, Login, Configuration, Play, and Closed phases.
 - Keep version-specific packet IDs in `ProtocolProfile` and `PacketTable`.
@@ -47,31 +45,44 @@ Completed:
 - Validate Login Acknowledged and Configuration Acknowledged ordering.
 - Track pending Keep Alive requests and validate responses.
 - Reject invalid phase transitions without mutating the connection state.
-- Cover the complete Login → Configuration → Play sequence with unit tests.
 - Build a protocol profile from the current `server.toml` packet table at startup.
-- Drive Handshake, Status, Ping/Pong, Login Start, Login Success, and Login Disconnect through `ProtocolSession`.
-- Preserve configured packet-ID tests through the new profile layer.
+- Drive Handshake, Status, Ping/Pong, Login, and Configuration through `ProtocolSession`.
+- Preserve custom packet-ID support through the profile layer.
 
-Remaining:
+Remaining cross-cutting work:
 
-- Add a deterministic disconnect path for unsupported protocol versions.
-- Consume Login Acknowledged in the socket runtime.
-- Keep malformed packets isolated to the originating connection as Configuration and Play handlers grow.
+- Add a protocol-version mismatch disconnect before Login Success.
+- Expand malformed-packet isolation tests as Play handlers grow.
 
 ## M11 — Minimal Configuration state
 
-- Send known-packs negotiation where required by the selected protocol version.
-- Send registry data backed by `ferrum-nbt`.
-- Send enabled features and tags.
-- Finish Configuration and wait for the client acknowledgement.
-- Target exactly one documented Minecraft Java Edition version before adding adapters for other versions.
+Status: wire-flow foundation implemented; version data remains.
+
+Completed:
+
+- Add a standalone `ferrum-configuration` payload-encoder crate.
+- Encode Registry Data entries with optional anonymous NBT values.
+- Encode Feature Flags and registry-grouped Tags.
+- Consume Login Acknowledged in the live socket runtime.
+- Send configured Feature Flags and an empty Tags payload.
+- Send Finish Configuration and wait for the client acknowledgement.
+- Transition the authoritative connection session to Play.
+- Keep the new flow opt-in until a complete target-version registry set exists.
+
+Remaining:
+
+- Select exactly one documented Minecraft Java Edition protocol version.
+- Add its required registry datasets and packet IDs.
+- Send Registry Data packets in the required order.
+- Implement known-packs negotiation when required by the selected version.
+- Add captured-client integration fixtures for the complete Configuration exchange.
 
 ## M12 — Minimal Play state
 
 - Send Login/Join Game data for one static dimension.
 - Send spawn position and player-position synchronization.
 - Send one static in-memory chunk.
-- Implement Keep Alive.
+- Implement Keep Alive on the live socket path.
 - Implement system messages and graceful disconnect.
 - Add integration fixtures that replay a real client packet sequence.
 

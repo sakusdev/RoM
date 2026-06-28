@@ -43,6 +43,9 @@ pub enum PacketKind {
     LoginSuccess,
     ConfigurationAcknowledged,
     ConfigurationDisconnect,
+    RegistryData,
+    FeatureFlags,
+    UpdateTags,
     FinishConfiguration,
     PlayDisconnect,
     KeepAliveRequest,
@@ -63,6 +66,9 @@ impl PacketKind {
             | Self::LoginSuccess => ProtocolPhase::Login,
             Self::ConfigurationAcknowledged
             | Self::ConfigurationDisconnect
+            | Self::RegistryData
+            | Self::FeatureFlags
+            | Self::UpdateTags
             | Self::FinishConfiguration => ProtocolPhase::Configuration,
             Self::PlayDisconnect | Self::KeepAliveRequest | Self::KeepAliveResponse => {
                 ProtocolPhase::Play

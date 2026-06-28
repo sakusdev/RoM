@@ -178,9 +178,19 @@ pub fn encode_named<W: Write>(mut writer: W, root: &NamedTag) -> Result<(), NbtE
     write_payload(&mut writer, &root.tag)
 }
 
-/// Encode an unnamed root, as commonly required by Minecraft packet payloads.
+/// Encode a standard named-root value using an empty root name.
 pub fn encode_unnamed<W: Write>(writer: W, tag: &Tag) -> Result<(), NbtError> {
     encode_named(writer, &NamedTag::unnamed(tag.clone()))
+}
+
+/// Encode protocol anonymous NBT: a root tag type followed directly by its payload.
+pub fn encode_anonymous<W: Write>(mut writer: W, tag: &Tag) -> Result<(), NbtError> {
+    let tag_type = tag.tag_type();
+    if tag_type == TagType::End {
+        return Err(NbtError::InvalidNamedEnd);
+    }
+    write_u8(&mut writer, tag_type as u8)?;
+    write_payload(&mut writer, tag)
 }
 
 /// Decode a named NBT root using conservative default limits.
@@ -200,6 +210,23 @@ pub fn decode_named_with_limits<R: Read>(
     let name = read_string(&mut reader, limits)?;
     let tag = read_payload(&mut reader, tag_type, limits, 0)?;
     Ok(NamedTag { name, tag })
+}
+
+/// Decode protocol anonymous NBT using conservative default limits.
+pub fn decode_anonymous<R: Read>(reader: R) -> Result<Tag, NbtError> {
+    decode_anonymous_with_limits(reader, DecodeLimits::default())
+}
+
+/// Decode protocol anonymous NBT using caller-provided resource limits.
+pub fn decode_anonymous_with_limits<R: Read>(
+    mut reader: R,
+    limits: DecodeLimits,
+) -> Result<Tag, NbtError> {
+    let tag_type = TagType::try_from(read_u8(&mut reader)?)?;
+    if tag_type == TagType::End {
+        return Err(NbtError::InvalidNamedEnd);
+    }
+    read_payload(&mut reader, tag_type, limits, 0)
 }
 
 fn write_payload<W: Write>(writer: &mut W, tag: &Tag) -> Result<(), NbtError> {
@@ -534,6 +561,20 @@ mod tests {
         };
         let error = decode_named_with_limits(Cursor::new(encoded), limits).unwrap_err();
         assert!(matches!(error, NbtError::DepthLimitExceeded { limit: 0 }));
+    }
+
+    #[test]
+    fn anonymous_nbt_omits_the_root_name() {
+        let mut values = BTreeMap::new();
+        values.insert("value".to_owned(), Tag::Int(7));
+        let tag = Tag::Compound(values);
+        let mut encoded = Vec::new();
+        encode_anonymous(&mut encoded, &tag).unwrap();
+        assert_eq!(
+            encoded,
+            vec![10, 3, 0, 5, b'v', b'a', b'l', b'u', b'e', 0, 0, 0, 7, 0]
+        );
+        assert_eq!(decode_anonymous(Cursor::new(encoded)).unwrap(), tag);
     }
 
     #[test]
