@@ -16,9 +16,9 @@ The current server milestone provides:
 - Independent connection workers
 - VarInt, framed-packet, string, and packet-reader primitives
 - Deterministic binary NBT encoding and decoding
-- A standalone protocol profile and connection-state model
+- Versioned protocol profiles and deterministic connection state validation
 
-The socket runtime does not yet enter Configuration or Play state.
+The socket runtime now uses `ProtocolProfile` and `ProtocolSession` for Handshake, Status, and Login. It does not yet consume Login Acknowledged or enter Configuration and Play on the wire.
 
 ## M9 — Binary NBT foundation
 
@@ -36,9 +36,9 @@ This milestone is required before registry data, dimension data, chunk data, and
 
 ## M10 — Protocol state machine
 
-Status: state-machine foundation implemented in `ferrum-protocol`; socket integration remains.
+Status: core model and existing socket-flow integration implemented.
 
-Completed foundation:
+Completed:
 
 - Model Handshake, Status, Login, Configuration, Play, and Closed phases.
 - Keep version-specific packet IDs in `ProtocolProfile` and `PacketTable`.
@@ -48,13 +48,15 @@ Completed foundation:
 - Track pending Keep Alive requests and validate responses.
 - Reject invalid phase transitions without mutating the connection state.
 - Cover the complete Login → Configuration → Play sequence with unit tests.
+- Build a protocol profile from the current `server.toml` packet table at startup.
+- Drive Handshake, Status, Ping/Pong, Login Start, Login Success, and Login Disconnect through `ProtocolSession`.
+- Preserve configured packet-ID tests through the new profile layer.
 
-Remaining integration:
+Remaining:
 
-- Replace the ad-hoc packet ID fields in `ferrum-server` with a `ProtocolProfile`.
-- Drive the socket connection handlers through `ProtocolSession`.
 - Add a deterministic disconnect path for unsupported protocol versions.
-- Keep malformed packets isolated to the originating connection.
+- Consume Login Acknowledged in the socket runtime.
+- Keep malformed packets isolated to the originating connection as Configuration and Play handlers grow.
 
 ## M11 — Minimal Configuration state
 
