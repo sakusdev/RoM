@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "target": "net/minecraft/util/Identifier.parse(Ljava/lang/String;)Lnet/minecraft/util/Identifier;",
+  "seed": 1,
+  "inputs": [
+    "minecraft:stone"
+  ],
+  "expected": {
+    "kind": "return",
+    "value": "minecraft:stone"
+  },
+  "actual": {
+    "kind": "return",
+    "value": "minecraft:stone"
+  }
+}

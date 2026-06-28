@@ -1,0 +1,120 @@
+[
+  {
+    "internal_name": "example/Sample$Mode",
+    "dotted_name": "example.Sample$Mode",
+    "super_name": "java/lang/Enum",
+    "interfaces": [],
+    "major": 65,
+    "minor": 0,
+    "access_bits": 16433,
+    "constant_pool_entries": 51,
+    "attributes_count": 4,
+    "fields": [
+      {
+        "name": "FAST",
+        "descriptor": "Lexample/Sample$Mode;",
+        "access_bits": 16409,
+        "attributes_count": 0
+      },
+      {
+        "name": "SAFE",
+        "descriptor": "Lexample/Sample$Mode;",
+        "access_bits": 16409,
+        "attributes_count": 0
+      },
+      {
+        "name": "$VALUES",
+        "descriptor": "[Lexample/Sample$Mode;",
+        "access_bits": 4122,
+        "attributes_count": 0
+      }
+    ],
+    "methods": [
+      {
+        "name": "values",
+        "descriptor": "()[Lexample/Sample$Mode;",
+        "access_bits": 9,
+        "attributes_count": 1
+      },
+      {
+        "name": "valueOf",
+        "descriptor": "(Ljava/lang/String;)Lexample/Sample$Mode;",
+        "access_bits": 9,
+        "attributes_count": 2
+      },
+      {
+        "name": "<init>",
+        "descriptor": "(Ljava/lang/String;I)V",
+        "access_bits": 2,
+        "attributes_count": 3
+      },
+      {
+        "name": "$values",
+        "descriptor": "()[Lexample/Sample$Mode;",
+        "access_bits": 4106,
+        "attributes_count": 1
+      },
+      {
+        "name": "<clinit>",
+        "descriptor": "()V",
+        "access_bits": 8,
+        "attributes_count": 1
+      }
+    ],
+    "archive_path": "example/Sample$Mode.class"
+  },
+  {
+    "internal_name": "example/Sample",
+    "dotted_name": "example.Sample",
+    "super_name": "java/lang/Object",
+    "interfaces": [
+      "java/lang/Runnable"
+    ],
+    "major": 65,
+    "minor": 0,
+    "access_bits": 49,
+    "constant_pool_entries": 72,
+    "attributes_count": 4,
+    "fields": [
+      {
+        "name": "name",
+        "descriptor": "Ljava/lang/String;",
+        "access_bits": 18,
+        "attributes_count": 0
+      },
+      {
+        "name": "ANSWER",
+        "descriptor": "I",
+        "access_bits": 25,
+        "attributes_count": 1
+      }
+    ],
+    "methods": [
+      {
+        "name": "<init>",
+        "descriptor": "(Ljava/lang/String;)V",
+        "access_bits": 1,
+        "attributes_count": 1
+      },
+      {
+        "name": "greeting",
+        "descriptor": "(I)Ljava/lang/String;",
+        "access_bits": 1,
+        "attributes_count": 1
+      },
+      {
+        "name": "values",
+        "descriptor": "()Ljava/util/List;",
+        "access_bits": 1,
+        "attributes_count": 2
+      },
+      {
+        "name": "run",
+        "descriptor": "()V",
+        "access_bits": 1,
+        "attributes_count": 1
+      }
+    ],
+    "archive_path": "example/Sample.class"
+  }
+]

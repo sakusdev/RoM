@@ -1,0 +1,10 @@
+/target/
+*.tmp
+*.log
+.DS_Store
+.idea/
+.vscode/
+
+# Fixture build intermediates. Keep committed jar fixtures that tests read directly.
+/fixtures/sample/out/
+/fixtures/m1-bytecode/out/classes/

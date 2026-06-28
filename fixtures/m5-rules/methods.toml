@@ -1,0 +1,4 @@
+[java_methods]
+"java/lang/Math.floor(D)D" = "f64::floor"
+"java/lang/System.nanoTime()J" = "ferrum_time::monotonic_nanos"
+"java/util/Objects.requireNonNull(Ljava/lang/Object;)Ljava/lang/Object;" = "ferrum_compat::require_non_null"

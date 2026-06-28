@@ -1,0 +1,10 @@
+[package]
+name = "ferrum-model"
+description = "Stable report and intermediate data models for Ferrum"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde.workspace = true

@@ -1,0 +1,4 @@
+tiny	2	0	official	intermediary	named
+c	m1/BytecodeFeatures	m1/BytecodeFeatures	m1/BytecodeFeatures
+	m	(II)I	arithmetic	arithmetic	arithmetic
+	f	I	stored	stored	stored
