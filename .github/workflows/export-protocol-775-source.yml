@@ -1,0 +1,20 @@
+name: Export protocol 775 source
+
+on:
+  push:
+    branches:
+      - feature/protocol-775
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/protocol-775
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rom-protocol-775-source
+          path: .
+          include-hidden-files: true
+          if-no-files-found: error
