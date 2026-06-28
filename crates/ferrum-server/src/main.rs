@@ -7,6 +7,7 @@ use codec::read_varint_io;
 use codec::{
     PacketReader, build_packet, read_packet, write_packet, write_string, write_varint_vec,
 };
+use ferrum_protocol::{HandshakeIntent, PacketKind, PacketTable, ProtocolProfile, ProtocolSession};
 use identity::offline_player_identity;
 use serde_json::{Map, Value, json};
 use std::{
@@ -72,12 +73,6 @@ struct PacketIds {
     login_success_clientbound: i32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ConnectionState {
-    Status,
-    Login,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Handshake {
     protocol: i32,
@@ -105,6 +100,9 @@ fn run(cli: Cli) -> Result<()> {
         .with_context(|| format!("cannot resolve {}", cli.config.display()))?;
     let config = ServerConfig::from_file(&config_path)
         .with_context(|| format!("cannot load {}", config_path.display()))?;
+    config
+        .protocol_profile()
+        .context("cannot build configured protocol profile")?;
     let listener = TcpListener::bind(&config.bind)
         .with_context(|| format!("cannot bind Minecraft status listener on {}", config.bind))?;
     println!(
@@ -319,6 +317,38 @@ impl ServerConfig {
         })
         .to_string()
     }
+
+    fn protocol_profile(&self) -> Result<ProtocolProfile> {
+        let mut packets = PacketTable::new();
+        packets.insert(PacketKind::Handshake, self.packets.handshake_serverbound)?;
+        packets.insert(
+            PacketKind::StatusRequest,
+            self.packets.status_request_serverbound,
+        )?;
+        packets.insert(
+            PacketKind::StatusResponse,
+            self.packets.status_response_clientbound,
+        )?;
+        packets.insert(
+            PacketKind::PingRequest,
+            self.packets.ping_request_serverbound,
+        )?;
+        packets.insert(
+            PacketKind::PongResponse,
+            self.packets.pong_response_clientbound,
+        )?;
+        packets.insert(PacketKind::LoginStart, self.packets.login_start_serverbound)?;
+        packets.insert(
+            PacketKind::LoginDisconnect,
+            self.packets.login_disconnect_clientbound,
+        )?;
+        packets.insert(
+            PacketKind::LoginSuccess,
+            self.packets.login_success_clientbound,
+        )?;
+        ProtocolProfile::new(self.version_name.clone(), self.protocol, packets)
+            .context("invalid protocol profile")
+    }
 }
 
 fn parse_string(value: &str) -> String {
@@ -421,19 +451,27 @@ fn handle_connection_protocol<R: Read, W: Write>(
     writer: W,
     config: &ServerConfig,
 ) -> Result<()> {
+    let profile = config.protocol_profile()?;
     let handshake_packet = read_packet(&mut reader).context("cannot read handshake packet")?;
-    let handshake = parse_handshake_packet(&handshake_packet, &config.packets)?;
-    match handshake.connection_state()? {
-        ConnectionState::Status => handle_status_protocol(reader, writer, config),
-        ConnectionState::Login => handle_login_protocol(reader, writer, config, &handshake),
+    let handshake = parse_handshake_packet(&handshake_packet, profile.packets())?;
+    let intent = handshake.intent()?;
+    let mut session = ProtocolSession::new();
+    session.handshake(handshake.protocol, intent)?;
+    match intent {
+        HandshakeIntent::Status => {
+            handle_status_protocol(reader, writer, config, &profile, &mut session)
+        }
+        HandshakeIntent::Login => {
+            handle_login_protocol(reader, writer, config, &handshake, &profile, &mut session)
+        }
     }
 }
 
 impl Handshake {
-    fn connection_state(&self) -> Result<ConnectionState> {
+    fn intent(&self) -> Result<HandshakeIntent> {
         match self.next_state {
-            1 => Ok(ConnectionState::Status),
-            2 => Ok(ConnectionState::Login),
+            1 => Ok(HandshakeIntent::Status),
+            2 => Ok(HandshakeIntent::Login),
             other => bail!("unsupported handshake next_state {other}"),
         }
     }
@@ -443,41 +481,47 @@ fn handle_status_protocol<R: Read, W: Write>(
     mut reader: R,
     mut writer: W,
     config: &ServerConfig,
+    profile: &ProtocolProfile,
+    session: &mut ProtocolSession,
 ) -> Result<()> {
+    let expected_request_id = profile.packets().require(PacketKind::StatusRequest)?;
     let request_packet = read_packet(&mut reader).context("cannot read status request")?;
     let mut request_reader = PacketReader::new(&request_packet);
     let request_id = request_reader.read_varint()?;
-    if request_id != config.packets.status_request_serverbound {
-        bail!(
-            "expected status request packet id {}, got {request_id}",
-            config.packets.status_request_serverbound
-        );
+    if request_id != expected_request_id {
+        bail!("expected status request packet id {expected_request_id}, got {request_id}");
     }
+    session.status_request()?;
     write_packet(
         &mut writer,
-        &build_packet(config.packets.status_response_clientbound, |body| {
-            write_string(body, &config.status_json())
-        })?,
+        &build_packet(
+            profile.packets().require(PacketKind::StatusResponse)?,
+            |body| write_string(body, &config.status_json()),
+        )?,
     )?;
+    session.status_response_sent()?;
 
     match read_packet(&mut reader) {
         Ok(ping_packet) => {
+            let expected_ping_id = profile.packets().require(PacketKind::PingRequest)?;
             let mut ping_reader = PacketReader::new(&ping_packet);
             let ping_id = ping_reader.read_varint()?;
-            if ping_id != config.packets.ping_request_serverbound {
-                bail!(
-                    "expected ping packet id {}, got {ping_id}",
-                    config.packets.ping_request_serverbound
-                );
+            if ping_id != expected_ping_id {
+                bail!("expected ping packet id {expected_ping_id}, got {ping_id}");
             }
+            session.ping()?;
             let payload = ping_reader.read_i64()?;
             write_packet(
                 &mut writer,
-                &build_packet(config.packets.pong_response_clientbound, |body| {
-                    body.extend_from_slice(&payload.to_be_bytes());
-                    Ok(())
-                })?,
+                &build_packet(
+                    profile.packets().require(PacketKind::PongResponse)?,
+                    |body| {
+                        body.extend_from_slice(&payload.to_be_bytes());
+                        Ok(())
+                    },
+                )?,
             )?;
+            session.pong_sent()?;
         }
         Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => {}
         Err(error) => return Err(error).context("cannot read ping packet"),
@@ -492,17 +536,18 @@ fn handle_login_protocol<R: Read, W: Write>(
     mut writer: W,
     config: &ServerConfig,
     handshake: &Handshake,
+    profile: &ProtocolProfile,
+    session: &mut ProtocolSession,
 ) -> Result<()> {
+    let expected_login_id = profile.packets().require(PacketKind::LoginStart)?;
     let login_packet = read_packet(&mut reader).context("cannot read login start packet")?;
     let mut login_reader = PacketReader::new(&login_packet);
     let packet_id = login_reader.read_varint()?;
-    if packet_id != config.packets.login_start_serverbound {
-        bail!(
-            "expected login start packet id {}, got {packet_id}",
-            config.packets.login_start_serverbound
-        );
+    if packet_id != expected_login_id {
+        bail!("expected login start packet id {expected_login_id}, got {packet_id}");
     }
     let username = login_reader.read_string()?;
+    session.login_start(username.clone())?;
     let identity = offline_player_identity(&username);
     println!(
         "login attempt from {} ({}) for {}:{} using protocol {} online_mode={}",
@@ -517,33 +562,37 @@ fn handle_login_protocol<R: Read, W: Write>(
     if config.allow_offline_login && !config.online_mode {
         write_packet(
             &mut writer,
-            &build_packet(config.packets.login_success_clientbound, |body| {
-                body.extend_from_slice(identity.uuid.as_bytes());
-                write_string(body, &identity.username)?;
-                write_varint_vec(body, 0);
-                Ok(())
-            })?,
+            &build_packet(
+                profile.packets().require(PacketKind::LoginSuccess)?,
+                |body| {
+                    body.extend_from_slice(identity.uuid.as_bytes());
+                    write_string(body, &identity.username)?;
+                    write_varint_vec(body, 0);
+                    Ok(())
+                },
+            )?,
         )?;
+        session.login_success_sent()?;
     } else {
         write_packet(
             &mut writer,
-            &build_packet(config.packets.login_disconnect_clientbound, |body| {
-                write_string(body, &config.login_disconnect_json())
-            })?,
+            &build_packet(
+                profile.packets().require(PacketKind::LoginDisconnect)?,
+                |body| write_string(body, &config.login_disconnect_json()),
+            )?,
         )?;
+        session.disconnect();
     }
     writer.flush()?;
     Ok(())
 }
 
-fn parse_handshake_packet(packet: &[u8], packets: &PacketIds) -> Result<Handshake> {
+fn parse_handshake_packet(packet: &[u8], packets: &PacketTable) -> Result<Handshake> {
     let mut reader = PacketReader::new(packet);
+    let expected_packet_id = packets.require(PacketKind::Handshake)?;
     let packet_id = reader.read_varint()?;
-    if packet_id != packets.handshake_serverbound {
-        bail!(
-            "expected handshake packet id {}, got {packet_id}",
-            packets.handshake_serverbound
-        );
+    if packet_id != expected_packet_id {
+        bail!("expected handshake packet id {expected_packet_id}, got {packet_id}");
     }
     Ok(Handshake {
         protocol: reader.read_varint()?,
@@ -694,8 +743,10 @@ mod tests {
         })
         .unwrap();
 
+        let profile = ServerConfig::default().protocol_profile().unwrap();
+
         assert_eq!(
-            parse_handshake_packet(&packet, &PacketIds::default()).unwrap(),
+            parse_handshake_packet(&packet, profile.packets()).unwrap(),
             Handshake {
                 protocol: 2600,
                 server_address: "localhost".to_owned(),

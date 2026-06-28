@@ -13,4 +13,5 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+ferrum-protocol = { path = "../ferrum-protocol" }
 serde_json.workspace = true

@@ -200,11 +200,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrum-nbt"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
+name = "ferrum-protocol"
+version = "0.1.0"
+
+[[package]]
 name = "ferrum-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "ferrum-protocol",
  "serde_json",
 ]
 
