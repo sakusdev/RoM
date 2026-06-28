@@ -43,9 +43,21 @@ jobs:
           cd vanilla-server
           java -Xms512M -Xmx1G -jar server.jar nogui > server.log 2>&1 &
           echo $! > server.pid
+          for attempt in $(seq 1 180); do
+            if grep -q 'Done (' server.log; then
+              exit 0
+            fi
+            if ! kill -0 "$(cat server.pid)" 2>/dev/null; then
+              cat server.log
+              exit 1
+            fi
+            sleep 1
+          done
+          cat server.log
+          echo 'vanilla server did not finish startup' >&2
+          exit 1
       - name: Capture configuration transcript
-        run: |
-          python3 tools/capture_registry_manifest_2612.py
+        run: python3 tools/capture_registry_manifest_2612.py
       - name: Stop server
         if: always()
         run: |
