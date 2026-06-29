@@ -1,27 +1,42 @@
-name: Export minimal play branch source
+name: Apply minimal Play 26.1.2
 
 on:
   push:
     branches:
       - feature/minimal-play-26-1-2
-  pull_request:
-    branches:
-      - master
+
+permissions:
+  contents: write
 
 jobs:
-  export:
+  apply:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: feature/minimal-play-26-1-2
-      - uses: actions/upload-artifact@v4
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          name: rom-minimal-play-branch-source
-          path: |
-            Cargo.toml
-            Cargo.lock
-            README.md
-            crates
-            docs
-          if-no-files-found: error
+          components: rustfmt, clippy
+      - name: Apply implementation
+        run: |
+          cat tools/minimal-play.patch.part-* | base64 -d | gzip -d > /tmp/minimal-play.patch
+          git apply --check /tmp/minimal-play.patch
+          git apply /tmp/minimal-play.patch
+          rm tools/minimal-play.patch.part-*
+          rm tools/inspect-play-packets-2612.sh
+          rm .github/workflows/inspect-play-packets-2612.yml
+          git checkout origin/master -- .github/workflows/ci.yml
+      - name: Validate workspace
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+      - name: Commit implementation
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "Implement minimal Minecraft 26.1.2 Play entry"
+          git push origin HEAD:feature/minimal-play-26-1-2
