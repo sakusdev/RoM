@@ -27,6 +27,51 @@ jobs:
           cat tools/minimal-play.patch.part-* | base64 -d | gzip -d > /tmp/minimal-play.patch
           git apply --check /tmp/minimal-play.patch
           git apply /tmp/minimal-play.patch
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('crates/ferrum-server/src/main.rs')
+          text = path.read_text()
+          text = text.replace('''#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+          enum PlayLoop {
+              Continuous,
+              Rounds(usize),
+          }
+
+          ''', '')
+          text = text.replace(
+              'handle_connection_protocol_with_play_loop(&mut reader, stream, config, PlayLoop::Continuous)',
+              'handle_connection_protocol_with_play_loop(&mut reader, stream, config, None)',
+          )
+          text = text.replace('''fn handle_connection_protocol<R: Read, W: Write>(
+              reader: R,
+              writer: W,
+              config: &ServerConfig,
+          ) -> Result<()> {
+              handle_connection_protocol_with_play_loop(reader, writer, config, PlayLoop::Rounds(1))
+          }''', '''#[cfg(test)]
+          fn handle_connection_protocol<R: Read, W: Write>(
+              reader: R,
+              writer: W,
+              config: &ServerConfig,
+          ) -> Result<()> {
+              handle_connection_protocol_with_play_loop(reader, writer, config, Some(1))
+          }''')
+          text = text.replace('play_loop: PlayLoop', 'play_round_limit: Option<usize>')
+          text = text.replace('play_loop,', 'play_round_limit,')
+          text = text.replace(
+              'run_keep_alive_loop(reader, writer, profile, session, play_loop)',
+              'run_keep_alive_loop(reader, writer, profile, session, play_round_limit)',
+          )
+          text = text.replace('''        if let PlayLoop::Rounds(rounds) = play_round_limit
+                      && completed_rounds >= rounds
+                  {
+                      return Ok(());
+                  }''', '''        if play_round_limit.is_some_and(|rounds| completed_rounds >= rounds) {
+                      return Ok(());
+                  }''')
+          path.write_text(text)
+          PY
+          cargo fmt --all
           rm tools/minimal-play.patch.part-*
           rm tools/inspect-play-packets-2612.sh
           rm .github/workflows/inspect-play-packets-2612.yml
