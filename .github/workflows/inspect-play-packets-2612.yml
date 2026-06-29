@@ -1,4 +1,4 @@
-name: Inspect play packets 26.1.2
+name: Export minimal play branch source
 
 on:
   push:
@@ -9,22 +9,19 @@ on:
       - master
 
 jobs:
-  inspect:
+  export:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
         with:
-          distribution: temurin
-          java-version: '25'
-      - run: bash -x tools/inspect-play-packets-2612.sh
-      - if: always()
-        run: |
-          mkdir -p inspect
-          find inspect -maxdepth 3 -type f -printf '%p %s bytes\n' | sort > inspect/files.txt || true
-      - if: always()
-        uses: actions/upload-artifact@v4
+          ref: feature/minimal-play-26-1-2
+      - uses: actions/upload-artifact@v4
         with:
-          name: play-packet-inspection-26.1.2
-          path: inspect
+          name: rom-minimal-play-branch-source
+          path: |
+            Cargo.toml
+            Cargo.lock
+            README.md
+            crates
+            docs
           if-no-files-found: error
