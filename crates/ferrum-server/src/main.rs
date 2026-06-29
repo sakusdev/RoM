@@ -1163,6 +1163,32 @@ fn run_keep_alive_loop<R: Read, W: Write>(
     play_runtime::run_play_loop(reader, writer, profile, session, play_round_limit)
 }
 
+#[cfg(test)]
+fn wait_for_keep_alive_response<R: Read>(
+    reader: &mut R,
+    profile: &ProtocolProfile,
+    expected_keep_alive_id: i64,
+) -> Result<()> {
+    let expected_packet_id = profile.packets().require(PacketKind::KeepAliveResponse)?;
+    for _ in 0..MAX_IGNORED_PLAY_PACKETS {
+        let packet = read_packet(reader).context("cannot read keep alive response")?;
+        let mut packet_reader = PacketReader::new(&packet);
+        let packet_id = packet_reader.read_varint()?;
+        if packet_id != expected_packet_id {
+            continue;
+        }
+        let keep_alive_id = packet_reader.read_i64()?;
+        if keep_alive_id != expected_keep_alive_id {
+            bail!("expected keep alive id {expected_keep_alive_id}, got {keep_alive_id}");
+        }
+        if !packet_reader.take_remaining().is_empty() {
+            bail!("keep alive response contains trailing bytes");
+        }
+        return Ok(());
+    }
+    bail!("keep alive response was not received within the packet limit")
+}
+
 fn is_connection_eof(error: &anyhow::Error) -> bool {
     error.chain().any(|cause| {
         cause
