@@ -1,125 +1,99 @@
-# Ferrum Porting Kit
+# RoM
 
-An experimental Rust toolchain for analyzing JVM JARs and accelerating a clean, testable port of Minecraft server behavior to Rust.
+**RoM is an experimental Minecraft Java Edition server written in Rust.**
 
-This repository **does not promise automatic, semantically perfect JAR → Rust conversion**. The practical goal is to automate inventory, dependency analysis, control-flow recovery, IR construction, skeleton generation, and differential testing so humans spend time on Minecraft-specific semantics rather than repetitive transcription.
+It is distributed as a native executable rather than a JAR and does not require Java or a JVM at runtime. The current target is **Minecraft Java Edition 26.1.2** using protocol **775**.
 
-## Included milestones
+> [!WARNING]
+> RoM is under active development. It can complete the initial vanilla connection flow and enter a small deterministic test world, but it is not yet a replacement for a production Minecraft server.
 
-`ferrum inspect` scans a JAR and emits versioned JSON containing:
+## Current status
 
-- Class names, superclass, and interfaces
-- Class-file/Java versions
-- Access flags
-- Fields and JVM descriptors
-- Methods and JVM descriptors
-- Constant-pool and attribute counts
-- Per-entry parse/verification errors
-- JAR manifest and aggregate statistics
+The native server currently supports:
 
-`ferrum bytecode` extends the same report with opt-in method-body inventory:
+- Handshake, server-list status, and ping/pong
+- Strict protocol validation for Minecraft Java Edition 26.1.2
+- Offline-mode login with Java-compatible offline UUIDs
+- Login Acknowledged and Configuration-state transitions
+- Vanilla `minecraft/core/26.1.2` Known Packs negotiation
+- All 28 synchronized 26.1.2 registries with 382 vanilla entries
+- Feature Flags, Tags, and Finish Configuration
+- Join Game for a static overworld
+- Default spawn and absolute player-position synchronization
+- Teleport acknowledgement validation
+- One deterministic in-memory flat chunk with palette containers and full skylight
+- Chunk-cache and chunk-batch synchronization
+- System chat messages
+- Live Keep Alive request/response validation
+- Graceful Play disconnects when bootstrap validation fails
 
-- `Code` attribute size, max stack, max locals, exception handlers, line numbers, and local variables
-- Decoded opcode sequence and deterministic opcode histogram
-- Branch, switch, return, and throw instruction inventories
-- Referenced methods, fields, types, and loaded string constants
-- Difficult JVM feature detection for native methods, synchronization, `invokedynamic`, reflection, class loading, `Unsafe`, native library loading, dynamic proxies, `java.lang.invoke`, runtime bytecode generation markers, switches, exceptions, arrays, and legacy `jsr`/`ret`
-- Green/Yellow/Red porting classifications with machine-readable reason codes
+The implemented connection flow is:
 
-`ferrum cfg` extends the bytecode report with method-level control-flow graphs:
+```text
+Handshake
+→ Status or Login
+→ Login Success
+→ Login Acknowledged
+→ Known Packs
+→ Feature Flags
+→ Registry Data
+→ Tags
+→ Finish Configuration
+→ Join Game
+→ Chunk Cache / Chunk Batch
+→ Static Chunk
+→ Player Position
+→ Teleport Acknowledgement
+→ System Chat
+→ Keep Alive
+```
 
-- Deterministic basic blocks and block IDs
-- Branch, fallthrough, switch, return, throw, and exception-handler edges
-- Branch and switch target validation
-- Stable JSON plus Graphviz DOT output for a selected method
+## Current limitations
 
-`ferrum ir` extends the CFG report with typed intermediate representation data:
+The world is intentionally small and deterministic while the protocol foundation is being built.
 
-- Parsed method and field descriptors
-- Local-variable types from descriptors, `LocalVariableTable`, and store inference
-- Explicit SSA-like values produced by operand-stack simulation
-- Structured `StackMapTable` frames when present
-- Conservative phi/merge placeholders at CFG joins
-- Exception-handler metadata and recoverable IR lowering errors
+Not implemented yet:
 
-`ferrum generate` emits deterministic Rust skeleton packages for selected classes:
+- General player movement processing
+- Dynamic chunk streaming
+- Block breaking and placement
+- Entities and entity tracking
+- Inventory and container behavior
+- World generation
+- World persistence and Anvil region saving
+- Authentication and encrypted online mode
+- Multi-version gameplay compatibility
+- Fabric, Bukkit, Spigot, or Paper plugin compatibility
 
-- Rust structs for Java classes and traits for Java interfaces
-- Field and method signatures mapped from JVM descriptors
-- Source provenance retained as Rust doc attributes
-- `todo!()` placeholders for every unsupported method body
-- Structured generation warnings in `ferrum-generation-report.json`
+## Quick start
 
-`ferrum map` adds the Minecraft-specific planning layer:
+### 1. Build the server
 
-- Tiny mapping inventory for classes, fields, and methods
-- Rewrite TOML ingestion for Java type/member replacements
-- Minecraft special-case detection for registries, codecs, packets, positions, NBT, and inventory types
-- Pilot-port readiness reporting for contained early targets such as `Identifier`, `BlockPos`, and `ChunkPos`
-
-`ferrum fabric inspect` produces Fabric compatibility reports:
-
-- `fabric.mod.json` metadata, entrypoints, dependencies, nested JARs, and access wideners
-- Mixin configuration discovery
-- Conservative Mixin compatibility classifications
-
-`ferrum diff run` reads deterministic replay JSON and compares expected versus actual outcomes. It is the differential-test report format and comparator foundation; external Java/Rust runners are intentionally not hidden inside this command yet.
-
-The parser library currently supports class files through Java 25. Newer class versions are preserved as per-entry errors with best-effort major/minor header values.
-
-## Build
+Use the Rust toolchain selected by `rust-toolchain.toml`:
 
 ```bash
-cargo build --release -p ferrum
 cargo build --release -p ferrum-server
 ```
 
-## Native server releases
+The binary is created at:
 
-`ferrum-server` is distributed as native Rust binaries, not as a JAR. Release binaries must not require Java or a JVM at runtime.
-
-Supported release targets:
-
-- Windows x86_64: `ferrum-server.exe`
-- Linux x86_64: `ferrum-server`
-- Linux ARM64: `ferrum-server`
-- macOS x86_64: `ferrum-server`
-- macOS ARM64: `ferrum-server`
-
-Expected usage:
-
-```powershell
-ferrum-server.exe --config server.toml
+```text
+target/release/ferrum-server
 ```
 
-```bash
-./ferrum-server --config server.toml
+On Windows:
+
+```text
+target\release\ferrum-server.exe
 ```
 
-Current server runtime scope:
-
-- Native Rust binary only; no Java or JVM at runtime
-- Built-in Minecraft Java Edition `26.1.2` profile (protocol `775`)
-- Status response and ping/pong latency handling
-- Offline-mode Login Success with Java-compatible offline UUIDs
-- Login Acknowledged and Configuration-state transitions
-- Vanilla core Known Packs negotiation
-- All 28 synchronized 26.1.2 Registry Data packets (382 vanilla entries)
-- Feature Flags, Tags, and Finish Configuration packets
-- Static-overworld Join Game, default-spawn, player-position, and chunk-cache synchronization
-- One deterministic in-memory flat chunk with palette containers and full skylight
-- Chunk batch negotiation, teleport acknowledgement, system chat, and live Keep Alive
-- Graceful Play disconnects when bootstrap or acknowledgement validation fails
-- Strict protocol mismatch disconnects for built-in profiles
-- Manual packet-ID profiles remain available for protocol experiments
-
-Recommended `server.toml`:
+### 2. Create `server.toml`
 
 ```toml
 [server]
 profile = "26.1.2"
 bind = "127.0.0.1:25565"
-motd = "Ferrum native Rust server"
+motd = "RoM native Rust server"
 max_players = 20
 online_players = 0
 allow_offline_login = true
@@ -133,88 +107,111 @@ enabled = true
 features = "minecraft:vanilla"
 ```
 
-The same configuration is available at `examples/server-26.1.2.toml`. A built-in profile owns its version name, protocol number, and packet IDs, so a `[protocol]` section must not be added alongside `profile = "26.1.2"`.
+The same configuration is available at `examples/server-26.1.2.toml`.
 
-The current server synchronizes the complete 26.1.2 vanilla registry manifest, enters Play, sends one deterministic flat overworld chunk with full skylight, negotiates the chunk batch, synchronizes the player position, emits a welcome system message, and maintains Keep Alive. This is still a single immutable chunk: movement processing, block interaction, entities, world persistence, and chunk streaming are not implemented yet.
+A built-in profile owns its version name, protocol number, and packet IDs. Do not add a manual `[protocol]` section when using:
 
-Tagged releases matching `v*` run `.github/workflows/release.yml`, build `ferrum-server` with Cargo's `release` profile on each supported native runner, package the binary with README and LICENSE, and attach the archives to the GitHub Release.
-
-## Use
-
-```bash
-# Full report
-./target/release/ferrum inspect server.jar -o server-report.json
-
-# Start with Minecraft classes only
-./target/release/ferrum inspect server.jar \
-  --prefix net.minecraft \
-  --limit 500 \
-  --verify \
-  -o minecraft-report.json
-
-# Fabric mod
-./target/release/ferrum inspect lithium.jar -o lithium-report.json
-
-# Bytecode inventory and porting difficulty classification
-./target/release/ferrum bytecode server.jar \
-  --prefix net.minecraft \
-  -o server-bytecode-report.json
-
-# CFG JSON plus DOT for one method
-./target/release/ferrum cfg server.jar \
-  --class net.minecraft.Example \
-  --method tick \
-  --dot-output tick.dot \
-  -o tick-cfg.json
-
-# Typed IR for one method
-./target/release/ferrum ir server.jar \
-  --class net.minecraft.Example \
-  --method tick \
-  -o tick-ir.json
-
-# Rust skeleton package for one class
-./target/release/ferrum generate server.jar \
-  --class net.minecraft.Example \
-  --output generated/example
-
-# Mapping and Minecraft rewrite planning
-./target/release/ferrum map server.jar \
-  --mappings yarn.tiny \
-  --rewrites mappings \
-  -o mapping-report.json
-
-# Fabric metadata and Mixin compatibility
-./target/release/ferrum fabric inspect example-mod.jar \
-  -o fabric-report.json
-
-# Differential replay comparator
-./target/release/ferrum diff run replay.json \
-  -o diff-report.json
+```toml
+profile = "26.1.2"
 ```
 
-The JSON document uses `schema_version: 1`. A bad class is added to `errors`; it does not normally abort the scan. Add `--fail-on-class-error` in CI when strict behavior is desired.
+### 3. Start the server
 
-M1 classification policy is intentionally conservative: simple primitive/local/field bytecode is Green, features that need CFG or Java object semantics review are Yellow, and native methods, reflection-heavy code, custom class loading, `Unsafe`, native library loading, dynamic proxies, runtime bytecode generation, and legacy subroutines are Red.
-
-## Test fixture
+Linux and macOS:
 
 ```bash
-./fixtures/sample/build.sh
-./fixtures/m1-bytecode/build.sh
+./target/release/ferrum-server --config server.toml
+```
+
+Windows PowerShell:
+
+```powershell
+.\target\release\ferrum-server.exe --config server.toml
+```
+
+Then connect with a matching Minecraft Java Edition 26.1.2 client to:
+
+```text
+127.0.0.1:25565
+```
+
+## Native releases
+
+`ferrum-server` is intended to be released as a platform-native executable.
+
+Supported release targets:
+
+- Windows x86_64: `ferrum-server.exe`
+- Linux x86_64: `ferrum-server`
+- Linux ARM64: `ferrum-server`
+- macOS x86_64: `ferrum-server`
+- macOS ARM64: `ferrum-server`
+
+Tagged releases matching `v*` run `.github/workflows/release.yml`, build the server with Cargo's release profile, and attach packaged binaries to the GitHub Release.
+
+## Architecture
+
+RoM separates version-independent server behavior from version-specific wire metadata.
+
+Core server crates:
+
+- `ferrum-server` — native TCP server and connection runtime
+- `ferrum-protocol` — packet tables, protocol phases, and connection state validation
+- `ferrum-configuration` — Configuration-state payload codecs
+- `ferrum-play` — deterministic Play-state payload codecs
+- `ferrum-nbt` — bounded binary NBT encoding and decoding
+- `ferrum-version-26-1-2` — exact protocol 775 metadata and registry manifests
+
+Design rules:
+
+- No JVM dependency in the released server
+- Version-specific packet IDs stay outside gameplay code
+- Untrusted lengths are bounded before allocation
+- Authoritative state transitions remain deterministic
+- Wire codecs are tested with exact-byte fixtures
+- Unsupported protocol input fails explicitly instead of being guessed
+
+## Roadmap
+
+The next server milestones are:
+
+1. Process serverbound player movement
+2. Stream chunks around the player
+3. Add mutable block storage and block interactions
+4. Add entities and entity tracking
+5. Add inventory and container protocols
+6. Add persistent Anvil region loading and saving
+7. Add an authoritative tick loop and scheduled work
+8. Add additional Minecraft version profiles
+
+See [`docs/SERVER_ROADMAP.md`](docs/SERVER_ROADMAP.md) for the detailed server plan.
+
+## Development
+
+Run the full validation suite with:
+
+```bash
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-python3 tools/reference_scan.py crates/ferrum-importer/tests/fixtures/sample.jar
 ```
 
-## Workspace
+The repository also contains JVM/JAR analysis and porting-assistance tools that were used to study and plan the Rust implementation. They are developer tooling, not a runtime dependency of the server.
 
-- `ferrum-model`: stable report/IR-facing data contracts
-- `ferrum-importer`: JAR and JVM Class File importer
-- `ferrum`: CLI
-- `ferrum-server`: native Rust server binary target
-- `docs/ROADMAP.md`: bytecode, CFG, IR, code-generation milestones
-- `tools/reference_scan.py`: small independent fixture validator
+Build the analysis CLI with:
+
+```bash
+cargo build --release -p ferrum
+```
+
+Example:
+
+```bash
+./target/release/ferrum inspect server.jar -o server-report.json
+```
 
 ## Legal boundary
 
-Use only software and mappings you are authorized to inspect. Do not publish Mojang-owned converted source or binaries merely because a tool can generate them. A safer public architecture is to publish original tooling, independently written runtime/server code, mapping/rewrite rules, and tests while requiring users to supply legitimately obtained inputs locally. This is not legal advice.
+RoM is an independently written server implementation. Do not publish Mojang-owned source, converted source, or proprietary binaries merely because tooling can inspect them. Use only software and mappings you are authorized to inspect.
+
+This project is not affiliated with or endorsed by Mojang Studios or Microsoft.
