@@ -1,0 +1,92 @@
+name: Publish RoM v0.1.0-alpha.1 assets
+
+on:
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'release/v0.1.0-alpha.1'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download the validated platform artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p downloaded dist
+          gh run download 28373752943 --pattern 'release-*' --dir downloaded
+          find downloaded -type f -exec cp '{}' dist/ ';'
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -ge 20
+
+      - name: Verify and combine SHA-256 checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          for checksum in *.sha256; do
+            sha256sum --check "$checksum"
+          done
+          find . -maxdepth 1 -type f \
+            ! -name '*.sha256' \
+            ! -name 'SHA256SUMS' \
+            -printf '%f\0' |
+            sort -z |
+            xargs -0 -r sha256sum > SHA256SUMS
+          test "$(wc -l < SHA256SUMS)" -eq 10
+
+      - name: Publish prerelease and upload all assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: v0.1.0-alpha.1
+          TARGET_SHA: fb96cd3e43f3255e1a2ca286842a8e3df59beb16
+        run: |
+          set -euo pipefail
+          cat > release-notes.md <<EOF
+          # RoM ${TAG}
+
+          Native Rust Minecraft Java Edition server binaries.
+
+          **Target:** Minecraft Java Edition 26.1.2 / protocol 775  
+          **Source commit:** ${TARGET_SHA}
+
+          This experimental release includes login, Configuration, all synchronized registries, Join Game, one deterministic flat chunk with light, player-position synchronization, system chat, and Keep Alive.
+
+          Each platform provides a standalone executable and an archive containing the executable, server.toml, README.md, LICENSE, and VERSION. Verify downloads with SHA256SUMS.
+
+          Player movement processing, dynamic chunk streaming, block interaction, entities, persistence, and online-mode authentication are not implemented yet.
+          EOF
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "RoM $TAG" --notes-file release-notes.md --prerelease
+          else
+            gh release create "$TAG" --target "$TARGET_SHA" --title "RoM $TAG" --notes-file release-notes.md --prerelease
+          fi
+
+          find dist -maxdepth 1 -type f -print0 |
+            xargs -0 gh release upload "$TAG" --clobber
+
+      - name: Verify published release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: v0.1.0-alpha.1
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" --json url,isPrerelease,assets \
+            --jq '{url, prerelease: .isPrerelease, assets: [.assets[].name]}' | tee release-manifest.json
+          test "$(gh release view "$TAG" --json assets --jq '.assets | length')" -ge 21
+          gh release view "$TAG" --json isPrerelease --jq '.isPrerelease' | grep -qx true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: published-release-manifest
+          path: release-manifest.json
+          if-no-files-found: error
