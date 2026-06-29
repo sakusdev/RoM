@@ -18,6 +18,9 @@ on:
       - "v*"
     branches:
       - "release/**"
+  pull_request:
+    branches:
+      - master
 
 permissions:
   contents: write
@@ -25,6 +28,7 @@ permissions:
 jobs:
   prepare:
     name: Prepare release metadata
+    if: github.event_name != 'pull_request' || startsWith(github.head_ref, 'release/')
     runs-on: ubuntu-24.04
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
@@ -36,15 +40,23 @@ jobs:
         env:
           DISPATCH_TAG: ${{ inputs.tag }}
           DISPATCH_PRERELEASE: ${{ inputs.prerelease }}
+          PR_HEAD_REF: ${{ github.head_ref }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
 
-          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            tag="${PR_HEAD_REF#release/}"
+            target_sha="$PR_HEAD_SHA"
+          elif [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
             tag="$GITHUB_REF_NAME"
+            target_sha="$GITHUB_SHA"
           elif [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
             tag="$DISPATCH_TAG"
+            target_sha="$GITHUB_SHA"
           else
             tag="${GITHUB_REF_NAME#release/}"
+            target_sha="$GITHUB_SHA"
           fi
 
           if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
@@ -62,7 +74,7 @@ jobs:
 
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
-          echo "target_sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          echo "target_sha=$target_sha" >> "$GITHUB_OUTPUT"
 
   build:
     name: Build ${{ matrix.platform }}
@@ -115,6 +127,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.target_sha }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -189,7 +203,7 @@ jobs:
           printf '%s' "$TAG" > "$stage/VERSION"
           tar -C dist -czf "dist/${package}.tar.gz" "$package"
 
-      - name: Record asset checksums
+      - name: Record Unix checksums
         if: runner.os != 'Windows'
         shell: bash
         run: |
@@ -199,7 +213,7 @@ jobs:
             [[ -f "$asset" ]] && shasum -a 256 "$asset" > "$asset.sha256"
           done
 
-      - name: Record Windows asset checksums
+      - name: Record Windows checksums
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
@@ -255,7 +269,7 @@ jobs:
           Native Rust Minecraft Java Edition server binaries.
 
           **Target:** Minecraft Java Edition 26.1.2 / protocol 775  
-          **Source commit:** `${TARGET_SHA}`
+          **Source commit:** ${TARGET_SHA}
 
           This prerelease includes the deterministic single-chunk Play milestone: login, Configuration, synchronized registries, Join Game, one flat chunk with light, position synchronization, system chat, and Keep Alive.
 
@@ -265,13 +279,13 @@ jobs:
 
           Each platform has both a standalone executable and an archive containing:
 
-          - `rom-server` or `rom-server.exe`
-          - `server.toml`
-          - `README.md`
-          - `LICENSE`
-          - `VERSION`
+          - rom-server or rom-server.exe
+          - server.toml
+          - README.md
+          - LICENSE
+          - VERSION
 
-          Verify downloads with `SHA256SUMS`. Unix users downloading a standalone binary may need to run `chmod +x <filename>`.
+          Verify downloads with SHA256SUMS. Unix users downloading a standalone binary may need to run chmod +x on it.
           EOF
 
       - name: Create or update release and upload assets
