@@ -17,13 +17,14 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
-      - run: bash tools/inspect-play-packets-2612.sh
-      - uses: actions/upload-artifact@v4
+      - run: bash -x tools/inspect-play-packets-2612.sh
+      - if: always()
+        run: |
+          mkdir -p inspect
+          find inspect -maxdepth 3 -type f -printf '%p %s bytes\n' | sort > inspect/files.txt || true
+      - if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: play-packet-inspection-26.1.2
-          path: |
-            inspect/mapping-hits.txt
-            inspect/classes.tsv
-            inspect/javap.txt
-            inspect/packet-ids.txt
+          path: inspect
           if-no-files-found: error
