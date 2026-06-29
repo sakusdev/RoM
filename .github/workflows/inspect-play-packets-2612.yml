@@ -34,9 +34,18 @@ jobs:
           git checkout FETCH_HEAD -- .github/workflows/ci.yml
       - name: Validate workspace
         run: |
-          cargo fmt --all --check
-          cargo clippy --workspace --all-targets -- -D warnings
-          cargo test --workspace
+          set -o pipefail
+          {
+            cargo fmt --all --check
+            cargo clippy --workspace --all-targets -- -D warnings
+            cargo test --workspace
+          } 2>&1 | tee validation.log
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: minimal-play-validation-log
+          path: validation.log
+          if-no-files-found: warn
       - name: Commit implementation
         run: |
           git config user.name github-actions[bot]
