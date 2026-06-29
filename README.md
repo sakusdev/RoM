@@ -18,14 +18,19 @@ The native server currently supports:
 - Vanilla `minecraft/core/26.1.2` Known Packs negotiation
 - All 28 synchronized 26.1.2 registries with 382 vanilla entries
 - Feature Flags, Tags, and Finish Configuration
-- Join Game for a static overworld
+- Join Game for a deterministic flat overworld
 - Default spawn and absolute player-position synchronization
 - Teleport acknowledgement validation
-- One deterministic in-memory flat chunk with palette containers and full skylight
-- Chunk-cache and chunk-batch synchronization
+- All four serverbound movement forms: position, rotation, position + rotation, and status-only
+- Finite coordinate, coordinate-range, movement-flag, and exact-payload validation
+- Per-connection authoritative `PlayerState`
+- Deterministic 3×3 chunk views around the player's current chunk
+- Chunk-cache-center updates only when the player crosses a chunk boundary
+- Newly visible flat-chunk batches and Forget Level Chunk unloads
+- Chunk-batch acknowledgement validation
 - System chat messages
-- Live Keep Alive request/response validation
-- Graceful Play disconnects when bootstrap validation fails
+- Live Keep Alive request/response validation while movement packets continue to be processed
+- Graceful Play disconnects when bootstrap or movement validation fails
 
 The implemented connection flow is:
 
@@ -40,26 +45,27 @@ Handshake
 → Tags
 → Finish Configuration
 → Join Game
-→ Chunk Cache / Chunk Batch
-→ Static Chunk
+→ Initial Chunk Batch
 → Player Position
 → Teleport Acknowledgement
-→ System Chat
+→ 3×3 Chunk View
+→ Player Movement
+→ Dynamic Chunk Load / Unload
 → Keep Alive
 ```
 
 ## Current limitations
 
-The world is intentionally small and deterministic while the protocol foundation is being built.
+The world is intentionally small and deterministic while the gameplay foundation is being built.
 
 Not implemented yet:
 
-- General player movement processing
-- Dynamic chunk streaming
+- Collision or movement-speed enforcement
+- A shared multi-player tick/world runtime
 - Block breaking and placement
 - Entities and entity tracking
 - Inventory and container behavior
-- World generation
+- Procedural world generation
 - World persistence and Anvil region saving
 - Authentication and encrypted online mode
 - Multi-version gameplay compatibility
@@ -158,7 +164,8 @@ Core server crates:
 - `ferrum-server` — native TCP server and connection runtime
 - `ferrum-protocol` — packet tables, protocol phases, and connection state validation
 - `ferrum-configuration` — Configuration-state payload codecs
-- `ferrum-play` — deterministic Play-state payload codecs
+- `ferrum-play` — bounded Play-state wire codecs and movement decoding
+- `ferrum-world` — version-neutral chunks, player chunk views, and world primitives
 - `ferrum-nbt` — bounded binary NBT encoding and decoding
 - `ferrum-version-26-1-2` — exact protocol 775 metadata and registry manifests
 
@@ -167,7 +174,8 @@ Design rules:
 - No JVM dependency in the released server
 - Version-specific packet IDs stay outside gameplay code
 - Untrusted lengths are bounded before allocation
-- Authoritative state transitions remain deterministic
+- NaN, infinity, invalid movement flags, and out-of-range coordinates are rejected
+- Authoritative state transitions and loaded-chunk set differences remain deterministic
 - Wire codecs are tested with exact-byte fixtures
 - Unsupported protocol input fails explicitly instead of being guessed
 
@@ -175,13 +183,13 @@ Design rules:
 
 The next server milestones are:
 
-1. Process serverbound player movement
-2. Stream chunks around the player
-3. Add mutable block storage and block interactions
+1. Add an authoritative 20 TPS world/runtime loop and ordered input queues
+2. Add mutable block storage and block breaking/placement
+3. Broadcast block and player changes across connections
 4. Add entities and entity tracking
 5. Add inventory and container protocols
 6. Add persistent Anvil region loading and saving
-7. Add an authoritative tick loop and scheduled work
+7. Add online-mode authentication and encryption
 8. Add additional Minecraft version profiles
 
 See [`docs/SERVER_ROADMAP.md`](docs/SERVER_ROADMAP.md) for the detailed server plan.
