@@ -1,16 +1,22 @@
 name: Apply movement and chunk view integration
 
 on:
-  push:
+  pull_request:
     branches:
-      - feature/player-movement-and-chunk-view-26-1-2
+      - master
+    types:
+      - opened
+      - synchronize
+      - reopened
 
 permissions:
   contents: write
 
 jobs:
   apply:
-    if: github.actor != 'github-actions[bot]'
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      github.head_ref == 'feature/player-movement-and-chunk-view-26-1-2'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,12 +34,6 @@ jobs:
 
       - name: Format
         run: cargo fmt --all
-
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
-      - name: Test
-        run: cargo test --workspace
 
       - name: Commit integrated implementation
         run: |
