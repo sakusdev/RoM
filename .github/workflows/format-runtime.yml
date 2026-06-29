@@ -1,0 +1,36 @@
+name: Format runtime crate
+
+on:
+  pull_request:
+    branches:
+      - master
+    types:
+      - synchronize
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      github.head_ref == 'feature/authoritative-tick-runtime'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/authoritative-tick-runtime
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Format workspace
+        run: cargo fmt --all
+      - name: Remove temporary workflow
+        run: rm .github/workflows/format-runtime.yml
+      - name: Commit formatting
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Format runtime crate"
+          git push origin HEAD:feature/authoritative-tick-runtime
