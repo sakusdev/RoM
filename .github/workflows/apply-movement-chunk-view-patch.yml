@@ -1,0 +1,45 @@
+name: Apply movement and chunk view integration
+
+on:
+  push:
+    branches:
+      - feature/player-movement-and-chunk-view-26-1-2
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/player-movement-and-chunk-view-26-1-2
+          fetch-depth: 0
+
+      - name: Apply source patch
+        run: python3 tools/apply_movement_chunk_view_patch.py
+
+      - name: Remove temporary patch machinery
+        run: |
+          rm tools/apply_movement_chunk_view_patch.py
+          rm .github/workflows/apply-movement-chunk-view-patch.yml
+
+      - name: Format
+        run: cargo fmt --all
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --workspace
+
+      - name: Commit integrated implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Implement player movement and dynamic chunk views"
+          git push origin HEAD:feature/player-movement-and-chunk-view-26-1-2
