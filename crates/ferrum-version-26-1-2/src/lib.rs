@@ -19,6 +19,14 @@ pub const VERSION_NAME: &str = "Minecraft Java Edition 26.1.2";
 pub const PROTOCOL_VERSION: i32 = 775;
 pub const WORLD_VERSION: i32 = 4_790;
 pub const VANILLA_FEATURE: &str = "minecraft:vanilla";
+pub const OVERWORLD_MIN_SECTION_Y: i32 = -4;
+pub const OVERWORLD_SECTION_COUNT: usize = 24;
+pub const AIR_BLOCK_STATE_ID: u32 = 0;
+pub const STONE_BLOCK_STATE_ID: u32 = 1;
+pub const GRASS_BLOCK_STATE_ID: u32 = 9;
+pub const DIRT_BLOCK_STATE_ID: u32 = 10;
+pub const BEDROCK_BLOCK_STATE_ID: u32 = 85;
+pub const PLAINS_BIOME_ID: u32 = 40;
 
 /// Construct the exact packet table used by Minecraft Java Edition 26.1.2.
 pub fn protocol_profile() -> Result<ProtocolProfile, ProfileError> {
@@ -42,8 +50,14 @@ pub fn protocol_profile() -> Result<ProtocolProfile, ProfileError> {
         (PacketKind::SelectKnownPacksRequest, 0x0e),
         (PacketKind::SelectKnownPacksResponse, 0x07),
         (PacketKind::PlayLogin, 0x31),
+        (PacketKind::ChunkBatchStart, 0x0c),
+        (PacketKind::ChunkBatchFinished, 0x0b),
+        (PacketKind::ChunkBatchReceived, 0x0b),
+        (PacketKind::LevelChunkWithLight, 0x2d),
+        (PacketKind::SetChunkCacheCenter, 0x5e),
         (PacketKind::DefaultSpawnPosition, 0x61),
         (PacketKind::PlayerPosition, 0x48),
+        (PacketKind::SystemChat, 0x79),
         (PacketKind::AcceptTeleportation, 0x00),
         (PacketKind::PlayDisconnect, 0x20),
         (PacketKind::KeepAliveRequest, 0x2c),
@@ -104,6 +118,24 @@ mod tests {
         assert_eq!(packets.require(PacketKind::RegistryData).unwrap(), 0x07);
         assert_eq!(packets.require(PacketKind::FeatureFlags).unwrap(), 0x0c);
         assert_eq!(packets.require(PacketKind::UpdateTags).unwrap(), 0x0d);
+        assert_eq!(packets.require(PacketKind::ChunkBatchStart).unwrap(), 0x0c);
+        assert_eq!(
+            packets.require(PacketKind::ChunkBatchFinished).unwrap(),
+            0x0b
+        );
+        assert_eq!(
+            packets.require(PacketKind::ChunkBatchReceived).unwrap(),
+            0x0b
+        );
+        assert_eq!(
+            packets.require(PacketKind::LevelChunkWithLight).unwrap(),
+            0x2d
+        );
+        assert_eq!(
+            packets.require(PacketKind::SetChunkCacheCenter).unwrap(),
+            0x5e
+        );
+        assert_eq!(packets.require(PacketKind::SystemChat).unwrap(), 0x79);
         assert_eq!(
             packets
                 .require(PacketKind::SelectKnownPacksRequest)
@@ -186,5 +218,16 @@ mod tests {
         );
         assert!(accepts_vanilla_core_pack(&known_packs()));
         assert!(!accepts_vanilla_core_pack(&[]));
+    }
+    #[test]
+    fn exposes_static_overworld_numeric_ids_from_official_reports() {
+        assert_eq!(OVERWORLD_MIN_SECTION_Y, -4);
+        assert_eq!(OVERWORLD_SECTION_COUNT, 24);
+        assert_eq!(AIR_BLOCK_STATE_ID, 0);
+        assert_eq!(STONE_BLOCK_STATE_ID, 1);
+        assert_eq!(GRASS_BLOCK_STATE_ID, 9);
+        assert_eq!(DIRT_BLOCK_STATE_ID, 10);
+        assert_eq!(BEDROCK_BLOCK_STATE_ID, 85);
+        assert_eq!(PLAINS_BIOME_ID, 40);
     }
 }

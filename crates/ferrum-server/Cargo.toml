@@ -18,4 +18,5 @@ ferrum-nbt = { path = "../ferrum-nbt" }
 ferrum-play = { path = "../ferrum-play" }
 ferrum-protocol = { path = "../ferrum-protocol" }
 ferrum-version-26-1-2 = { path = "../ferrum-version-26-1-2" }
+ferrum-world = { path = "../ferrum-world" }
 serde_json.workspace = true

@@ -218,6 +218,8 @@ dependencies = [
 name = "ferrum-play"
 version = "0.1.0"
 dependencies = [
+ "ferrum-nbt",
+ "ferrum-world",
  "thiserror",
 ]
 
@@ -236,6 +238,7 @@ dependencies = [
  "ferrum-play",
  "ferrum-protocol",
  "ferrum-version-26-1-2",
+ "ferrum-world",
  "serde_json",
 ]
 
@@ -245,6 +248,13 @@ version = "0.1.0"
 dependencies = [
  "ferrum-configuration",
  "ferrum-protocol",
+]
+
+[[package]]
+name = "ferrum-world"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
 ]
 
 [[package]]

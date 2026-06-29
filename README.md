@@ -106,8 +106,10 @@ Current server runtime scope:
 - Vanilla core Known Packs negotiation
 - All 28 synchronized 26.1.2 Registry Data packets (382 vanilla entries)
 - Feature Flags, Tags, and Finish Configuration packets
-- Static-overworld Join Game, default-spawn, and player-position synchronization
-- Teleport acknowledgement validation and a live Keep Alive request/response loop
+- Static-overworld Join Game, default-spawn, player-position, and chunk-cache synchronization
+- One deterministic in-memory flat chunk with palette containers and full skylight
+- Chunk batch negotiation, teleport acknowledgement, system chat, and live Keep Alive
+- Graceful Play disconnects when bootstrap or acknowledgement validation fails
 - Strict protocol mismatch disconnects for built-in profiles
 - Manual packet-ID profiles remain available for protocol experiments
 
@@ -133,7 +135,7 @@ features = "minecraft:vanilla"
 
 The same configuration is available at `examples/server-26.1.2.toml`. A built-in profile owns its version name, protocol number, and packet IDs, so a `[protocol]` section must not be added alongside `profile = "26.1.2"`.
 
-The current server synchronizes the complete 26.1.2 vanilla registry manifest, enters Play, sends a static-overworld Join Game sequence, validates the initial teleport acknowledgement, and keeps the connection alive. It does **not** yet send chunk data, so a matching vanilla client still cannot see or interact with a playable world.
+The current server synchronizes the complete 26.1.2 vanilla registry manifest, enters Play, sends one deterministic flat overworld chunk with full skylight, negotiates the chunk batch, synchronizes the player position, emits a welcome system message, and maintains Keep Alive. This is still a single immutable chunk: movement processing, block interaction, entities, world persistence, and chunk streaming are not implemented yet.
 
 Tagged releases matching `v*` run `.github/workflows/release.yml`, build `ferrum-server` with Cargo's `release` profile on each supported native runner, package the binary with README and LICENSE, and attach the archives to the GitHub Release.
 

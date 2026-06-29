@@ -14,11 +14,14 @@ use ferrum_configuration::{
 use ferrum_nbt::{Tag, encode_anonymous};
 use ferrum_play::{
     BlockPosition, CommonPlayerSpawnInfo, DefaultSpawnPosition, GlobalPosition, JoinGame,
-    PlayerPosition, PositionMoveRotation, encode_default_spawn_position, encode_join_game,
-    encode_keep_alive, encode_player_position,
+    PlayerPosition, PositionMoveRotation, encode_chunk_batch_finished, encode_chunk_batch_start,
+    encode_default_spawn_position, encode_join_game, encode_keep_alive,
+    encode_level_chunk_with_light, encode_play_disconnect, encode_player_position,
+    encode_set_chunk_cache_center, encode_system_chat,
 };
 use ferrum_protocol::{HandshakeIntent, PacketKind, PacketTable, ProtocolProfile, ProtocolSession};
 use ferrum_version_26_1_2 as version_26_1_2;
+use ferrum_world::{BiomeId, BlockStateId, ChunkPos, FlatWorldSpec, StaticChunk};
 use identity::offline_player_identity;
 use serde_json::{Map, Value, json};
 use std::{
@@ -41,6 +44,11 @@ const STATIC_TELEPORT_ID: i32 = 1;
 const STATIC_CHUNK_RADIUS: i32 = 2;
 const STATIC_SIMULATION_DISTANCE: i32 = 2;
 const STATIC_SEA_LEVEL: i32 = 63;
+const STATIC_FLOOR_Y: i32 = 63;
+const STATIC_CHUNK_X: i32 = 0;
+const STATIC_CHUNK_Z: i32 = 0;
+const STATIC_CHUNK_BATCH_SIZE: i32 = 1;
+const STATIC_WELCOME_MESSAGE: &str = "Ferrum native Rust world loaded";
 const MAX_IGNORED_PLAY_PACKETS: usize = 1_024;
 const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(15);
 
@@ -928,6 +936,30 @@ fn handle_play_protocol<R: Read, W: Write>(
         return Ok(());
     }
 
+    let result =
+        run_static_play_session(reader, writer, config, profile, session, play_round_limit);
+    if let Err(error) = result {
+        let reason = format!("Ferrum closed the connection: {error}");
+        if let Ok(payload) = encode_play_disconnect(&reason) {
+            let _ = write_play_payload(writer, profile, PacketKind::PlayDisconnect, &payload);
+            let _ = writer.flush();
+        }
+        session.disconnect();
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn run_static_play_session<R: Read, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    config: &ServerConfig,
+    profile: &ProtocolProfile,
+    session: &mut ProtocolSession,
+    play_round_limit: Option<usize>,
+) -> Result<()> {
+    let chunk = static_chunk()?;
+
     write_play_payload(
         writer,
         profile,
@@ -943,13 +975,63 @@ fn handle_play_protocol<R: Read, W: Write>(
     write_play_payload(
         writer,
         profile,
+        PacketKind::SetChunkCacheCenter,
+        &encode_set_chunk_cache_center(STATIC_CHUNK_X, STATIC_CHUNK_Z),
+    )?;
+    write_play_payload(
+        writer,
+        profile,
+        PacketKind::ChunkBatchStart,
+        &encode_chunk_batch_start(),
+    )?;
+    write_play_payload(
+        writer,
+        profile,
+        PacketKind::LevelChunkWithLight,
+        &encode_level_chunk_with_light(&chunk)?,
+    )?;
+    write_play_payload(
+        writer,
+        profile,
+        PacketKind::ChunkBatchFinished,
+        &encode_chunk_batch_finished(STATIC_CHUNK_BATCH_SIZE)?,
+    )?;
+    write_play_payload(
+        writer,
+        profile,
+        PacketKind::SystemChat,
+        &encode_system_chat(STATIC_WELCOME_MESSAGE, false)?,
+    )?;
+    write_play_payload(
+        writer,
+        profile,
         PacketKind::PlayerPosition,
         &encode_player_position(&static_player_position())?,
     )?;
     writer.flush()?;
 
-    wait_for_teleport_acknowledgement(reader, profile, STATIC_TELEPORT_ID)?;
+    wait_for_play_bootstrap_acknowledgements(reader, profile, STATIC_TELEPORT_ID)?;
     run_keep_alive_loop(reader, writer, profile, session, play_round_limit)
+}
+
+fn static_chunk() -> Result<StaticChunk> {
+    Ok(StaticChunk::flat_overworld(
+        ChunkPos {
+            x: STATIC_CHUNK_X,
+            z: STATIC_CHUNK_Z,
+        },
+        version_26_1_2::OVERWORLD_MIN_SECTION_Y,
+        version_26_1_2::OVERWORLD_SECTION_COUNT,
+        FlatWorldSpec {
+            floor_y: STATIC_FLOOR_Y,
+            air: BlockStateId::new(version_26_1_2::AIR_BLOCK_STATE_ID),
+            bedrock: BlockStateId::new(version_26_1_2::BEDROCK_BLOCK_STATE_ID),
+            stone: BlockStateId::new(version_26_1_2::STONE_BLOCK_STATE_ID),
+            dirt: BlockStateId::new(version_26_1_2::DIRT_BLOCK_STATE_ID),
+            grass: BlockStateId::new(version_26_1_2::GRASS_BLOCK_STATE_ID),
+            biome: BiomeId::new(version_26_1_2::PLAINS_BIOME_ID),
+        },
+    )?)
 }
 
 fn static_join_game(config: &ServerConfig) -> JoinGame {
@@ -1019,29 +1101,51 @@ fn write_play_payload<W: Write>(
     Ok(())
 }
 
-fn wait_for_teleport_acknowledgement<R: Read>(
+fn wait_for_play_bootstrap_acknowledgements<R: Read>(
     reader: &mut R,
     profile: &ProtocolProfile,
     expected_teleport_id: i32,
 ) -> Result<()> {
-    let expected_packet_id = profile.packets().require(PacketKind::AcceptTeleportation)?;
+    let teleport_packet_id = profile.packets().require(PacketKind::AcceptTeleportation)?;
+    let chunk_batch_packet_id = profile.packets().require(PacketKind::ChunkBatchReceived)?;
+    let mut teleport_acknowledged = false;
+    let mut chunk_batch_acknowledged = false;
+
     for _ in 0..MAX_IGNORED_PLAY_PACKETS {
-        let packet = read_packet(reader).context("cannot read teleport acknowledgement")?;
+        let packet = read_packet(reader).context("cannot read Play bootstrap acknowledgement")?;
         let mut packet_reader = PacketReader::new(&packet);
         let packet_id = packet_reader.read_varint()?;
-        if packet_id != expected_packet_id {
-            continue;
+
+        if packet_id == teleport_packet_id {
+            let teleport_id = packet_reader.read_varint()?;
+            if teleport_id != expected_teleport_id {
+                bail!("expected teleport id {expected_teleport_id}, got {teleport_id}");
+            }
+            if !packet_reader.take_remaining().is_empty() {
+                bail!("teleport acknowledgement contains trailing bytes");
+            }
+            teleport_acknowledged = true;
+        } else if packet_id == chunk_batch_packet_id {
+            let desired_chunks_per_tick = packet_reader.read_f32()?;
+            if !desired_chunks_per_tick.is_finite() || desired_chunks_per_tick <= 0.0 {
+                bail!(
+                    "chunk batch acknowledgement contains invalid desired chunks per tick {desired_chunks_per_tick}"
+                );
+            }
+            if !packet_reader.take_remaining().is_empty() {
+                bail!("chunk batch acknowledgement contains trailing bytes");
+            }
+            chunk_batch_acknowledged = true;
         }
-        let teleport_id = packet_reader.read_varint()?;
-        if teleport_id != expected_teleport_id {
-            bail!("expected teleport id {expected_teleport_id}, got {teleport_id}");
+
+        if teleport_acknowledged && chunk_batch_acknowledged {
+            return Ok(());
         }
-        if !packet_reader.take_remaining().is_empty() {
-            bail!("teleport acknowledgement contains trailing bytes");
-        }
-        return Ok(());
     }
-    bail!("teleport acknowledgement was not received within the packet limit")
+
+    bail!(
+        "Play bootstrap acknowledgements were not received within the packet limit: teleport={teleport_acknowledged}, chunk_batch={chunk_batch_acknowledged}"
+    )
 }
 
 fn run_keep_alive_loop<R: Read, W: Write>(
@@ -1708,6 +1812,15 @@ mod tests {
         write_packet(&mut input, &build_packet(0x03, |_| Ok(())).unwrap()).unwrap();
         write_packet(
             &mut input,
+            &build_packet(0x0b, |body| {
+                body.extend_from_slice(&1.0_f32.to_be_bytes());
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        write_packet(
+            &mut input,
             &build_packet(0x00, |body| {
                 write_varint_vec(body, STATIC_TELEPORT_ID);
                 Ok(())
@@ -1788,6 +1901,38 @@ mod tests {
             encode_default_spawn_position(&static_default_spawn_position()).unwrap()
         );
 
+        let chunk_center = read_packet(&mut cursor).unwrap();
+        let mut chunk_center_reader = PacketReader::new(&chunk_center);
+        assert_eq!(chunk_center_reader.read_varint().unwrap(), 0x5e);
+        assert_eq!(chunk_center_reader.take_remaining(), &[0, 0]);
+
+        let chunk_batch_start = read_packet(&mut cursor).unwrap();
+        let mut chunk_batch_start_reader = PacketReader::new(&chunk_batch_start);
+        assert_eq!(chunk_batch_start_reader.read_varint().unwrap(), 0x0c);
+        assert!(chunk_batch_start_reader.take_remaining().is_empty());
+
+        let level_chunk = read_packet(&mut cursor).unwrap();
+        let mut level_chunk_reader = PacketReader::new(&level_chunk);
+        assert_eq!(level_chunk_reader.read_varint().unwrap(), 0x2d);
+        assert_eq!(
+            level_chunk_reader.take_remaining(),
+            encode_level_chunk_with_light(&static_chunk().unwrap()).unwrap()
+        );
+
+        let chunk_batch_finished = read_packet(&mut cursor).unwrap();
+        let mut chunk_batch_finished_reader = PacketReader::new(&chunk_batch_finished);
+        assert_eq!(chunk_batch_finished_reader.read_varint().unwrap(), 0x0b);
+        assert_eq!(chunk_batch_finished_reader.read_varint().unwrap(), 1);
+        assert!(chunk_batch_finished_reader.take_remaining().is_empty());
+
+        let system_chat = read_packet(&mut cursor).unwrap();
+        let mut system_chat_reader = PacketReader::new(&system_chat);
+        assert_eq!(system_chat_reader.read_varint().unwrap(), 0x79);
+        assert_eq!(
+            system_chat_reader.take_remaining(),
+            encode_system_chat(STATIC_WELCOME_MESSAGE, false).unwrap()
+        );
+
         let player_position = read_packet(&mut cursor).unwrap();
         let mut player_position_reader = PacketReader::new(&player_position);
         assert_eq!(player_position_reader.read_varint().unwrap(), 0x48);
@@ -1808,21 +1953,61 @@ mod tests {
     fn builtin_profile_rejects_wrong_teleport_acknowledgement() {
         let config = ServerConfig::for_profile(Some("26.1.2")).unwrap();
         let profile = config.protocol_profile().unwrap();
-        let packet = build_packet(0x00, |body| {
-            write_varint_vec(body, STATIC_TELEPORT_ID + 1);
-            Ok(())
-        })
-        .unwrap();
         let mut framed = Vec::new();
-        write_packet(&mut framed, &packet).unwrap();
+        write_packet(
+            &mut framed,
+            &build_packet(0x0b, |body| {
+                body.extend_from_slice(&1.0_f32.to_be_bytes());
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        write_packet(
+            &mut framed,
+            &build_packet(0x00, |body| {
+                write_varint_vec(body, STATIC_TELEPORT_ID + 1);
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
 
-        let error = wait_for_teleport_acknowledgement(
+        let error = wait_for_play_bootstrap_acknowledgements(
             &mut Cursor::new(framed),
             &profile,
             STATIC_TELEPORT_ID,
         )
         .unwrap_err();
         assert!(error.to_string().contains("expected teleport id 1, got 2"));
+    }
+
+    #[test]
+    fn builtin_profile_rejects_invalid_chunk_batch_rate() {
+        let config = ServerConfig::for_profile(Some("26.1.2")).unwrap();
+        let profile = config.protocol_profile().unwrap();
+        let mut framed = Vec::new();
+        write_packet(
+            &mut framed,
+            &build_packet(0x0b, |body| {
+                body.extend_from_slice(&f32::NAN.to_be_bytes());
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        let error = wait_for_play_bootstrap_acknowledgements(
+            &mut Cursor::new(framed),
+            &profile,
+            STATIC_TELEPORT_ID,
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("invalid desired chunks per tick")
+        );
     }
 
     #[test]

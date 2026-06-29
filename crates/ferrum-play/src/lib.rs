@@ -2,6 +2,10 @@
 //!
 //! Packet IDs are version metadata and intentionally live outside this crate.
 
+use std::collections::BTreeMap;
+
+use ferrum_nbt::{Tag, encode_anonymous};
+use ferrum_world::{ChunkSection, StaticChunk};
 use thiserror::Error;
 
 const MAX_RESOURCE_LOCATION_BYTES: usize = 32_767;
@@ -9,6 +13,11 @@ const BLOCK_POS_XZ_MIN: i32 = -33_554_432;
 const BLOCK_POS_XZ_MAX: i32 = 33_554_431;
 const BLOCK_POS_Y_MIN: i32 = -2_048;
 const BLOCK_POS_Y_MAX: i32 = 2_047;
+const BLOCK_PALETTE_MIN_BITS: u8 = 4;
+const BLOCK_PALETTE_MAX_INDIRECT_BITS: u8 = 8;
+const BIOME_PALETTE_MIN_BITS: u8 = 1;
+const BIOME_PALETTE_MAX_INDIRECT_BITS: u8 = 3;
+const LIGHT_BYTES_PER_SECTION: usize = 2_048;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct CommonPlayerSpawnInfo {
@@ -88,11 +97,72 @@ pub enum PlayEncodeError {
     BlockPositionOutOfRange { x: i32, y: i32, z: i32 },
     #[error("{field} must be finite")]
     NonFinite { field: &'static str },
+    #[error("{kind} numeric ID {value} exceeds the protocol VarInt range")]
+    NumericIdOutOfRange { kind: &'static str, value: u32 },
+    #[error("palette requires {bits} bits per value, exceeding the supported maximum")]
+    PaletteBitsOutOfRange { bits: u8 },
+    #[error("cannot encode an empty paletted container")]
+    EmptyPalettedContainer,
+    #[error("component encoding failed: {message}")]
+    ComponentEncoding { message: String },
 }
 
 #[must_use]
 pub fn encode_keep_alive(id: i64) -> Vec<u8> {
     id.to_be_bytes().to_vec()
+}
+
+#[must_use]
+pub fn encode_chunk_batch_start() -> Vec<u8> {
+    Vec::new()
+}
+
+pub fn encode_chunk_batch_finished(batch_size: i32) -> Result<Vec<u8>, PlayEncodeError> {
+    require_non_negative("chunk batch size", batch_size)?;
+    let mut output = Vec::new();
+    write_varint(&mut output, batch_size);
+    Ok(output)
+}
+
+#[must_use]
+pub fn encode_set_chunk_cache_center(x: i32, z: i32) -> Vec<u8> {
+    let mut output = Vec::new();
+    write_varint(&mut output, x);
+    write_varint(&mut output, z);
+    output
+}
+
+pub fn encode_system_chat(message: &str, overlay: bool) -> Result<Vec<u8>, PlayEncodeError> {
+    let mut output = encode_component(message)?;
+    write_bool(&mut output, overlay);
+    Ok(output)
+}
+
+pub fn encode_play_disconnect(message: &str) -> Result<Vec<u8>, PlayEncodeError> {
+    encode_component(message)
+}
+
+pub fn encode_level_chunk_with_light(chunk: &StaticChunk) -> Result<Vec<u8>, PlayEncodeError> {
+    let mut section_data = Vec::new();
+    for section in chunk.sections() {
+        encode_chunk_section(&mut section_data, section)?;
+    }
+
+    let mut output = Vec::new();
+    output.extend_from_slice(&chunk.pos().x.to_be_bytes());
+    output.extend_from_slice(&chunk.pos().z.to_be_bytes());
+
+    // Heightmap map. The first static-world milestone intentionally sends no
+    // heightmap entries; clients can derive visible geometry from chunk data.
+    write_varint(&mut output, 0);
+    write_len(&mut output, section_data.len())?;
+    output.extend_from_slice(&section_data);
+
+    // Block entity list.
+    write_varint(&mut output, 0);
+
+    encode_full_sky_light(&mut output, chunk.sections().len())?;
+    Ok(output)
 }
 
 pub fn encode_join_game(packet: &JoinGame) -> Result<Vec<u8>, PlayEncodeError> {
@@ -158,6 +228,171 @@ pub fn encode_player_position(packet: &PlayerPosition) -> Result<Vec<u8>, PlayEn
     output.extend_from_slice(&packet.change.yaw.to_be_bytes());
     output.extend_from_slice(&packet.change.pitch.to_be_bytes());
     output.extend_from_slice(&packet.relative_flags.to_be_bytes());
+    Ok(output)
+}
+
+fn encode_chunk_section(
+    output: &mut Vec<u8>,
+    section: &ChunkSection,
+) -> Result<(), PlayEncodeError> {
+    output.extend_from_slice(&section.non_empty_block_count().to_be_bytes());
+    output.extend_from_slice(&section.fluid_count().to_be_bytes());
+
+    let block_values: Vec<u32> = section.blocks().iter().map(|id| id.get()).collect();
+    encode_paletted_container(
+        output,
+        &block_values,
+        "block state",
+        BLOCK_PALETTE_MIN_BITS,
+        BLOCK_PALETTE_MAX_INDIRECT_BITS,
+    )?;
+
+    let biome_values: Vec<u32> = section.biomes().iter().map(|id| id.get()).collect();
+    encode_paletted_container(
+        output,
+        &biome_values,
+        "biome",
+        BIOME_PALETTE_MIN_BITS,
+        BIOME_PALETTE_MAX_INDIRECT_BITS,
+    )?;
+    Ok(())
+}
+
+fn encode_paletted_container(
+    output: &mut Vec<u8>,
+    values: &[u32],
+    kind: &'static str,
+    minimum_indirect_bits: u8,
+    maximum_indirect_bits: u8,
+) -> Result<(), PlayEncodeError> {
+    if values.is_empty() {
+        return Err(PlayEncodeError::EmptyPalettedContainer);
+    }
+
+    let mut palette = Vec::new();
+    let mut palette_indexes = BTreeMap::new();
+    let mut indexes = Vec::with_capacity(values.len());
+    for value in values {
+        let index = if let Some(index) = palette_indexes.get(value) {
+            *index
+        } else {
+            let index =
+                u32::try_from(palette.len()).map_err(|_| PlayEncodeError::CollectionTooLong {
+                    length: palette.len(),
+                })?;
+            palette.push(*value);
+            palette_indexes.insert(*value, index);
+            index
+        };
+        indexes.push(index);
+    }
+
+    if palette.len() == 1 {
+        output.push(0);
+        write_numeric_id(output, kind, palette[0])?;
+        return Ok(());
+    }
+
+    let required_bits = ceil_log2(palette.len());
+    let bits = required_bits.max(minimum_indirect_bits);
+    if bits <= maximum_indirect_bits {
+        output.push(bits);
+        write_len(output, palette.len())?;
+        for value in palette {
+            write_numeric_id(output, kind, value)?;
+        }
+        for packed in pack_values(&indexes, bits)? {
+            output.extend_from_slice(&packed.to_be_bytes());
+        }
+        return Ok(());
+    }
+
+    let maximum_value = values.iter().copied().max().unwrap_or(0);
+    let global_bits = (u32::BITS - maximum_value.leading_zeros()) as u8;
+    let global_bits = global_bits.max(1);
+    output.push(global_bits);
+    for packed in pack_values(values, global_bits)? {
+        output.extend_from_slice(&packed.to_be_bytes());
+    }
+    Ok(())
+}
+
+fn pack_values(values: &[u32], bits: u8) -> Result<Vec<u64>, PlayEncodeError> {
+    if bits == 0 || bits > 32 {
+        return Err(PlayEncodeError::PaletteBitsOutOfRange { bits });
+    }
+    let values_per_long = 64 / usize::from(bits);
+    let long_count = values.len().div_ceil(values_per_long);
+    let mask = (1_u64 << bits) - 1;
+    let mut packed = vec![0_u64; long_count];
+    for (index, value) in values.iter().copied().enumerate() {
+        if u64::from(value) > mask {
+            return Err(PlayEncodeError::NumericIdOutOfRange {
+                kind: "palette",
+                value,
+            });
+        }
+        let long_index = index / values_per_long;
+        let bit_index = (index % values_per_long) * usize::from(bits);
+        packed[long_index] |= u64::from(value) << bit_index;
+    }
+    Ok(packed)
+}
+
+fn encode_full_sky_light(
+    output: &mut Vec<u8>,
+    section_count: usize,
+) -> Result<(), PlayEncodeError> {
+    let light_section_count =
+        section_count
+            .checked_add(2)
+            .ok_or(PlayEncodeError::CollectionTooLong {
+                length: section_count,
+            })?;
+    let all_sections_mask = bitset_with_low_bits(light_section_count);
+
+    write_bitset(output, &all_sections_mask)?;
+    write_bitset(output, &[])?;
+    write_bitset(output, &[])?;
+    write_bitset(output, &all_sections_mask)?;
+
+    write_len(output, light_section_count)?;
+    for _ in 0..light_section_count {
+        write_len(output, LIGHT_BYTES_PER_SECTION)?;
+        output.extend(std::iter::repeat_n(0xff, LIGHT_BYTES_PER_SECTION));
+    }
+    write_varint(output, 0);
+    Ok(())
+}
+
+fn bitset_with_low_bits(bit_count: usize) -> Vec<u64> {
+    if bit_count == 0 {
+        return Vec::new();
+    }
+    let long_count = bit_count.div_ceil(64);
+    let mut longs = vec![u64::MAX; long_count];
+    let remainder = bit_count % 64;
+    if remainder != 0 {
+        longs[long_count - 1] = (1_u64 << remainder) - 1;
+    }
+    longs
+}
+
+fn write_bitset(output: &mut Vec<u8>, values: &[u64]) -> Result<(), PlayEncodeError> {
+    write_len(output, values.len())?;
+    for value in values {
+        output.extend_from_slice(&value.to_be_bytes());
+    }
+    Ok(())
+}
+
+fn encode_component(message: &str) -> Result<Vec<u8>, PlayEncodeError> {
+    let mut output = Vec::new();
+    encode_anonymous(&mut output, &Tag::String(message.to_owned())).map_err(|error| {
+        PlayEncodeError::ComponentEncoding {
+            message: error.to_string(),
+        }
+    })?;
     Ok(output)
 }
 
@@ -233,6 +468,17 @@ fn write_resource_location(output: &mut Vec<u8>, value: &str) -> Result<(), Play
     Ok(())
 }
 
+fn write_numeric_id(
+    output: &mut Vec<u8>,
+    kind: &'static str,
+    value: u32,
+) -> Result<(), PlayEncodeError> {
+    let value =
+        i32::try_from(value).map_err(|_| PlayEncodeError::NumericIdOutOfRange { kind, value })?;
+    write_varint(output, value);
+    Ok(())
+}
+
 fn write_len(output: &mut Vec<u8>, length: usize) -> Result<(), PlayEncodeError> {
     let length =
         i32::try_from(length).map_err(|_| PlayEncodeError::CollectionTooLong { length })?;
@@ -253,6 +499,11 @@ fn write_varint(output: &mut Vec<u8>, value: i32) {
             break;
         }
     }
+}
+
+fn ceil_log2(value_count: usize) -> u8 {
+    let value = value_count.saturating_sub(1);
+    (usize::BITS - value.leading_zeros()) as u8
 }
 
 fn require_non_negative(field: &'static str, value: i32) -> Result<(), PlayEncodeError> {
@@ -282,6 +533,7 @@ fn require_finite_f64(field: &'static str, value: f64) -> Result<(), PlayEncodeE
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ferrum_world::{BiomeId, BlockStateId, ChunkPos, FlatWorldSpec, StaticChunk};
 
     fn static_spawn_info() -> CommonPlayerSpawnInfo {
         CommonPlayerSpawnInfo {
@@ -296,6 +548,24 @@ mod tests {
             portal_cooldown: 0,
             sea_level: 63,
         }
+    }
+
+    fn static_chunk() -> StaticChunk {
+        StaticChunk::flat_overworld(
+            ChunkPos { x: 0, z: 0 },
+            -4,
+            24,
+            FlatWorldSpec {
+                floor_y: 63,
+                air: BlockStateId::new(0),
+                bedrock: BlockStateId::new(85),
+                stone: BlockStateId::new(1),
+                dirt: BlockStateId::new(10),
+                grass: BlockStateId::new(9),
+                biome: BiomeId::new(40),
+            },
+        )
+        .unwrap()
     }
 
     #[test]
@@ -367,6 +637,62 @@ mod tests {
     }
 
     #[test]
+    fn encodes_chunk_batch_and_cache_center_payloads() {
+        assert!(encode_chunk_batch_start().is_empty());
+        assert_eq!(encode_chunk_batch_finished(1).unwrap(), vec![1]);
+        assert_eq!(encode_set_chunk_cache_center(0, 0), vec![0, 0]);
+    }
+
+    #[test]
+    fn encodes_string_components_for_system_chat_and_disconnect() {
+        let mut expected = vec![8, 0, 6];
+        expected.extend_from_slice(b"Ferrum");
+        assert_eq!(encode_play_disconnect("Ferrum").unwrap(), expected);
+        expected.push(0);
+        assert_eq!(encode_system_chat("Ferrum", false).unwrap(), expected);
+    }
+
+    #[test]
+    fn encodes_flat_chunk_with_expected_section_layout_and_full_sky_light() {
+        let chunk = static_chunk();
+        let payload = encode_level_chunk_with_light(&chunk).unwrap();
+        assert_eq!(&payload[..8], &[0; 8]);
+        assert_eq!(payload[8], 0, "heightmap map must be empty");
+
+        let (section_length, length_bytes) = read_varint(&payload[9..]);
+        assert_eq!(section_length, 2_245);
+        let section_start = 9 + length_bytes;
+        let section_end = section_start + section_length as usize;
+        assert_eq!(
+            section_end + 1 + 20 + 1 + 26 * (2 + LIGHT_BYTES_PER_SECTION) + 1,
+            payload.len()
+        );
+        assert_eq!(payload[section_end], 0, "block entity list must be empty");
+
+        let first_section = &payload[section_start..];
+        assert_eq!(&first_section[..4], &[0, 0, 0, 0]);
+        assert_eq!(&first_section[4..8], &[0, 0, 0, 40]);
+
+        let floor_offset = section_start + 7 * 8;
+        assert_eq!(&payload[floor_offset..floor_offset + 4], &[4, 0, 0, 0]);
+        assert_eq!(payload[floor_offset + 4], 4);
+        assert_eq!(payload[floor_offset + 5], 5);
+        assert_eq!(
+            &payload[floor_offset + 6..floor_offset + 11],
+            &[0, 85, 1, 10, 9]
+        );
+    }
+
+    #[test]
+    fn packs_palette_values_without_crossing_long_boundaries() {
+        let packed =
+            pack_values(&(0_u32..17).map(|value| value % 16).collect::<Vec<_>>(), 4).unwrap();
+        assert_eq!(packed.len(), 2);
+        assert_eq!(packed[0], 0xfedc_ba98_7654_3210);
+        assert_eq!(packed[1], 0);
+    }
+
+    #[test]
     fn packs_negative_block_coordinates() {
         let packed = pack_block_position(BlockPosition {
             x: -1,
@@ -396,5 +722,16 @@ mod tests {
                 field: "position x"
             }
         );
+    }
+
+    fn read_varint(input: &[u8]) -> (i32, usize) {
+        let mut value = 0_i32;
+        for (position, byte) in input.iter().copied().enumerate().take(5) {
+            value |= i32::from(byte & 0x7f) << (7 * position);
+            if byte & 0x80 == 0 {
+                return (value, position + 1);
+            }
+        }
+        panic!("invalid test VarInt")
     }
 }

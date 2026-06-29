@@ -1,10 +1,20 @@
 name: CI
 
 on:
-  workflow_dispatch:
+  push:
+  pull_request:
 
 jobs:
-  paused:
-    runs-on: ubuntu-latest
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
-      - run: echo "CI is temporarily paused while the validated static-world patch is applied."
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
