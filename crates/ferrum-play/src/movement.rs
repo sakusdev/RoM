@@ -79,11 +79,7 @@ impl PlayerState {
                 self.pitch = pitch;
                 self.apply_flags(flags);
             }
-            PlayerMovement::Rotation {
-                yaw,
-                pitch,
-                flags,
-            } => {
+            PlayerMovement::Rotation { yaw, pitch, flags } => {
                 self.yaw = yaw;
                 self.pitch = pitch;
                 self.apply_flags(flags);
@@ -209,11 +205,19 @@ fn validate_rotation(yaw: f32, pitch: f32) -> Result<(), MovementDecodeError> {
 }
 
 fn read_f64(payload: &[u8], offset: usize) -> f64 {
-    f64::from_be_bytes(payload[offset..offset + 8].try_into().expect("length checked"))
+    f64::from_be_bytes(
+        payload[offset..offset + 8]
+            .try_into()
+            .expect("length checked"),
+    )
 }
 
 fn read_f32(payload: &[u8], offset: usize) -> f32 {
-    f32::from_be_bytes(payload[offset..offset + 4].try_into().expect("length checked"))
+    f32::from_be_bytes(
+        payload[offset..offset + 4]
+            .try_into()
+            .expect("length checked"),
+    )
 }
 
 #[derive(Debug, Error, PartialEq)]
@@ -245,8 +249,8 @@ mod tests {
 
     #[test]
     fn decodes_position_and_flags_exactly() {
-        let movement = decode_move_player_position(&position_payload([16.25, 65.0, -0.25], 0x03))
-            .unwrap();
+        let movement =
+            decode_move_player_position(&position_payload([16.25, 65.0, -0.25], 0x03)).unwrap();
         assert_eq!(
             movement,
             PlayerMovement::Position {
@@ -288,7 +292,11 @@ mod tests {
         rotation.push(0x02);
         assert!(matches!(
             decode_move_player_rotation(&rotation).unwrap(),
-            PlayerMovement::Rotation { yaw: 180.0, pitch: 45.0, .. }
+            PlayerMovement::Rotation {
+                yaw: 180.0,
+                pitch: 45.0,
+                ..
+            }
         ));
         assert_eq!(
             decode_move_player_status(&[0x01]).unwrap(),
@@ -303,16 +311,22 @@ mod tests {
 
     #[test]
     fn rejects_non_finite_and_out_of_range_coordinates() {
-        let error = decode_move_player_position(&position_payload([f64::NAN, 0.0, 0.0], 0))
-            .unwrap_err();
-        assert!(matches!(error, MovementDecodeError::NonFiniteCoordinate { axis: "x", .. }));
+        let error =
+            decode_move_player_position(&position_payload([f64::NAN, 0.0, 0.0], 0)).unwrap_err();
+        assert!(matches!(
+            error,
+            MovementDecodeError::NonFiniteCoordinate { axis: "x", .. }
+        ));
 
         let error = decode_move_player_position(&position_payload(
             [MAX_PLAYER_COORDINATE + 1.0, 0.0, 0.0],
             0,
         ))
         .unwrap_err();
-        assert!(matches!(error, MovementDecodeError::CoordinateOutOfRange { axis: "x", .. }));
+        assert!(matches!(
+            error,
+            MovementDecodeError::CoordinateOutOfRange { axis: "x", .. }
+        ));
     }
 
     #[test]
@@ -341,11 +355,13 @@ mod tests {
             .unwrap(),
         );
         assert_eq!(state.position, [0.5, 65.0, 0.5]);
-        assert_eq!((state.yaw, state.pitch, state.on_ground), (30.0, 15.0, true));
-
-        state.apply(
-            decode_move_player_position(&position_payload([-0.1, 65.0, -16.1], 0)).unwrap(),
+        assert_eq!(
+            (state.yaw, state.pitch, state.on_ground),
+            (30.0, 15.0, true)
         );
+
+        state
+            .apply(decode_move_player_position(&position_payload([-0.1, 65.0, -16.1], 0)).unwrap());
         assert_eq!(state.chunk_pos(), ChunkPos { x: -1, z: -2 });
     }
 }

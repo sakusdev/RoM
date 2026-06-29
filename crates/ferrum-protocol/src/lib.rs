@@ -62,6 +62,12 @@ pub enum PacketKind {
     PlayDisconnect,
     KeepAliveRequest,
     KeepAliveResponse,
+    ClientTickEnd,
+    MovePlayerPosition,
+    MovePlayerPositionRotation,
+    MovePlayerRotation,
+    MovePlayerStatusOnly,
+    ForgetLevelChunk,
 }
 
 impl PacketKind {
@@ -96,7 +102,13 @@ impl PacketKind {
             | Self::AcceptTeleportation
             | Self::PlayDisconnect
             | Self::KeepAliveRequest
-            | Self::KeepAliveResponse => ProtocolPhase::Play,
+            | Self::KeepAliveResponse
+            | Self::ClientTickEnd
+            | Self::MovePlayerPosition
+            | Self::MovePlayerPositionRotation
+            | Self::MovePlayerRotation
+            | Self::MovePlayerStatusOnly
+            | Self::ForgetLevelChunk => ProtocolPhase::Play,
         }
     }
 
@@ -112,7 +124,12 @@ impl PacketKind {
             | Self::SelectKnownPacksResponse
             | Self::ChunkBatchReceived
             | Self::AcceptTeleportation
-            | Self::KeepAliveResponse => PacketDirection::Serverbound,
+            | Self::KeepAliveResponse
+            | Self::ClientTickEnd
+            | Self::MovePlayerPosition
+            | Self::MovePlayerPositionRotation
+            | Self::MovePlayerRotation
+            | Self::MovePlayerStatusOnly => PacketDirection::Serverbound,
             _ => PacketDirection::Clientbound,
         }
     }
@@ -673,5 +690,29 @@ mod tests {
         session.finish_configuration_sent().unwrap();
         session.configuration_acknowledged().unwrap();
         session
+    }
+}
+
+#[cfg(test)]
+mod movement_packet_tests {
+    use super::*;
+
+    #[test]
+    fn movement_and_chunk_view_packets_have_expected_metadata() {
+        for kind in [
+            PacketKind::ClientTickEnd,
+            PacketKind::MovePlayerPosition,
+            PacketKind::MovePlayerPositionRotation,
+            PacketKind::MovePlayerRotation,
+            PacketKind::MovePlayerStatusOnly,
+        ] {
+            assert_eq!(kind.phase(), ProtocolPhase::Play);
+            assert_eq!(kind.direction(), PacketDirection::Serverbound);
+        }
+        assert_eq!(PacketKind::ForgetLevelChunk.phase(), ProtocolPhase::Play);
+        assert_eq!(
+            PacketKind::ForgetLevelChunk.direction(),
+            PacketDirection::Clientbound
+        );
     }
 }

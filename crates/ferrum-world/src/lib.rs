@@ -4,6 +4,10 @@
 //! protocol serialization remains in `ferrum-play`, while version-specific
 //! numeric IDs remain in version crates.
 
+mod chunk_view;
+
+pub use chunk_view::{ChunkView, ChunkViewDelta, ChunkViewError};
+
 use thiserror::Error;
 
 pub const SECTION_EDGE: usize = 16;

@@ -116,7 +116,10 @@ mod tests {
         assert!(!delta.center_changed);
         assert_eq!(delta.newly_visible.len(), 9);
         assert!(delta.no_longer_visible.is_empty());
-        assert_eq!(delta.newly_visible.first(), Some(&ChunkPos { x: -1, z: -1 }));
+        assert_eq!(
+            delta.newly_visible.first(),
+            Some(&ChunkPos { x: -1, z: -1 })
+        );
         assert_eq!(delta.newly_visible.last(), Some(&ChunkPos { x: 1, z: 1 }));
     }
 

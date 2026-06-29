@@ -2,6 +2,7 @@ use anyhow::{Context, Result, bail};
 use clap::Parser;
 mod codec;
 mod identity;
+mod play_runtime;
 #[cfg(test)]
 use codec::read_varint_io;
 use codec::{
@@ -15,9 +16,9 @@ use ferrum_nbt::{Tag, encode_anonymous};
 use ferrum_play::{
     BlockPosition, CommonPlayerSpawnInfo, DefaultSpawnPosition, GlobalPosition, JoinGame,
     PlayerPosition, PositionMoveRotation, encode_chunk_batch_finished, encode_chunk_batch_start,
-    encode_default_spawn_position, encode_join_game, encode_keep_alive,
-    encode_level_chunk_with_light, encode_play_disconnect, encode_player_position,
-    encode_set_chunk_cache_center, encode_system_chat,
+    encode_default_spawn_position, encode_join_game, encode_level_chunk_with_light,
+    encode_play_disconnect, encode_player_position, encode_set_chunk_cache_center,
+    encode_system_chat,
 };
 use ferrum_protocol::{HandshakeIntent, PacketKind, PacketTable, ProtocolProfile, ProtocolSession};
 use ferrum_version_26_1_2 as version_26_1_2;
@@ -41,7 +42,7 @@ const DEFAULT_MOTD: &str = "Ferrum native Rust server";
 const STATIC_LEVEL: &str = "minecraft:overworld";
 const STATIC_PLAYER_ID: i32 = 1;
 const STATIC_TELEPORT_ID: i32 = 1;
-const STATIC_CHUNK_RADIUS: i32 = 2;
+const STATIC_CHUNK_RADIUS: i32 = 1;
 const STATIC_SIMULATION_DISTANCE: i32 = 2;
 const STATIC_SEA_LEVEL: i32 = 63;
 const STATIC_FLOOR_Y: i32 = 63;
@@ -1116,6 +1117,10 @@ fn wait_for_play_bootstrap_acknowledgements<R: Read>(
         let mut packet_reader = PacketReader::new(&packet);
         let packet_id = packet_reader.read_varint()?;
 
+        if !teleport_acknowledged && play_runtime::is_movement_packet_id(profile, packet_id) {
+            bail!("player movement received before teleport acknowledgement");
+        }
+
         if packet_id == teleport_packet_id {
             let teleport_id = packet_reader.read_varint()?;
             if teleport_id != expected_teleport_id {
@@ -1155,63 +1160,7 @@ fn run_keep_alive_loop<R: Read, W: Write>(
     session: &mut ProtocolSession,
     play_round_limit: Option<usize>,
 ) -> Result<()> {
-    let mut keep_alive_id = 1_i64;
-    let mut completed_rounds = 0_usize;
-
-    loop {
-        write_play_payload(
-            writer,
-            profile,
-            PacketKind::KeepAliveRequest,
-            &encode_keep_alive(keep_alive_id),
-        )?;
-        session.keep_alive_sent(keep_alive_id)?;
-        writer.flush()?;
-
-        match wait_for_keep_alive_response(reader, profile, keep_alive_id) {
-            Ok(()) => session.keep_alive_response(keep_alive_id)?,
-            Err(error) if is_connection_eof(&error) => {
-                session.disconnect();
-                return Ok(());
-            }
-            Err(error) => return Err(error),
-        }
-
-        completed_rounds += 1;
-        if play_round_limit.is_some_and(|rounds| completed_rounds >= rounds) {
-            return Ok(());
-        }
-
-        keep_alive_id = keep_alive_id
-            .checked_add(1)
-            .ok_or_else(|| anyhow::anyhow!("keep alive id overflow"))?;
-        thread::sleep(KEEP_ALIVE_INTERVAL);
-    }
-}
-
-fn wait_for_keep_alive_response<R: Read>(
-    reader: &mut R,
-    profile: &ProtocolProfile,
-    expected_keep_alive_id: i64,
-) -> Result<()> {
-    let expected_packet_id = profile.packets().require(PacketKind::KeepAliveResponse)?;
-    for _ in 0..MAX_IGNORED_PLAY_PACKETS {
-        let packet = read_packet(reader).context("cannot read keep alive response")?;
-        let mut packet_reader = PacketReader::new(&packet);
-        let packet_id = packet_reader.read_varint()?;
-        if packet_id != expected_packet_id {
-            continue;
-        }
-        let keep_alive_id = packet_reader.read_i64()?;
-        if keep_alive_id != expected_keep_alive_id {
-            bail!("expected keep alive id {expected_keep_alive_id}, got {keep_alive_id}");
-        }
-        if !packet_reader.take_remaining().is_empty() {
-            bail!("keep alive response contains trailing bytes");
-        }
-        return Ok(());
-    }
-    bail!("keep alive response was not received within the packet limit")
+    play_runtime::run_play_loop(reader, writer, profile, session, play_round_limit)
 }
 
 fn is_connection_eof(error: &anyhow::Error) -> bool {

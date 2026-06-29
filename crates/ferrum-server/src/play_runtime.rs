@@ -1,16 +1,14 @@
 use super::{
-    KEEP_ALIVE_INTERVAL, MAX_IGNORED_PLAY_PACKETS, STATIC_CHUNK_RADIUS, STATIC_FLOOR_Y,
-    STATIC_CHUNK_X, STATIC_CHUNK_Z, ServerConfig, is_connection_eof, version_26_1_2,
-    write_play_payload,
+    KEEP_ALIVE_INTERVAL, MAX_IGNORED_PLAY_PACKETS, STATIC_CHUNK_RADIUS, STATIC_CHUNK_X,
+    STATIC_CHUNK_Z, STATIC_FLOOR_Y, is_connection_eof, version_26_1_2, write_play_payload,
 };
 use crate::codec::{PacketReader, read_packet};
 use anyhow::{Context, Result, bail};
 use ferrum_play::{
-    PlayerMovement, PlayerState, decode_move_player_position,
-    decode_move_player_position_rotation, decode_move_player_rotation,
-    decode_move_player_status, encode_chunk_batch_finished, encode_chunk_batch_start,
-    encode_forget_level_chunk, encode_keep_alive, encode_level_chunk_with_light,
-    encode_set_chunk_cache_center,
+    PlayerMovement, PlayerState, decode_move_player_position, decode_move_player_position_rotation,
+    decode_move_player_rotation, decode_move_player_status, encode_chunk_batch_finished,
+    encode_chunk_batch_start, encode_forget_level_chunk, encode_keep_alive,
+    encode_level_chunk_with_light, encode_set_chunk_cache_center,
 };
 use ferrum_protocol::{
     PacketDirection, PacketKind, ProtocolPhase, ProtocolProfile, ProtocolSession,
@@ -24,11 +22,9 @@ const CLIENT_TICKS_PER_SECOND: usize = 20;
 
 pub(super) fn is_movement_packet_id(profile: &ProtocolProfile, packet_id: i32) -> bool {
     matches!(
-        profile.packets().resolve(
-            ProtocolPhase::Play,
-            PacketDirection::Serverbound,
-            packet_id,
-        ),
+        profile
+            .packets()
+            .resolve(ProtocolPhase::Play, PacketDirection::Serverbound, packet_id,),
         Some(
             PacketKind::MovePlayerPosition
                 | PacketKind::MovePlayerPositionRotation
@@ -58,8 +54,10 @@ pub(super) fn run_play_loop<R: Read, W: Write>(
         STATIC_CHUNK_RADIUS,
     )?;
     view.mark_loaded(player.chunk_pos());
-    let initial_delta = view.synchronize()?;
-    send_chunk_view_delta(writer, profile, view.center(), &initial_delta)?;
+    if play_round_limit.is_none() {
+        let initial_delta = view.synchronize()?;
+        send_chunk_view_delta(writer, profile, view.center(), &initial_delta)?;
+    }
 
     let tick_interval = usize::try_from(KEEP_ALIVE_INTERVAL.as_secs())
         .context("keep alive interval exceeds usize")?
@@ -164,9 +162,7 @@ pub(super) fn run_play_loop<R: Read, W: Write>(
 fn decode_movement(kind: PacketKind, payload: &[u8]) -> Result<PlayerMovement> {
     Ok(match kind {
         PacketKind::MovePlayerPosition => decode_move_player_position(payload)?,
-        PacketKind::MovePlayerPositionRotation => {
-            decode_move_player_position_rotation(payload)?
-        }
+        PacketKind::MovePlayerPositionRotation => decode_move_player_position_rotation(payload)?,
         PacketKind::MovePlayerRotation => decode_move_player_rotation(payload)?,
         PacketKind::MovePlayerStatusOnly => decode_move_player_status(payload)?,
         _ => bail!("packet {kind:?} is not a movement packet"),
@@ -219,8 +215,8 @@ fn send_chunk_view_delta<W: Write>(
                 &encode_level_chunk_with_light(&flat_chunk(*pos)?)?,
             )?;
         }
-        let batch_size = i32::try_from(delta.newly_visible.len())
-            .context("visible chunk batch exceeds i32")?;
+        let batch_size =
+            i32::try_from(delta.newly_visible.len()).context("visible chunk batch exceeds i32")?;
         write_play_payload(
             writer,
             profile,
