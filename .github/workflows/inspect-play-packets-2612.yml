@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - feature/minimal-play-26-1-2
+  pull_request:
+    branches:
+      - master
 
 jobs:
   inspect:
