@@ -9,8 +9,9 @@ use codec::{
 };
 use ferrum_configuration::{
     KnownPack, KnownPackDecodeLimits, decode_known_packs, encode_feature_flags, encode_known_packs,
-    encode_tags,
+    encode_registry_data, encode_tags,
 };
+use ferrum_nbt::{Tag, encode_anonymous};
 use ferrum_protocol::{HandshakeIntent, PacketKind, PacketTable, ProtocolProfile, ProtocolSession};
 use ferrum_version_26_1_2 as version_26_1_2;
 use identity::offline_player_identity;
@@ -813,7 +814,19 @@ fn handle_configuration_protocol<R: Read, W: Write>(
     }
     session.login_acknowledged()?;
 
-    negotiate_known_packs(reader, writer, config, profile)?;
+    let accepted_known_packs = negotiate_known_packs(reader, writer, config, profile)?;
+    if config.profile_name.as_deref() == Some(version_26_1_2::PROFILE_NAME)
+        && !version_26_1_2::accepts_vanilla_core_pack(&accepted_known_packs)
+    {
+        write_configuration_disconnect(
+            writer,
+            profile,
+            "Minecraft 26.1.2 requires the bundled minecraft/core/26.1.2 data pack",
+        )?;
+        session.disconnect();
+        writer.flush()?;
+        return Ok(());
+    }
 
     if let Some(packet_id) = profile.packets().id(PacketKind::FeatureFlags) {
         let body = encode_feature_flags(&config.configuration_features)?;
@@ -825,6 +838,8 @@ fn handle_configuration_protocol<R: Read, W: Write>(
             })?,
         )?;
     }
+    send_registry_data(writer, config, profile)?;
+
     if let Some(packet_id) = profile.packets().id(PacketKind::UpdateTags) {
         let body = encode_tags(&[])?;
         write_packet(
@@ -860,6 +875,51 @@ fn handle_configuration_protocol<R: Read, W: Write>(
     }
     session.configuration_acknowledged()?;
     println!("configuration completed; connection entered Play state");
+    Ok(())
+}
+
+fn send_registry_data<W: Write>(
+    writer: &mut W,
+    config: &ServerConfig,
+    profile: &ProtocolProfile,
+) -> Result<()> {
+    if config.profile_name.as_deref() != Some(version_26_1_2::PROFILE_NAME) {
+        return Ok(());
+    }
+
+    let packet_id = profile.packets().require(PacketKind::RegistryData)?;
+    for registry in version_26_1_2::configuration_registries() {
+        let body = encode_registry_data(&registry)?;
+        write_packet(
+            writer,
+            &build_packet(packet_id, |output| {
+                output.extend_from_slice(&body);
+                Ok(())
+            })?,
+        )?;
+    }
+    Ok(())
+}
+
+fn write_configuration_disconnect<W: Write>(
+    writer: &mut W,
+    profile: &ProtocolProfile,
+    message: &str,
+) -> Result<()> {
+    let mut body = Vec::new();
+    encode_anonymous(&mut body, &Tag::String(message.to_owned()))?;
+    write_packet(
+        writer,
+        &build_packet(
+            profile
+                .packets()
+                .require(PacketKind::ConfigurationDisconnect)?,
+            |output| {
+                output.extend_from_slice(&body);
+                Ok(())
+            },
+        )?,
+    )?;
     Ok(())
 }
 
@@ -1435,6 +1495,17 @@ mod tests {
         assert_eq!(features_reader.read_varint().unwrap(), 1);
         assert_eq!(features_reader.read_string().unwrap(), "minecraft:vanilla");
 
+        for expected in version_26_1_2::SYNCHRONIZED_REGISTRIES {
+            let packet = read_packet(&mut cursor).unwrap();
+            let mut registry_reader = PacketReader::new(&packet);
+            assert_eq!(registry_reader.read_varint().unwrap(), 0x07);
+            assert_eq!(registry_reader.read_string().unwrap(), expected.id);
+            assert_eq!(
+                registry_reader.read_varint().unwrap(),
+                i32::try_from(expected.entries.len()).unwrap()
+            );
+        }
+
         let tags = read_packet(&mut cursor).unwrap();
         let mut tags_reader = PacketReader::new(&tags);
         assert_eq!(tags_reader.read_varint().unwrap(), 0x0d);
@@ -1442,6 +1513,74 @@ mod tests {
 
         let finish = read_packet(&mut cursor).unwrap();
         assert_eq!(PacketReader::new(&finish).read_varint().unwrap(), 0x03);
+    }
+
+    #[test]
+    fn builtin_profile_disconnects_when_core_pack_is_declined() {
+        let mut config = ServerConfig::for_profile(Some("26.1.2")).unwrap();
+        config.allow_offline_login = true;
+
+        let mut input = Vec::new();
+        write_packet(
+            &mut input,
+            &build_packet(0, |body| {
+                write_varint_vec(body, 775);
+                write_string(body, "localhost")?;
+                body.extend_from_slice(&25565u16.to_be_bytes());
+                write_varint_vec(body, 2);
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        write_packet(
+            &mut input,
+            &build_packet(0, |body| {
+                write_string(body, "Steve")?;
+                body.extend_from_slice(&[0; 16]);
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        write_packet(&mut input, &build_packet(0x03, |_| Ok(())).unwrap()).unwrap();
+        let declined = encode_known_packs(&[]).unwrap();
+        write_packet(
+            &mut input,
+            &build_packet(0x07, |body| {
+                body.extend_from_slice(&declined);
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        let mut output = Vec::new();
+        handle_connection_protocol(Cursor::new(input), &mut output, &config).unwrap();
+        let mut cursor = Cursor::new(output);
+
+        assert_eq!(
+            PacketReader::new(&read_packet(&mut cursor).unwrap())
+                .read_varint()
+                .unwrap(),
+            0x02
+        );
+        assert_eq!(
+            PacketReader::new(&read_packet(&mut cursor).unwrap())
+                .read_varint()
+                .unwrap(),
+            0x0e
+        );
+        let disconnect = read_packet(&mut cursor).unwrap();
+        let mut disconnect_reader = PacketReader::new(&disconnect);
+        assert_eq!(disconnect_reader.read_varint().unwrap(), 0x02);
+        assert_eq!(
+            ferrum_nbt::decode_anonymous(disconnect_reader.take_remaining()).unwrap(),
+            Tag::String(
+                "Minecraft 26.1.2 requires the bundled minecraft/core/26.1.2 data pack".to_owned()
+            )
+        );
+        assert!(read_packet(&mut cursor).is_err());
     }
 
     #[test]
