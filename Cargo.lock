@@ -225,6 +225,7 @@ dependencies = [
  "anyhow",
  "clap",
  "ferrum-configuration",
+ "ferrum-nbt",
  "ferrum-protocol",
  "ferrum-version-26-1-2",
  "serde_json",

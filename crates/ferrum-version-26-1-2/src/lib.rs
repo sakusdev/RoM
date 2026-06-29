@@ -1,8 +1,15 @@
 //! Built-in protocol metadata for Minecraft Java Edition 26.1.2.
 //!
-//! This crate contains only public wire metadata and the vanilla known-pack
-//! declaration required during Configuration. World registries and gameplay
-//! data remain separate so they can be generated and tested independently.
+//! This crate contains public wire metadata, the vanilla known-pack declaration,
+//! and the generated synchronized-registry manifest required during Configuration.
+//! Gameplay state remains separate from version data.
+
+mod registries;
+
+pub use registries::{
+    OFFICIAL_SERVER_SHA1, REGISTRY_COUNT, REGISTRY_ENTRY_COUNT, REGISTRY_MANIFEST_SHA256,
+    RegistryManifest, SYNCHRONIZED_REGISTRIES, configuration_registries,
+};
 
 use ferrum_configuration::KnownPack;
 use ferrum_protocol::{PacketKind, PacketTable, ProfileError, ProtocolProfile};
@@ -40,10 +47,21 @@ pub fn protocol_profile() -> Result<ProtocolProfile, ProfileError> {
     ProtocolProfile::new(VERSION_NAME, PROTOCOL_VERSION, packets)
 }
 
+/// The vanilla core pack required to omit inline registry NBT.
+#[must_use]
+pub fn vanilla_core_pack() -> KnownPack {
+    KnownPack::new("minecraft", "core", PROFILE_NAME)
+}
+
 /// Packs bundled into a matching vanilla 26.1.2 client.
 #[must_use]
 pub fn known_packs() -> Vec<KnownPack> {
-    vec![KnownPack::new("minecraft", "core", PROFILE_NAME)]
+    vec![vanilla_core_pack()]
+}
+
+#[must_use]
+pub fn accepts_vanilla_core_pack(accepted: &[KnownPack]) -> bool {
+    accepted.contains(&vanilla_core_pack())
 }
 
 #[must_use]
@@ -99,5 +117,52 @@ mod tests {
             known_packs(),
             vec![KnownPack::new("minecraft", "core", "26.1.2")]
         );
+    }
+
+    #[test]
+    fn exposes_the_complete_synchronized_registry_manifest() {
+        use std::collections::BTreeSet;
+
+        assert_eq!(SYNCHRONIZED_REGISTRIES.len(), REGISTRY_COUNT);
+        assert_eq!(
+            SYNCHRONIZED_REGISTRIES
+                .iter()
+                .map(|registry| registry.entries.len())
+                .sum::<usize>(),
+            REGISTRY_ENTRY_COUNT
+        );
+        assert_eq!(REGISTRY_COUNT, 28);
+        assert_eq!(REGISTRY_ENTRY_COUNT, 382);
+        assert_eq!(
+            SYNCHRONIZED_REGISTRIES.first().unwrap().id,
+            "minecraft:worldgen/biome"
+        );
+        assert_eq!(
+            SYNCHRONIZED_REGISTRIES.last().unwrap().id,
+            "minecraft:timeline"
+        );
+
+        let registry_ids: BTreeSet<_> = SYNCHRONIZED_REGISTRIES
+            .iter()
+            .map(|registry| registry.id)
+            .collect();
+        assert_eq!(registry_ids.len(), REGISTRY_COUNT);
+        for registry in SYNCHRONIZED_REGISTRIES {
+            let entries: BTreeSet<_> = registry.entries.iter().copied().collect();
+            assert_eq!(entries.len(), registry.entries.len(), "{}", registry.id);
+        }
+    }
+
+    #[test]
+    fn registry_packets_reference_the_accepted_core_pack() {
+        let registries = configuration_registries();
+        assert_eq!(registries.len(), REGISTRY_COUNT);
+        assert!(
+            registries
+                .iter()
+                .all(|registry| { registry.entries.iter().all(|entry| entry.value.is_none()) })
+        );
+        assert!(accepts_vanilla_core_pack(&known_packs()));
+        assert!(!accepts_vanilla_core_pack(&[]));
     }
 }

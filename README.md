@@ -104,6 +104,7 @@ Current server runtime scope:
 - Offline-mode Login Success with Java-compatible offline UUIDs
 - Login Acknowledged and Configuration-state transitions
 - Vanilla core Known Packs negotiation
+- All 28 synchronized 26.1.2 Registry Data packets (382 vanilla entries)
 - Feature Flags, Tags, and Finish Configuration packets
 - Strict protocol mismatch disconnects for built-in profiles
 - Manual packet-ID profiles remain available for protocol experiments
@@ -130,7 +131,7 @@ features = "minecraft:vanilla"
 
 The same configuration is available at `examples/server-26.1.2.toml`. A built-in profile owns its version name, protocol number, and packet IDs, so a `[protocol]` section must not be added alongside `profile = "26.1.2"`.
 
-The current server reaches the Play protocol state after Configuration, but it does **not** yet send the mandatory registry dataset, Join Game, chunks, or player-position packets. A matching vanilla client therefore cannot enter a playable world yet.
+The current server synchronizes the complete 26.1.2 vanilla registry manifest and reaches the Play protocol state after Configuration. It does **not** yet send Join Game, chunks, or player-position packets, so a matching vanilla client cannot enter a playable world yet.
 
 Tagged releases matching `v*` run `.github/workflows/release.yml`, build `ferrum-server` with Cargo's `release` profile on each supported native runner, package the binary with README and LICENSE, and attach the archives to the GitHub Release.
 
