@@ -7,10 +7,19 @@ import json, urllib.request
 manifest=json.load(urllib.request.urlopen('https://piston-meta.mojang.com/mc/game/version_manifest_v2.json'))
 entry=next(v for v in manifest['versions'] if v['id']=='26.1.2')
 version=json.load(urllib.request.urlopen(entry['url']))
-for key in ('server','server_mappings'):
-    item=version['downloads'][key]
-    urllib.request.urlretrieve(item['url'], f'inspect/{key}')
-    print(key, item['sha1'], item['url'])
+with open('inspect/version.json','w') as f:
+    json.dump(version,f,indent=2,sort_keys=True)
+server=version['downloads']['server']
+urllib.request.urlretrieve(server['url'], 'inspect/server')
+print('server', server['sha1'], server['url'])
+for key in ('server_mappings','client_mappings'):
+    item=version['downloads'].get(key)
+    if item is not None:
+        urllib.request.urlretrieve(item['url'], 'inspect/mappings')
+        print('mappings', key, item['sha1'], item['url'])
+        break
+else:
+    raise SystemExit(f'no mappings download; keys={sorted(version["downloads"])}')
 PY
 
 mkdir -p inspect/server-unpacked
@@ -19,6 +28,7 @@ jar xf ../server
 INNER=$(find META-INF/versions -type f -name '*.jar' | head -n1)
 if [[ -z "${INNER}" ]]; then
   echo 'inner server jar not found' >&2
+  find . -maxdepth 4 -type f | sort >&2
   exit 1
 fi
 cp "$INNER" ../server-inner.jar
@@ -33,7 +43,7 @@ for NAME in \
   ServerboundKeepAlivePacket \
   CommonPlayerSpawnInfo \
   PositionMoveRotation; do
-  grep -F "$NAME" inspect/server_mappings || true
+  grep -F "$NAME" inspect/mappings || true
 done > inspect/mapping-hits.txt
 
 python3 - <<'PY'
@@ -54,9 +64,9 @@ while IFS=$'\t' read -r NAMED OBF; do
   javap -classpath inspect/server-inner.jar -p -c -s "$OBF" >> inspect/javap.txt 2>&1 || true
 done < inspect/classes.tsv
 
-java -DbundlerMainClass=net.minecraft.data.Main -jar inspect/server --reports
 python3 - <<'PY'
-import json
+import json, subprocess
+subprocess.run(['java','-DbundlerMainClass=net.minecraft.data.Main','-jar','inspect/server','--reports'],check=True)
 p=json.load(open('generated/reports/packets.json'))['play']
 wanted={
 'minecraft:login','minecraft:set_default_spawn_position','minecraft:player_position',
