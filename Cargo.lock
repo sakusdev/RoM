@@ -228,6 +228,13 @@ name = "ferrum-protocol"
 version = "0.1.0"
 
 [[package]]
+name = "ferrum-runtime"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
 name = "ferrum-server"
 version = "0.1.0"
 dependencies = [
