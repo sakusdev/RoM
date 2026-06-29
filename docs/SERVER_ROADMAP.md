@@ -26,10 +26,13 @@ The current server milestone provides:
 - All four serverbound movement packet forms with bounded decoding
 - Per-connection player position, rotation, movement flags, and current-chunk state
 - Deterministic 3×3 chunk views with cache-center updates, new chunk batches, and unloads
+- Version-neutral 20 TPS tick scheduling with capped catch-up
+- Globally bounded, per-connection sequenced input queues
+- Deterministic fair per-tick input draining and mutation budgets
 - Welcome system chat and graceful Play disconnects
 - Version-neutral in-memory world coordinates, sections, block states, biome IDs, and chunk views
 
-The socket runtime now uses `ProtocolProfile` and `ProtocolSession` from Handshake through Play. The 26.1.2 profile validates the handshake protocol, negotiates the vanilla core known pack, sends the full synchronized registry set, completes Configuration, sends the flat-overworld Play bootstrap, validates teleport and chunk-batch acknowledgements, and enters a movement-aware Play loop. The server tracks each player's authoritative position and rotation, updates the chunk-cache center only after crossing a chunk boundary, sends newly visible chunks, unloads chunks that leave the 3×3 view, and continues Keep Alive validation while processing movement. Block interactions, entities, shared world ticks, and persistence are not implemented yet.
+The socket runtime now uses `ProtocolProfile` and `ProtocolSession` from Handshake through Play. The 26.1.2 profile validates the handshake protocol, negotiates the vanilla core known pack, sends the full synchronized registry set, completes Configuration, sends the flat-overworld Play bootstrap, validates teleport and chunk-batch acknowledgements, and enters a movement-aware Play loop. The server tracks each player's authoritative position and rotation, updates the chunk-cache center only after crossing a chunk boundary, sends newly visible chunks, unloads chunks that leave the 3×3 view, and continues Keep Alive validation while processing movement. The standalone `ferrum-runtime` crate now provides deterministic scheduling and bounded input-ordering primitives for the next shared-world integration. Block interactions, entities, the live shared-world runtime, and persistence are not implemented yet.
 
 ## M9 — Binary NBT foundation
 
@@ -132,14 +135,38 @@ Completed:
 - Use Client Tick End packets to advance the per-connection Keep Alive cadence without blocking movement handling.
 - Add exact-byte, malformed-input, boundary-crossing, and deterministic-set tests.
 
-Remaining runtime work:
+Remaining movement work:
 
-- Move from per-connection timing to a shared authoritative 20 TPS runtime.
-- Add ordered connection input queues and deterministic world mutation.
 - Add collision, movement-speed, and fall-state validation.
 - Broadcast player state to other connected clients.
 
-## M14 — Persistent world foundation
+## M14 — Authoritative tick/runtime foundation
+
+Status: complete for version-neutral scheduling and input-ordering primitives.
+
+Completed:
+
+- Add a standalone `ferrum-runtime` crate with no Minecraft wire-format dependency.
+- Add stable `Tick`, `ConnectionId`, and per-connection `InputSequence` identifiers.
+- Add a fixed-rate clock with a standard 20 TPS server constructor.
+- Cap catch-up work and explicitly report skipped overdue ticks to prevent an unbounded catch-up spiral.
+- Add a globally bounded input queue with explicit overflow errors.
+- Assign independent monotonic sequence numbers to each connection.
+- Drain queued input in deterministic fair rounds ordered by connection ID.
+- Enforce a configurable maximum number of mutations per tick.
+- Remove queued input and reset sequence state when a connection is removed.
+- Add a generic deterministic state runner for applying envelopes at an authoritative tick.
+- Cover timing, overload, fairness, queue limits, disconnect cleanup, and mutation order with tests.
+
+Remaining integration work:
+
+- Move packet readers into independent network workers that publish bounded input envelopes.
+- Run one shared 20 TPS world loop instead of per-connection timing.
+- Route resulting chunk, movement, Keep Alive, and disconnect output back to connection writers.
+- Ensure a slow reader or writer cannot block unrelated players.
+- Add integration tests for deterministic ordering across multiple simulated connections.
+
+## M15 — Persistent world foundation
 
 Status: started with deterministic in-memory primitives.
 
@@ -155,7 +182,7 @@ Completed foundation:
 Remaining:
 
 - Add block mutation and interaction handling.
-- Add an authoritative shared tick loop and ordered input queues.
+- Integrate world mutation with the shared authoritative runtime.
 - Add NBT-backed Anvil region reading.
 - Add safe asynchronous loading and saving.
 - Preserve deterministic world mutation through the authoritative tick loop.
@@ -166,6 +193,8 @@ Remaining:
 - Do not scatter packet IDs throughout gameplay code.
 - Do not treat generated Mojang code as publishable original source.
 - Network I/O may be concurrent, but authoritative world mutations must be ordered and deterministic.
+- Bound total queued input and per-tick work so one connection cannot starve the server.
+- Cap tick catch-up rather than allowing overload to grow without limit.
 - Every externally supplied length must have a limit before allocation.
 - Reject non-finite or unreasonable movement input before mutating player state.
 - Add tests for exact wire bytes in addition to round-trip tests.
