@@ -49,6 +49,16 @@ pub enum PacketKind {
     SelectKnownPacksRequest,
     SelectKnownPacksResponse,
     FinishConfiguration,
+    PlayLogin,
+    ChunkBatchStart,
+    ChunkBatchFinished,
+    ChunkBatchReceived,
+    LevelChunkWithLight,
+    SetChunkCacheCenter,
+    DefaultSpawnPosition,
+    PlayerPosition,
+    SystemChat,
+    AcceptTeleportation,
     PlayDisconnect,
     KeepAliveRequest,
     KeepAliveResponse,
@@ -74,9 +84,19 @@ impl PacketKind {
             | Self::SelectKnownPacksRequest
             | Self::SelectKnownPacksResponse
             | Self::FinishConfiguration => ProtocolPhase::Configuration,
-            Self::PlayDisconnect | Self::KeepAliveRequest | Self::KeepAliveResponse => {
-                ProtocolPhase::Play
-            }
+            Self::PlayLogin
+            | Self::ChunkBatchStart
+            | Self::ChunkBatchFinished
+            | Self::ChunkBatchReceived
+            | Self::LevelChunkWithLight
+            | Self::SetChunkCacheCenter
+            | Self::DefaultSpawnPosition
+            | Self::PlayerPosition
+            | Self::SystemChat
+            | Self::AcceptTeleportation
+            | Self::PlayDisconnect
+            | Self::KeepAliveRequest
+            | Self::KeepAliveResponse => ProtocolPhase::Play,
         }
     }
 
@@ -90,6 +110,8 @@ impl PacketKind {
             | Self::LoginAcknowledged
             | Self::ConfigurationAcknowledged
             | Self::SelectKnownPacksResponse
+            | Self::ChunkBatchReceived
+            | Self::AcceptTeleportation
             | Self::KeepAliveResponse => PacketDirection::Serverbound,
             _ => PacketDirection::Clientbound,
         }

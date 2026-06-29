@@ -12,8 +12,16 @@ use ferrum_configuration::{
     encode_registry_data, encode_tags,
 };
 use ferrum_nbt::{Tag, encode_anonymous};
+use ferrum_play::{
+    BlockPosition, CommonPlayerSpawnInfo, DefaultSpawnPosition, GlobalPosition, JoinGame,
+    PlayerPosition, PositionMoveRotation, encode_chunk_batch_finished, encode_chunk_batch_start,
+    encode_default_spawn_position, encode_join_game, encode_keep_alive,
+    encode_level_chunk_with_light, encode_play_disconnect, encode_player_position,
+    encode_set_chunk_cache_center, encode_system_chat,
+};
 use ferrum_protocol::{HandshakeIntent, PacketKind, PacketTable, ProtocolProfile, ProtocolSession};
 use ferrum_version_26_1_2 as version_26_1_2;
+use ferrum_world::{BiomeId, BlockStateId, ChunkPos, FlatWorldSpec, StaticChunk};
 use identity::offline_player_identity;
 use serde_json::{Map, Value, json};
 use std::{
@@ -30,6 +38,19 @@ const DEFAULT_BIND: &str = "127.0.0.1:25565";
 const DEFAULT_VERSION_NAME: &str = "Minecraft Java Edition 26.*.*";
 const DEFAULT_PROTOCOL: i32 = 0;
 const DEFAULT_MOTD: &str = "Ferrum native Rust server";
+const STATIC_LEVEL: &str = "minecraft:overworld";
+const STATIC_PLAYER_ID: i32 = 1;
+const STATIC_TELEPORT_ID: i32 = 1;
+const STATIC_CHUNK_RADIUS: i32 = 2;
+const STATIC_SIMULATION_DISTANCE: i32 = 2;
+const STATIC_SEA_LEVEL: i32 = 63;
+const STATIC_FLOOR_Y: i32 = 63;
+const STATIC_CHUNK_X: i32 = 0;
+const STATIC_CHUNK_Z: i32 = 0;
+const STATIC_CHUNK_BATCH_SIZE: i32 = 1;
+const STATIC_WELCOME_MESSAGE: &str = "Ferrum native Rust world loaded";
+const MAX_IGNORED_PLAY_PACKETS: usize = 1_024;
+const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Parser)]
 #[command(
@@ -635,13 +656,23 @@ fn base64_encode(bytes: &[u8]) -> String {
 
 fn handle_client(stream: &mut TcpStream, config: &ServerConfig) -> Result<()> {
     let mut reader = stream.try_clone().context("cannot clone TCP stream")?;
-    handle_connection_protocol(&mut reader, stream, config)
+    handle_connection_protocol_with_play_round_limit(&mut reader, stream, config, None)
 }
 
+#[cfg(test)]
 fn handle_connection_protocol<R: Read, W: Write>(
+    reader: R,
+    writer: W,
+    config: &ServerConfig,
+) -> Result<()> {
+    handle_connection_protocol_with_play_round_limit(reader, writer, config, Some(1))
+}
+
+fn handle_connection_protocol_with_play_round_limit<R: Read, W: Write>(
     mut reader: R,
     writer: W,
     config: &ServerConfig,
+    play_round_limit: Option<usize>,
 ) -> Result<()> {
     let profile = config.protocol_profile()?;
     let handshake_packet = read_packet(&mut reader).context("cannot read handshake packet")?;
@@ -653,9 +684,15 @@ fn handle_connection_protocol<R: Read, W: Write>(
         HandshakeIntent::Status => {
             handle_status_protocol(reader, writer, config, &profile, &mut session)
         }
-        HandshakeIntent::Login => {
-            handle_login_protocol(reader, writer, config, &handshake, &profile, &mut session)
-        }
+        HandshakeIntent::Login => handle_login_protocol(
+            reader,
+            writer,
+            config,
+            &handshake,
+            &profile,
+            &mut session,
+            play_round_limit,
+        ),
     }
 }
 
@@ -730,6 +767,7 @@ fn handle_login_protocol<R: Read, W: Write>(
     handshake: &Handshake,
     profile: &ProtocolProfile,
     session: &mut ProtocolSession,
+    play_round_limit: Option<usize>,
 ) -> Result<()> {
     if config.profile_name.is_some() && !profile.supports(handshake.protocol) {
         write_packet(
@@ -779,7 +817,14 @@ fn handle_login_protocol<R: Read, W: Write>(
         )?;
         session.login_success_sent()?;
         if config.configuration_enabled {
-            handle_configuration_protocol(&mut reader, &mut writer, config, profile, session)?;
+            handle_configuration_protocol(
+                &mut reader,
+                &mut writer,
+                config,
+                profile,
+                session,
+                play_round_limit,
+            )?;
         }
     } else {
         write_packet(
@@ -801,6 +846,7 @@ fn handle_configuration_protocol<R: Read, W: Write>(
     config: &ServerConfig,
     profile: &ProtocolProfile,
     session: &mut ProtocolSession,
+    play_round_limit: Option<usize>,
 ) -> Result<()> {
     let login_acknowledged =
         read_packet(reader).context("cannot read login acknowledged packet")?;
@@ -875,7 +921,305 @@ fn handle_configuration_protocol<R: Read, W: Write>(
     }
     session.configuration_acknowledged()?;
     println!("configuration completed; connection entered Play state");
+    handle_play_protocol(reader, writer, config, profile, session, play_round_limit)
+}
+
+fn handle_play_protocol<R: Read, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    config: &ServerConfig,
+    profile: &ProtocolProfile,
+    session: &mut ProtocolSession,
+    play_round_limit: Option<usize>,
+) -> Result<()> {
+    if config.profile_name.as_deref() != Some(version_26_1_2::PROFILE_NAME) {
+        return Ok(());
+    }
+
+    let result =
+        run_static_play_session(reader, writer, config, profile, session, play_round_limit);
+    if let Err(error) = result {
+        let reason = format!("Ferrum closed the connection: {error}");
+        if let Ok(payload) = encode_play_disconnect(&reason) {
+            let _ = write_play_payload(writer, profile, PacketKind::PlayDisconnect, &payload);
+            let _ = writer.flush();
+        }
+        session.disconnect();
+        return Err(error);
+    }
     Ok(())
+}
+
+fn run_static_play_session<R: Read, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    config: &ServerConfig,
+    profile: &ProtocolProfile,
+    session: &mut ProtocolSession,
+    play_round_limit: Option<usize>,
+) -> Result<()> {
+    let chunk = static_chunk()?;
+
+    write_play_payload(
+        writer,
+        profile,
+        PacketKind::PlayLogin,
+        &encode_join_game(&static_join_game(config))?,
+    )?;
+    write_play_payload(
+        writer,
+        profile,
+        PacketKind::DefaultSpawnPosition,
+        &encode_default_spawn_position(&static_default_spawn_position())?,
+    )?;
+    write_play_payload(
+        writer,
+        profile,
+        PacketKind::SetChunkCacheCenter,
+        &encode_set_chunk_cache_center(STATIC_CHUNK_X, STATIC_CHUNK_Z),
+    )?;
+    write_play_payload(
+        writer,
+        profile,
+        PacketKind::ChunkBatchStart,
+        &encode_chunk_batch_start(),
+    )?;
+    write_play_payload(
+        writer,
+        profile,
+        PacketKind::LevelChunkWithLight,
+        &encode_level_chunk_with_light(&chunk)?,
+    )?;
+    write_play_payload(
+        writer,
+        profile,
+        PacketKind::ChunkBatchFinished,
+        &encode_chunk_batch_finished(STATIC_CHUNK_BATCH_SIZE)?,
+    )?;
+    write_play_payload(
+        writer,
+        profile,
+        PacketKind::SystemChat,
+        &encode_system_chat(STATIC_WELCOME_MESSAGE, false)?,
+    )?;
+    write_play_payload(
+        writer,
+        profile,
+        PacketKind::PlayerPosition,
+        &encode_player_position(&static_player_position())?,
+    )?;
+    writer.flush()?;
+
+    wait_for_play_bootstrap_acknowledgements(reader, profile, STATIC_TELEPORT_ID)?;
+    run_keep_alive_loop(reader, writer, profile, session, play_round_limit)
+}
+
+fn static_chunk() -> Result<StaticChunk> {
+    Ok(StaticChunk::flat_overworld(
+        ChunkPos {
+            x: STATIC_CHUNK_X,
+            z: STATIC_CHUNK_Z,
+        },
+        version_26_1_2::OVERWORLD_MIN_SECTION_Y,
+        version_26_1_2::OVERWORLD_SECTION_COUNT,
+        FlatWorldSpec {
+            floor_y: STATIC_FLOOR_Y,
+            air: BlockStateId::new(version_26_1_2::AIR_BLOCK_STATE_ID),
+            bedrock: BlockStateId::new(version_26_1_2::BEDROCK_BLOCK_STATE_ID),
+            stone: BlockStateId::new(version_26_1_2::STONE_BLOCK_STATE_ID),
+            dirt: BlockStateId::new(version_26_1_2::DIRT_BLOCK_STATE_ID),
+            grass: BlockStateId::new(version_26_1_2::GRASS_BLOCK_STATE_ID),
+            biome: BiomeId::new(version_26_1_2::PLAINS_BIOME_ID),
+        },
+    )?)
+}
+
+fn static_join_game(config: &ServerConfig) -> JoinGame {
+    JoinGame {
+        player_id: STATIC_PLAYER_ID,
+        hardcore: false,
+        levels: vec![STATIC_LEVEL.to_owned()],
+        max_players: config.max_players,
+        chunk_radius: STATIC_CHUNK_RADIUS,
+        simulation_distance: STATIC_SIMULATION_DISTANCE,
+        reduced_debug_info: false,
+        show_death_screen: true,
+        limited_crafting: false,
+        spawn_info: CommonPlayerSpawnInfo {
+            dimension_type_id: 0,
+            dimension: STATIC_LEVEL.to_owned(),
+            seed: 0,
+            game_mode: 0,
+            previous_game_mode: -1,
+            is_debug: false,
+            is_flat: true,
+            last_death_location: None,
+            portal_cooldown: 0,
+            sea_level: STATIC_SEA_LEVEL,
+        },
+        enforces_secure_chat: config.enforces_secure_chat,
+    }
+}
+
+fn static_default_spawn_position() -> DefaultSpawnPosition {
+    DefaultSpawnPosition {
+        position: GlobalPosition {
+            dimension: STATIC_LEVEL.to_owned(),
+            position: BlockPosition { x: 0, y: 64, z: 0 },
+        },
+        yaw: 0.0,
+        pitch: 0.0,
+    }
+}
+
+fn static_player_position() -> PlayerPosition {
+    PlayerPosition {
+        teleport_id: STATIC_TELEPORT_ID,
+        change: PositionMoveRotation {
+            position: [0.5, 65.0, 0.5],
+            delta_movement: [0.0; 3],
+            yaw: 0.0,
+            pitch: 0.0,
+        },
+        relative_flags: 0,
+    }
+}
+
+fn write_play_payload<W: Write>(
+    writer: &mut W,
+    profile: &ProtocolProfile,
+    kind: PacketKind,
+    payload: &[u8],
+) -> Result<()> {
+    write_packet(
+        writer,
+        &build_packet(profile.packets().require(kind)?, |body| {
+            body.extend_from_slice(payload);
+            Ok(())
+        })?,
+    )?;
+    Ok(())
+}
+
+fn wait_for_play_bootstrap_acknowledgements<R: Read>(
+    reader: &mut R,
+    profile: &ProtocolProfile,
+    expected_teleport_id: i32,
+) -> Result<()> {
+    let teleport_packet_id = profile.packets().require(PacketKind::AcceptTeleportation)?;
+    let chunk_batch_packet_id = profile.packets().require(PacketKind::ChunkBatchReceived)?;
+    let mut teleport_acknowledged = false;
+    let mut chunk_batch_acknowledged = false;
+
+    for _ in 0..MAX_IGNORED_PLAY_PACKETS {
+        let packet = read_packet(reader).context("cannot read Play bootstrap acknowledgement")?;
+        let mut packet_reader = PacketReader::new(&packet);
+        let packet_id = packet_reader.read_varint()?;
+
+        if packet_id == teleport_packet_id {
+            let teleport_id = packet_reader.read_varint()?;
+            if teleport_id != expected_teleport_id {
+                bail!("expected teleport id {expected_teleport_id}, got {teleport_id}");
+            }
+            if !packet_reader.take_remaining().is_empty() {
+                bail!("teleport acknowledgement contains trailing bytes");
+            }
+            teleport_acknowledged = true;
+        } else if packet_id == chunk_batch_packet_id {
+            let desired_chunks_per_tick = packet_reader.read_f32()?;
+            if !desired_chunks_per_tick.is_finite() || desired_chunks_per_tick <= 0.0 {
+                bail!(
+                    "chunk batch acknowledgement contains invalid desired chunks per tick {desired_chunks_per_tick}"
+                );
+            }
+            if !packet_reader.take_remaining().is_empty() {
+                bail!("chunk batch acknowledgement contains trailing bytes");
+            }
+            chunk_batch_acknowledged = true;
+        }
+
+        if teleport_acknowledged && chunk_batch_acknowledged {
+            return Ok(());
+        }
+    }
+
+    bail!(
+        "Play bootstrap acknowledgements were not received within the packet limit: teleport={teleport_acknowledged}, chunk_batch={chunk_batch_acknowledged}"
+    )
+}
+
+fn run_keep_alive_loop<R: Read, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    profile: &ProtocolProfile,
+    session: &mut ProtocolSession,
+    play_round_limit: Option<usize>,
+) -> Result<()> {
+    let mut keep_alive_id = 1_i64;
+    let mut completed_rounds = 0_usize;
+
+    loop {
+        write_play_payload(
+            writer,
+            profile,
+            PacketKind::KeepAliveRequest,
+            &encode_keep_alive(keep_alive_id),
+        )?;
+        session.keep_alive_sent(keep_alive_id)?;
+        writer.flush()?;
+
+        match wait_for_keep_alive_response(reader, profile, keep_alive_id) {
+            Ok(()) => session.keep_alive_response(keep_alive_id)?,
+            Err(error) if is_connection_eof(&error) => {
+                session.disconnect();
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+        }
+
+        completed_rounds += 1;
+        if play_round_limit.is_some_and(|rounds| completed_rounds >= rounds) {
+            return Ok(());
+        }
+
+        keep_alive_id = keep_alive_id
+            .checked_add(1)
+            .ok_or_else(|| anyhow::anyhow!("keep alive id overflow"))?;
+        thread::sleep(KEEP_ALIVE_INTERVAL);
+    }
+}
+
+fn wait_for_keep_alive_response<R: Read>(
+    reader: &mut R,
+    profile: &ProtocolProfile,
+    expected_keep_alive_id: i64,
+) -> Result<()> {
+    let expected_packet_id = profile.packets().require(PacketKind::KeepAliveResponse)?;
+    for _ in 0..MAX_IGNORED_PLAY_PACKETS {
+        let packet = read_packet(reader).context("cannot read keep alive response")?;
+        let mut packet_reader = PacketReader::new(&packet);
+        let packet_id = packet_reader.read_varint()?;
+        if packet_id != expected_packet_id {
+            continue;
+        }
+        let keep_alive_id = packet_reader.read_i64()?;
+        if keep_alive_id != expected_keep_alive_id {
+            bail!("expected keep alive id {expected_keep_alive_id}, got {keep_alive_id}");
+        }
+        if !packet_reader.take_remaining().is_empty() {
+            bail!("keep alive response contains trailing bytes");
+        }
+        return Ok(());
+    }
+    bail!("keep alive response was not received within the packet limit")
+}
+
+fn is_connection_eof(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<io::Error>()
+            .is_some_and(|io_error| io_error.kind() == io::ErrorKind::UnexpectedEof)
+    })
 }
 
 fn send_registry_data<W: Write>(
@@ -1466,6 +1810,33 @@ mod tests {
         )
         .unwrap();
         write_packet(&mut input, &build_packet(0x03, |_| Ok(())).unwrap()).unwrap();
+        write_packet(
+            &mut input,
+            &build_packet(0x0b, |body| {
+                body.extend_from_slice(&1.0_f32.to_be_bytes());
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        write_packet(
+            &mut input,
+            &build_packet(0x00, |body| {
+                write_varint_vec(body, STATIC_TELEPORT_ID);
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        write_packet(
+            &mut input,
+            &build_packet(0x1c, |body| {
+                body.extend_from_slice(&1_i64.to_be_bytes());
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
 
         let mut output = Vec::new();
         handle_connection_protocol(Cursor::new(input), &mut output, &config).unwrap();
@@ -1513,6 +1884,151 @@ mod tests {
 
         let finish = read_packet(&mut cursor).unwrap();
         assert_eq!(PacketReader::new(&finish).read_varint().unwrap(), 0x03);
+
+        let join_game = read_packet(&mut cursor).unwrap();
+        let mut join_game_reader = PacketReader::new(&join_game);
+        assert_eq!(join_game_reader.read_varint().unwrap(), 0x31);
+        assert_eq!(
+            join_game_reader.take_remaining(),
+            encode_join_game(&static_join_game(&config)).unwrap()
+        );
+
+        let default_spawn = read_packet(&mut cursor).unwrap();
+        let mut default_spawn_reader = PacketReader::new(&default_spawn);
+        assert_eq!(default_spawn_reader.read_varint().unwrap(), 0x61);
+        assert_eq!(
+            default_spawn_reader.take_remaining(),
+            encode_default_spawn_position(&static_default_spawn_position()).unwrap()
+        );
+
+        let chunk_center = read_packet(&mut cursor).unwrap();
+        let mut chunk_center_reader = PacketReader::new(&chunk_center);
+        assert_eq!(chunk_center_reader.read_varint().unwrap(), 0x5e);
+        assert_eq!(chunk_center_reader.take_remaining(), &[0, 0]);
+
+        let chunk_batch_start = read_packet(&mut cursor).unwrap();
+        let mut chunk_batch_start_reader = PacketReader::new(&chunk_batch_start);
+        assert_eq!(chunk_batch_start_reader.read_varint().unwrap(), 0x0c);
+        assert!(chunk_batch_start_reader.take_remaining().is_empty());
+
+        let level_chunk = read_packet(&mut cursor).unwrap();
+        let mut level_chunk_reader = PacketReader::new(&level_chunk);
+        assert_eq!(level_chunk_reader.read_varint().unwrap(), 0x2d);
+        assert_eq!(
+            level_chunk_reader.take_remaining(),
+            encode_level_chunk_with_light(&static_chunk().unwrap()).unwrap()
+        );
+
+        let chunk_batch_finished = read_packet(&mut cursor).unwrap();
+        let mut chunk_batch_finished_reader = PacketReader::new(&chunk_batch_finished);
+        assert_eq!(chunk_batch_finished_reader.read_varint().unwrap(), 0x0b);
+        assert_eq!(chunk_batch_finished_reader.read_varint().unwrap(), 1);
+        assert!(chunk_batch_finished_reader.take_remaining().is_empty());
+
+        let system_chat = read_packet(&mut cursor).unwrap();
+        let mut system_chat_reader = PacketReader::new(&system_chat);
+        assert_eq!(system_chat_reader.read_varint().unwrap(), 0x79);
+        assert_eq!(
+            system_chat_reader.take_remaining(),
+            encode_system_chat(STATIC_WELCOME_MESSAGE, false).unwrap()
+        );
+
+        let player_position = read_packet(&mut cursor).unwrap();
+        let mut player_position_reader = PacketReader::new(&player_position);
+        assert_eq!(player_position_reader.read_varint().unwrap(), 0x48);
+        assert_eq!(
+            player_position_reader.take_remaining(),
+            encode_player_position(&static_player_position()).unwrap()
+        );
+
+        let keep_alive = read_packet(&mut cursor).unwrap();
+        let mut keep_alive_reader = PacketReader::new(&keep_alive);
+        assert_eq!(keep_alive_reader.read_varint().unwrap(), 0x2c);
+        assert_eq!(keep_alive_reader.read_i64().unwrap(), 1);
+        assert!(keep_alive_reader.take_remaining().is_empty());
+        assert!(read_packet(&mut cursor).is_err());
+    }
+
+    #[test]
+    fn builtin_profile_rejects_wrong_teleport_acknowledgement() {
+        let config = ServerConfig::for_profile(Some("26.1.2")).unwrap();
+        let profile = config.protocol_profile().unwrap();
+        let mut framed = Vec::new();
+        write_packet(
+            &mut framed,
+            &build_packet(0x0b, |body| {
+                body.extend_from_slice(&1.0_f32.to_be_bytes());
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        write_packet(
+            &mut framed,
+            &build_packet(0x00, |body| {
+                write_varint_vec(body, STATIC_TELEPORT_ID + 1);
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        let error = wait_for_play_bootstrap_acknowledgements(
+            &mut Cursor::new(framed),
+            &profile,
+            STATIC_TELEPORT_ID,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("expected teleport id 1, got 2"));
+    }
+
+    #[test]
+    fn builtin_profile_rejects_invalid_chunk_batch_rate() {
+        let config = ServerConfig::for_profile(Some("26.1.2")).unwrap();
+        let profile = config.protocol_profile().unwrap();
+        let mut framed = Vec::new();
+        write_packet(
+            &mut framed,
+            &build_packet(0x0b, |body| {
+                body.extend_from_slice(&f32::NAN.to_be_bytes());
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        let error = wait_for_play_bootstrap_acknowledgements(
+            &mut Cursor::new(framed),
+            &profile,
+            STATIC_TELEPORT_ID,
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("invalid desired chunks per tick")
+        );
+    }
+
+    #[test]
+    fn builtin_profile_rejects_wrong_keep_alive_response() {
+        let config = ServerConfig::for_profile(Some("26.1.2")).unwrap();
+        let profile = config.protocol_profile().unwrap();
+        let packet = build_packet(0x1c, |body| {
+            body.extend_from_slice(&2_i64.to_be_bytes());
+            Ok(())
+        })
+        .unwrap();
+        let mut framed = Vec::new();
+        write_packet(&mut framed, &packet).unwrap();
+
+        let error =
+            wait_for_keep_alive_response(&mut Cursor::new(framed), &profile, 1).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("expected keep alive id 1, got 2")
+        );
     }
 
     #[test]

@@ -1,7 +1,18 @@
-name: Release Binaries
+name: Release RoM server binaries
 
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, for example v0.1.0-alpha.1
+        required: true
+        default: v0.1.0-alpha.1
+        type: string
+      prerelease:
+        description: Publish as a prerelease
+        required: true
+        default: true
+        type: boolean
   push:
     tags:
       - "v*"
@@ -10,38 +21,91 @@ permissions:
   contents: write
 
 jobs:
+  prepare:
+    name: Prepare release metadata
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      target_sha: ${{ steps.meta.outputs.target_sha }}
+    steps:
+      - id: meta
+        shell: bash
+        env:
+          DISPATCH_TAG: ${{ inputs.tag }}
+          DISPATCH_PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            tag="$DISPATCH_TAG"
+            prerelease="$DISPATCH_PRERELEASE"
+          else
+            tag="$GITHUB_REF_NAME"
+            if [[ "$tag" == *-* ]]; then
+              prerelease=true
+            else
+              prerelease=false
+            fi
+          fi
+
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release tag: $tag" >&2
+            exit 1
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "target_sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+
   build:
-    name: Build ${{ matrix.artifact }}
+    name: Build ${{ matrix.platform }}
+    needs: prepare
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - artifact: ferrum-server-windows-x86_64
-            os: windows-2025
+          - platform: windows-x86_64
+            os: windows-latest
             target: x86_64-pc-windows-msvc
+            source_binary: ferrum-server.exe
+            package_binary: rom-server.exe
+            raw_asset: rom-server-windows-x86_64.exe
             archive: zip
-            binary: ferrum-server.exe
-          - artifact: ferrum-server-linux-x86_64
+            native: true
+          - platform: linux-x86_64
             os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
+            source_binary: ferrum-server
+            package_binary: rom-server
+            raw_asset: rom-server-linux-x86_64
             archive: tar.gz
-            binary: ferrum-server
-          - artifact: ferrum-server-linux-aarch64
-            os: ubuntu-24.04-arm
+            native: true
+          - platform: linux-aarch64
+            os: ubuntu-24.04
             target: aarch64-unknown-linux-gnu
+            source_binary: ferrum-server
+            package_binary: rom-server
+            raw_asset: rom-server-linux-aarch64
             archive: tar.gz
-            binary: ferrum-server
-          - artifact: ferrum-server-macos-x86_64
+            native: false
+          - platform: macos-x86_64
             os: macos-15-intel
             target: x86_64-apple-darwin
+            source_binary: ferrum-server
+            package_binary: rom-server
+            raw_asset: rom-server-macos-x86_64
             archive: tar.gz
-            binary: ferrum-server
-          - artifact: ferrum-server-macos-aarch64
+            native: true
+          - platform: macos-aarch64
             os: macos-15
             target: aarch64-apple-darwin
+            source_binary: ferrum-server
+            package_binary: rom-server
+            raw_asset: rom-server-macos-aarch64
             archive: tar.gz
-            binary: ferrum-server
+            native: true
 
     steps:
       - uses: actions/checkout@v4
@@ -50,58 +114,189 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Build ferrum-server
-        run: cargo build --locked --profile release -p ferrum-server --target ${{ matrix.target }}
-
-      - name: Package Windows binary
-        if: matrix.archive == 'zip'
-        shell: pwsh
-        run: |
-          $stage = "dist/${{ matrix.artifact }}"
-          New-Item -ItemType Directory -Force -Path $stage | Out-Null
-          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.binary }}" "$stage/${{ matrix.binary }}"
-          Copy-Item README.md "$stage/README.md"
-          Copy-Item LICENSE "$stage/LICENSE"
-          Compress-Archive -Path "$stage/*" -DestinationPath "dist/${{ matrix.artifact }}.zip" -Force
-
-      - name: Package Unix binary
-        if: matrix.archive == 'tar.gz'
+      - name: Install Linux ARM64 linker
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
         shell: bash
         run: |
           set -euo pipefail
-          stage="dist/${{ matrix.artifact }}"
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross
+
+      - name: Build native server
+        if: matrix.target != 'aarch64-unknown-linux-gnu'
+        run: cargo build --locked --release -p ferrum-server --target ${{ matrix.target }}
+
+      - name: Build Linux ARM64 server
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        shell: bash
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: cargo build --locked --release -p ferrum-server --target ${{ matrix.target }}
+
+      - name: Smoke-test Windows executable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & "target/${{ matrix.target }}/release/${{ matrix.source_binary }}" --help | Out-Null
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Smoke-test Unix executable
+        if: runner.os != 'Windows' && matrix.native
+        shell: bash
+        run: |
+          set -euo pipefail
+          "target/${{ matrix.target }}/release/${{ matrix.source_binary }}" --help >/dev/null
+
+      - name: Package Windows release
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $package = "RoM-$env:TAG-${{ matrix.platform }}"
+          $stage = "dist/$package"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.source_binary }}" "$stage/${{ matrix.package_binary }}"
+          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.source_binary }}" "dist/${{ matrix.raw_asset }}"
+          Copy-Item "examples/server-26.1.2.toml" "$stage/server.toml"
+          Copy-Item README.md "$stage/README.md"
+          Copy-Item LICENSE "$stage/LICENSE"
+          Set-Content -Path "$stage/VERSION" -Value $env:TAG -NoNewline
+          Compress-Archive -Path "$stage/*" -DestinationPath "dist/$package.zip" -Force
+
+      - name: Package Unix release
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          package="RoM-${TAG}-${{ matrix.platform }}"
+          stage="dist/${package}"
           mkdir -p "$stage"
-          cp "target/${{ matrix.target }}/release/${{ matrix.binary }}" "$stage/${{ matrix.binary }}"
+          install -m 0755 "target/${{ matrix.target }}/release/${{ matrix.source_binary }}" "$stage/${{ matrix.package_binary }}"
+          install -m 0755 "target/${{ matrix.target }}/release/${{ matrix.source_binary }}" "dist/${{ matrix.raw_asset }}"
+          cp examples/server-26.1.2.toml "$stage/server.toml"
           cp README.md "$stage/README.md"
           cp LICENSE "$stage/LICENSE"
-          tar -C dist -czf "dist/${{ matrix.artifact }}.tar.gz" "${{ matrix.artifact }}"
+          printf '%s' "$TAG" > "$stage/VERSION"
+          tar -C dist -czf "dist/${package}.tar.gz" "$package"
+
+      - name: Record Unix checksums
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          for asset in "${{ matrix.raw_asset }}" *.tar.gz; do
+            [[ -f "$asset" ]] && shasum -a 256 "$asset" > "$asset.sha256"
+          done
+
+      - name: Record Windows checksums
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Get-ChildItem dist -File | Where-Object { $_.Extension -eq '.zip' -or $_.Extension -eq '.exe' } | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($_.Name)" | Set-Content -NoNewline "$($_.FullName).sha256"
+          }
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
+          name: release-${{ matrix.platform }}
           path: |
-            dist/${{ matrix.artifact }}.zip
-            dist/${{ matrix.artifact }}.tar.gz
+            dist/*.zip
+            dist/*.tar.gz
+            dist/rom-server-*
+            dist/*.sha256
           if-no-files-found: error
+          retention-days: 14
 
   publish:
     name: Publish GitHub Release
-    if: startsWith(github.ref, 'refs/tags/')
-    needs: build
+    needs: [prepare, build]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v4
         with:
+          pattern: release-*
           path: dist
+          merge-multiple: true
 
-      - name: Create or update release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+      - name: Verify per-asset checksums and generate SHA256SUMS
+        shell: bash
         run: |
           set -euo pipefail
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --title "$TAG" --notes "Native ferrum-server release binaries."
+          cd dist
+          for checksum in *.sha256; do
+            sha256sum --check "$checksum"
+          done
+          find . -maxdepth 1 -type f \
+            ! -name '*.sha256' \
+            ! -name 'SHA256SUMS' \
+            -printf '%f\0' |
+            sort -z |
+            xargs -0 -r sha256sum > SHA256SUMS
+          test "$(wc -l < SHA256SUMS)" -eq 10
+
+      - name: Write release notes
+        shell: bash
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+          TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
+        run: |
+          cat > release-notes.md <<EOF
+          # RoM ${TAG}
+
+          Native Rust Minecraft Java Edition server binaries.
+
+          **Target:** Minecraft Java Edition 26.1.2 / protocol 775  
+          **Source commit:** ${TARGET_SHA}
+
+          This experimental release includes login, Configuration, all synchronized registries, Join Game, one deterministic flat chunk with light, player-position synchronization, system chat, and Keep Alive.
+
+          Each platform provides a standalone executable and an archive containing the executable, server.toml, README.md, LICENSE, and VERSION. Verify downloads with SHA256SUMS.
+
+          Player movement processing, dynamic chunk streaming, block interaction, entities, persistence, and online-mode authentication are not implemented yet.
+          EOF
+
+      - name: Create or update release and upload assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+
+          release_flags=()
+          if [[ "$PRERELEASE" == "true" ]]; then
+            release_flags+=(--prerelease)
           fi
-          find dist -type f \( -name '*.zip' -o -name '*.tar.gz' \) -print0 |
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "RoM $TAG" --notes-file release-notes.md "${release_flags[@]}"
+          else
+            gh release create "$TAG" --target "$TARGET_SHA" --title "RoM $TAG" --notes-file release-notes.md "${release_flags[@]}"
+          fi
+
+          find dist -maxdepth 1 -type f -print0 |
             xargs -0 gh release upload "$TAG" --clobber
+
+      - name: Verify published release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          test "$(gh release view "$TAG" --json assets --jq '.assets | length')" -ge 21
+          actual_prerelease="$(gh release view "$TAG" --json isPrerelease --jq '.isPrerelease')"
+          test "$actual_prerelease" = "$PRERELEASE"
+          gh release view "$TAG" --json url,isPrerelease,assets \
+            --jq '{url, prerelease: .isPrerelease, assets: [.assets[].name]}'

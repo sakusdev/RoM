@@ -132,6 +132,11 @@ impl<'a> PacketReader<'a> {
         ]))
     }
 
+    pub(crate) fn read_f32(&mut self) -> Result<f32> {
+        let bytes = self.read_bytes(4)?;
+        Ok(f32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+    }
+
     pub(crate) fn take_remaining(&mut self) -> &'a [u8] {
         let remaining = &self.bytes[self.cursor..];
         self.cursor = self.bytes.len();
@@ -186,5 +191,12 @@ mod tests {
         write_string(&mut packet, "Ferrum").unwrap();
         let mut reader = PacketReader::new(&packet);
         assert_eq!(reader.read_string().unwrap(), "Ferrum");
+    }
+
+    #[test]
+    fn reads_big_endian_float_payloads() {
+        let bytes = 3.5_f32.to_be_bytes();
+        let mut reader = PacketReader::new(&bytes);
+        assert_eq!(reader.read_f32().unwrap(), 3.5);
     }
 }

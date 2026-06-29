@@ -1,0 +1,10 @@
+[package]
+name = "ferrum-world"
+description = "Deterministic in-memory world primitives for Ferrum"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+thiserror.workspace = true

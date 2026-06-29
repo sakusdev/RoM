@@ -19,9 +19,14 @@ The current server milestone provides:
 - Protocol-anonymous NBT encoding and decoding
 - Versioned protocol profiles and deterministic connection state validation
 - Configuration-state Registry Data, Feature Flags, Tags, and Known Packs codecs
+- Deterministic Play-state payload codecs
 - A built-in Minecraft Java Edition 26.1.2 profile (protocol 775)
+- Static-overworld Join Game, default spawn, player-position synchronization, and Keep Alive
+- One palette-encoded in-memory flat chunk with full skylight and chunk-batch negotiation
+- Welcome system chat and graceful Play disconnects
+- Version-neutral in-memory world coordinates, sections, block states, and biome IDs
 
-The socket runtime now uses `ProtocolProfile` and `ProtocolSession` from Handshake through Configuration. The 26.1.2 profile validates the handshake protocol, negotiates the vanilla core known pack, sends Feature Flags and Tags, sends Finish Configuration, validates the client acknowledgement, and reaches the Play state. It does not yet send the mandatory registry dataset, Join Game, or world data.
+The socket runtime now uses `ProtocolProfile` and `ProtocolSession` from Handshake through Play. The 26.1.2 profile validates the handshake protocol, negotiates the vanilla core known pack, sends the full synchronized registry set, completes Configuration, sends a static-overworld Play bootstrap and one flat chunk, negotiates the chunk batch, validates the teleport acknowledgement, emits a welcome system message, and runs Keep Alive exchanges. The world remains a single immutable in-memory chunk; movement, interactions, entities, streaming, and persistence are not implemented yet.
 
 ## M9 — Binary NBT foundation
 
@@ -56,7 +61,7 @@ Remaining cross-cutting work:
 
 ## M11 — Minimal Configuration state
 
-Status: protocol profile and Known Packs negotiation implemented; registry data remains.
+Status: complete for the selected 26.1.2 configuration flow.
 
 Completed:
 
@@ -72,26 +77,55 @@ Completed:
 - Add an exact built-in packet table for the implemented states.
 - Disconnect mismatched clients before Login Start is consumed.
 - Negotiate the vanilla `minecraft/core/26.1.2` known pack with bounded response decoding.
+- Add all 28 required 26.1.2 synchronized registries and 382 entry identifiers.
+- Send Registry Data packets in deterministic order after Feature Flags and before Tags.
+- Disconnect during Configuration when the required core pack is declined.
 
-Remaining:
+Remaining cross-version validation:
 
-- Add the required 26.1.2 registry datasets.
-- Send Registry Data packets in the required order after Known Packs negotiation.
 - Add captured-client integration fixtures for the complete Configuration exchange.
 
 ## M12 — Minimal Play state
 
-- Send Login/Join Game data for one static dimension.
-- Send spawn position and player-position synchronization.
-- Send one static in-memory chunk.
-- Implement Keep Alive on the live socket path.
-- Implement system messages and graceful disconnect.
-- Add integration fixtures that replay a real client packet sequence.
+Status: complete for the first single-chunk 26.1.2 Play milestone.
+
+Completed:
+
+- Add a standalone deterministic `ferrum-play` payload-codec crate.
+- Send Login/Join Game data for one static overworld dimension.
+- Send default spawn and absolute player-position synchronization.
+- Validate the client's teleport acknowledgement and reject the wrong teleport ID.
+- Implement Keep Alive on the live socket path with exact response validation.
+- Keep test execution finite while the real TCP path continues periodic Keep Alive rounds.
+- Send the chunk cache center and one deterministic flat in-memory chunk.
+- Encode block-state and biome palette containers in vanilla section order.
+- Send full skylight data and negotiate Chunk Batch Start/Finished/Received.
+- Send a welcome system message and a graceful Play disconnect on bootstrap failure.
+
+Remaining cross-client validation:
+
+- Add integration fixtures captured from a real 26.1.2 client.
+- Confirm the complete single-chunk join sequence against the vanilla client.
+- Verify initial chunk rendering, skylight, and spawn stability in a manual vanilla-client smoke test.
 
 ## M13 — Persistent world foundation
 
-- Add region-independent world coordinates and block-state IDs.
-- Implement chunk sections and palette containers.
+Status: started with deterministic in-memory primitives.
+
+Completed foundation:
+
+- Add a standalone `ferrum-world` crate.
+- Add region-independent chunk coordinates and version-neutral block-state and biome IDs.
+- Implement mutable 16×16×16 chunk sections and 4×4×4 biome containers.
+- Track non-air block counts incrementally.
+- Build a deterministic four-layer flat overworld chunk.
+- Keep protocol serialization and version-specific numeric IDs outside the world crate.
+
+Remaining:
+
+- Add authoritative player movement and chunk subscription state.
+- Stream and unload chunks as the view center changes.
+- Add block mutation and interaction handling.
 - Add NBT-backed Anvil region reading.
 - Add safe asynchronous loading and saving.
 - Preserve deterministic world mutation through the authoritative tick loop.

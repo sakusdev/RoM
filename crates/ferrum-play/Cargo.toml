@@ -1,0 +1,12 @@
+[package]
+name = "ferrum-play"
+description = "Minecraft Java Edition Play-state payload codecs for Ferrum"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ferrum-nbt = { path = "../ferrum-nbt" }
+ferrum-world = { path = "../ferrum-world" }
+thiserror.workspace = true

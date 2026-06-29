@@ -41,3 +41,19 @@ Implementation order:
 6. Generate Rust structs, traits, fields, signatures, provenance, and `todo!()` bodies.
 7. Add mapping/rewrite reports, Fabric compatibility reports, and replay comparators.
 8. Add Java-semantics lowering and Rust-native gameplay subsystem implementation in later server work.
+
+
+## Native server path
+
+```text
+ferrum-version-26-1-2   Exact protocol IDs and version-specific numeric IDs
+          │
+          ├── ferrum-configuration   Known packs, registries, features, tags
+          ├── ferrum-play            Play payload and palette/light encoding
+          └── ferrum-world           Version-neutral coordinates and chunk state
+                       │
+                       ▼
+                 ferrum-server        Socket runtime and protocol orchestration
+```
+
+The world crate does not know packet IDs or Minecraft-version numeric registries. The Play codec does not own authoritative world mutation. The server runtime orders Configuration, Join Game, chunk batches, acknowledgements, and Keep Alive while preserving deterministic state transitions.
