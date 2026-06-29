@@ -4,6 +4,16 @@ use std::io::{self, Read, Write};
 const MAX_PACKET_LENGTH: i32 = 2 * 1024 * 1024;
 
 pub(crate) fn read_packet(reader: &mut impl Read) -> io::Result<Vec<u8>> {
+    loop {
+        let packet = read_raw_packet(reader)?;
+        if is_configuration_brand_payload(&packet) {
+            continue;
+        }
+        return Ok(packet);
+    }
+}
+
+fn read_raw_packet(reader: &mut impl Read) -> io::Result<Vec<u8>> {
     let length = read_varint_io(reader)?;
     if !(0..=MAX_PACKET_LENGTH).contains(&length) {
         return Err(io::Error::new(
@@ -14,6 +24,26 @@ pub(crate) fn read_packet(reader: &mut impl Read) -> io::Result<Vec<u8>> {
     let mut packet = vec![0; length as usize];
     reader.read_exact(&mut packet)?;
     Ok(packet)
+}
+
+fn is_configuration_brand_payload(packet: &[u8]) -> bool {
+    let mut reader = PacketReader::new(packet);
+    let Ok(packet_id) = reader.read_varint() else {
+        return false;
+    };
+    if packet_id != 0x02 {
+        return false;
+    }
+    let Ok(channel) = reader.read_string() else {
+        return false;
+    };
+    if channel != "minecraft:brand" {
+        return false;
+    }
+    if reader.read_string().is_err() {
+        return false;
+    }
+    reader.is_empty()
 }
 
 pub(crate) fn write_packet(writer: &mut impl Write, packet: &[u8]) -> io::Result<()> {
@@ -143,6 +173,10 @@ impl<'a> PacketReader<'a> {
         remaining
     }
 
+    fn is_empty(&self) -> bool {
+        self.cursor == self.bytes.len()
+    }
+
     #[cfg(test)]
     pub(crate) fn read_uuid_bytes(&mut self) -> Result<[u8; 16]> {
         let bytes = self.read_bytes(16)?;
@@ -198,5 +232,51 @@ mod tests {
         let bytes = 3.5_f32.to_be_bytes();
         let mut reader = PacketReader::new(&bytes);
         assert_eq!(reader.read_f32().unwrap(), 3.5);
+    }
+
+    #[test]
+    fn skips_configuration_brand_payload_before_expected_packet() {
+        let brand = build_packet(0x02, |body| {
+            write_string(body, "minecraft:brand")?;
+            write_string(body, "vanilla")
+        })
+        .unwrap();
+        let expected = build_packet(0x07, |_| Ok(())).unwrap();
+
+        let mut framed = Vec::new();
+        write_packet(&mut framed, &brand).unwrap();
+        write_packet(&mut framed, &expected).unwrap();
+
+        assert_eq!(read_packet(&mut Cursor::new(framed)).unwrap(), expected);
+    }
+
+    #[test]
+    fn does_not_skip_other_custom_payload_channels() {
+        let packet = build_packet(0x02, |body| {
+            write_string(body, "example:channel")?;
+            body.push(0x01);
+            Ok(())
+        })
+        .unwrap();
+
+        let mut framed = Vec::new();
+        write_packet(&mut framed, &packet).unwrap();
+
+        assert_eq!(read_packet(&mut Cursor::new(framed)).unwrap(), packet);
+    }
+
+    #[test]
+    fn does_not_skip_malformed_brand_payloads() {
+        let packet = build_packet(0x02, |body| {
+            write_string(body, "minecraft:brand")?;
+            body.extend_from_slice(&[0x05, b'x']);
+            Ok(())
+        })
+        .unwrap();
+
+        let mut framed = Vec::new();
+        write_packet(&mut framed, &packet).unwrap();
+
+        assert_eq!(read_packet(&mut Cursor::new(framed)).unwrap(), packet);
     }
 }
