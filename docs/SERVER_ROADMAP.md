@@ -19,9 +19,11 @@ The current server milestone provides:
 - Protocol-anonymous NBT encoding and decoding
 - Versioned protocol profiles and deterministic connection state validation
 - Configuration-state Registry Data, Feature Flags, Tags, and Known Packs codecs
+- Deterministic Play-state payload codecs
 - A built-in Minecraft Java Edition 26.1.2 profile (protocol 775)
+- Static-overworld Join Game, default spawn, player-position synchronization, and Keep Alive
 
-The socket runtime now uses `ProtocolProfile` and `ProtocolSession` from Handshake through Configuration. The 26.1.2 profile validates the handshake protocol, negotiates the vanilla core known pack, sends Feature Flags and Tags, sends Finish Configuration, validates the client acknowledgement, and reaches the Play state. It does not yet send the mandatory registry dataset, Join Game, or world data.
+The socket runtime now uses `ProtocolProfile` and `ProtocolSession` from Handshake through Play. The 26.1.2 profile validates the handshake protocol, negotiates the vanilla core known pack, sends the full synchronized registry set, completes Configuration, sends a static-overworld Play bootstrap, validates the teleport acknowledgement, and runs a bounded Keep Alive exchange. Static chunk data is not implemented yet.
 
 ## M9 — Binary NBT foundation
 
@@ -56,7 +58,7 @@ Remaining cross-cutting work:
 
 ## M11 — Minimal Configuration state
 
-Status: protocol profile and Known Packs negotiation implemented; registry data remains.
+Status: complete for the selected 26.1.2 configuration flow.
 
 Completed:
 
@@ -72,19 +74,30 @@ Completed:
 - Add an exact built-in packet table for the implemented states.
 - Disconnect mismatched clients before Login Start is consumed.
 - Negotiate the vanilla `minecraft/core/26.1.2` known pack with bounded response decoding.
+- Add all 28 required 26.1.2 synchronized registries and 382 entry identifiers.
+- Send Registry Data packets in deterministic order after Feature Flags and before Tags.
+- Disconnect during Configuration when the required core pack is declined.
 
-Remaining:
+Remaining cross-version validation:
 
-- Add the required 26.1.2 registry datasets.
-- Send Registry Data packets in the required order after Known Packs negotiation.
 - Add captured-client integration fixtures for the complete Configuration exchange.
 
 ## M12 — Minimal Play state
 
-- Send Login/Join Game data for one static dimension.
-- Send spawn position and player-position synchronization.
+Status: Play entry foundation implemented; static chunk remains.
+
+Completed:
+
+- Add a standalone deterministic `ferrum-play` payload-codec crate.
+- Send Login/Join Game data for one static overworld dimension.
+- Send default spawn and absolute player-position synchronization.
+- Validate the client's teleport acknowledgement and reject the wrong teleport ID.
+- Implement Keep Alive on the live socket path with exact response validation.
+- Keep test execution finite while the real TCP path continues periodic Keep Alive rounds.
+
+Remaining:
+
 - Send one static in-memory chunk.
-- Implement Keep Alive on the live socket path.
 - Implement system messages and graceful disconnect.
 - Add integration fixtures that replay a real client packet sequence.
 

@@ -49,6 +49,10 @@ pub enum PacketKind {
     SelectKnownPacksRequest,
     SelectKnownPacksResponse,
     FinishConfiguration,
+    PlayLogin,
+    DefaultSpawnPosition,
+    PlayerPosition,
+    AcceptTeleportation,
     PlayDisconnect,
     KeepAliveRequest,
     KeepAliveResponse,
@@ -74,9 +78,13 @@ impl PacketKind {
             | Self::SelectKnownPacksRequest
             | Self::SelectKnownPacksResponse
             | Self::FinishConfiguration => ProtocolPhase::Configuration,
-            Self::PlayDisconnect | Self::KeepAliveRequest | Self::KeepAliveResponse => {
-                ProtocolPhase::Play
-            }
+            Self::PlayLogin
+            | Self::DefaultSpawnPosition
+            | Self::PlayerPosition
+            | Self::AcceptTeleportation
+            | Self::PlayDisconnect
+            | Self::KeepAliveRequest
+            | Self::KeepAliveResponse => ProtocolPhase::Play,
         }
     }
 
@@ -90,6 +98,7 @@ impl PacketKind {
             | Self::LoginAcknowledged
             | Self::ConfigurationAcknowledged
             | Self::SelectKnownPacksResponse
+            | Self::AcceptTeleportation
             | Self::KeepAliveResponse => PacketDirection::Serverbound,
             _ => PacketDirection::Clientbound,
         }

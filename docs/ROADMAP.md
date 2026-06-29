@@ -84,6 +84,7 @@
 - Status responses include vanilla-style server list metadata: favicon, sample players, secure-chat flags, and optional hidden player counts.
 - Minecraft Java Edition `26.1.2` is the first concrete built-in profile, including strict protocol validation and vanilla Known Packs negotiation.
 - The 26.1.2 profile synchronizes all 28 data-driven registries and 382 vanilla entry identifiers using references to the accepted `minecraft/core/26.1.2` pack.
+- The runtime now emits a static-overworld Join Game bootstrap, validates teleport acknowledgement, and runs live Keep Alive exchanges.
 - Manual packet tables remain available for protocol experiments outside built-in profiles.
 - Generated reports and replay cases are ready to feed later Rust-native server subsystems.
 - Actual gameplay subsystem implementation is intentionally outside the porting kit CLI.

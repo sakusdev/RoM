@@ -7,6 +7,7 @@ members = [
     "crates/ferrum-nbt",
     "crates/ferrum-protocol",
     "crates/ferrum-configuration",
+    "crates/ferrum-play",
     "crates/ferrum-version-26-1-2",
 ]
 resolver = "2"

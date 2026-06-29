@@ -41,6 +41,13 @@ pub fn protocol_profile() -> Result<ProtocolProfile, ProfileError> {
         (PacketKind::UpdateTags, 0x0d),
         (PacketKind::SelectKnownPacksRequest, 0x0e),
         (PacketKind::SelectKnownPacksResponse, 0x07),
+        (PacketKind::PlayLogin, 0x31),
+        (PacketKind::DefaultSpawnPosition, 0x61),
+        (PacketKind::PlayerPosition, 0x48),
+        (PacketKind::AcceptTeleportation, 0x00),
+        (PacketKind::PlayDisconnect, 0x20),
+        (PacketKind::KeepAliveRequest, 0x2c),
+        (PacketKind::KeepAliveResponse, 0x1c),
     ] {
         packets.insert(kind, id)?;
     }
@@ -108,6 +115,21 @@ mod tests {
                 .require(PacketKind::SelectKnownPacksResponse)
                 .unwrap(),
             0x07
+        );
+        assert_eq!(packets.require(PacketKind::PlayLogin).unwrap(), 0x31);
+        assert_eq!(
+            packets.require(PacketKind::DefaultSpawnPosition).unwrap(),
+            0x61
+        );
+        assert_eq!(packets.require(PacketKind::PlayerPosition).unwrap(), 0x48);
+        assert_eq!(
+            packets.require(PacketKind::AcceptTeleportation).unwrap(),
+            0x00
+        );
+        assert_eq!(packets.require(PacketKind::KeepAliveRequest).unwrap(), 0x2c);
+        assert_eq!(
+            packets.require(PacketKind::KeepAliveResponse).unwrap(),
+            0x1c
         );
     }
 
