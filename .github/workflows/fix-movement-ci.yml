@@ -1,0 +1,83 @@
+name: Fix movement runtime CI
+
+on:
+  pull_request:
+    branches:
+      - master
+    types:
+      - synchronize
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      github.head_ref == 'feature/player-movement-and-chunk-view-26-1-2'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/player-movement-and-chunk-view-26-1-2
+          fetch-depth: 0
+      - name: Restore finite-test keep alive parser
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('crates/ferrum-server/src/main.rs')
+          text = path.read_text()
+          needle = '''fn run_keep_alive_loop<R: Read, W: Write>(
+              reader: &mut R,
+              writer: &mut W,
+              profile: &ProtocolProfile,
+              session: &mut ProtocolSession,
+              play_round_limit: Option<usize>,
+          ) -> Result<()> {
+              play_runtime::run_play_loop(reader, writer, profile, session, play_round_limit)
+          }
+
+          '''
+          replacement = needle + '''#[cfg(test)]
+          fn wait_for_keep_alive_response<R: Read>(
+              reader: &mut R,
+              profile: &ProtocolProfile,
+              expected_keep_alive_id: i64,
+          ) -> Result<()> {
+              let expected_packet_id = profile.packets().require(PacketKind::KeepAliveResponse)?;
+              for _ in 0..MAX_IGNORED_PLAY_PACKETS {
+                  let packet = read_packet(reader).context("cannot read keep alive response")?;
+                  let mut packet_reader = PacketReader::new(&packet);
+                  let packet_id = packet_reader.read_varint()?;
+                  if packet_id != expected_packet_id {
+                      continue;
+                  }
+                  let keep_alive_id = packet_reader.read_i64()?;
+                  if keep_alive_id != expected_keep_alive_id {
+                      bail!("expected keep alive id {expected_keep_alive_id}, got {keep_alive_id}");
+                  }
+                  if !packet_reader.take_remaining().is_empty() {
+                      bail!("keep alive response contains trailing bytes");
+                  }
+                  return Ok(());
+              }
+              bail!("keep alive response was not received within the packet limit")
+          }
+
+          '''
+          if text.count(needle) != 1:
+              raise SystemExit(f'expected one wrapper, found {text.count(needle)}')
+          path.write_text(text.replace(needle, replacement, 1))
+          PY
+          rm -f clippy-diagnostics.txt
+          rm .github/workflows/fix-movement-ci.yml
+      - name: Format
+        run: cargo fmt --all
+      - name: Commit fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Restore keep alive parser test helper"
+          git push origin HEAD:feature/player-movement-and-chunk-view-26-1-2
