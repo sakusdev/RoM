@@ -62,6 +62,12 @@ pub fn protocol_profile() -> Result<ProtocolProfile, ProfileError> {
         (PacketKind::PlayDisconnect, 0x20),
         (PacketKind::KeepAliveRequest, 0x2c),
         (PacketKind::KeepAliveResponse, 0x1c),
+        (PacketKind::ClientTickEnd, 0x0d),
+        (PacketKind::MovePlayerPosition, 0x1e),
+        (PacketKind::MovePlayerPositionRotation, 0x1f),
+        (PacketKind::MovePlayerRotation, 0x20),
+        (PacketKind::MovePlayerStatusOnly, 0x21),
+        (PacketKind::ForgetLevelChunk, 0x25),
     ] {
         packets.insert(kind, id)?;
     }
@@ -163,6 +169,26 @@ mod tests {
             packets.require(PacketKind::KeepAliveResponse).unwrap(),
             0x1c
         );
+        assert_eq!(packets.require(PacketKind::ClientTickEnd).unwrap(), 0x0d);
+        assert_eq!(
+            packets.require(PacketKind::MovePlayerPosition).unwrap(),
+            0x1e
+        );
+        assert_eq!(
+            packets
+                .require(PacketKind::MovePlayerPositionRotation)
+                .unwrap(),
+            0x1f
+        );
+        assert_eq!(
+            packets.require(PacketKind::MovePlayerRotation).unwrap(),
+            0x20
+        );
+        assert_eq!(
+            packets.require(PacketKind::MovePlayerStatusOnly).unwrap(),
+            0x21
+        );
+        assert_eq!(packets.require(PacketKind::ForgetLevelChunk).unwrap(), 0x25);
     }
 
     #[test]

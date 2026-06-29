@@ -2,6 +2,16 @@
 //!
 //! Packet IDs are version metadata and intentionally live outside this crate.
 
+mod chunk_stream;
+mod movement;
+
+pub use chunk_stream::encode_forget_level_chunk;
+pub use movement::{
+    MAX_PLAYER_COORDINATE, MovementDecodeError, MovementFlags, PlayerMovement, PlayerState,
+    decode_move_player_position, decode_move_player_position_rotation, decode_move_player_rotation,
+    decode_move_player_status,
+};
+
 use std::collections::BTreeMap;
 
 use ferrum_nbt::{Tag, encode_anonymous};

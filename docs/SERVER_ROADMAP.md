@@ -1,6 +1,6 @@
-# Ferrum Server Roadmap
+# RoM Server Roadmap
 
-Ferrum Server is a native Rust implementation of a Minecraft Java Edition-compatible server. It is distributed as platform-native binaries and must not require Java or a JVM at runtime.
+RoM is a native Rust implementation of a Minecraft Java Edition-compatible server. It is distributed as platform-native binaries and must not require Java or a JVM at runtime.
 
 ## Current implementation
 
@@ -22,11 +22,14 @@ The current server milestone provides:
 - Deterministic Play-state payload codecs
 - A built-in Minecraft Java Edition 26.1.2 profile (protocol 775)
 - Static-overworld Join Game, default spawn, player-position synchronization, and Keep Alive
-- One palette-encoded in-memory flat chunk with full skylight and chunk-batch negotiation
+- Palette-encoded in-memory flat chunks with full skylight and chunk-batch negotiation
+- All four serverbound movement packet forms with bounded decoding
+- Per-connection player position, rotation, movement flags, and current-chunk state
+- Deterministic 3×3 chunk views with cache-center updates, new chunk batches, and unloads
 - Welcome system chat and graceful Play disconnects
-- Version-neutral in-memory world coordinates, sections, block states, and biome IDs
+- Version-neutral in-memory world coordinates, sections, block states, biome IDs, and chunk views
 
-The socket runtime now uses `ProtocolProfile` and `ProtocolSession` from Handshake through Play. The 26.1.2 profile validates the handshake protocol, negotiates the vanilla core known pack, sends the full synchronized registry set, completes Configuration, sends a static-overworld Play bootstrap and one flat chunk, negotiates the chunk batch, validates the teleport acknowledgement, emits a welcome system message, and runs Keep Alive exchanges. The world remains a single immutable in-memory chunk; movement, interactions, entities, streaming, and persistence are not implemented yet.
+The socket runtime now uses `ProtocolProfile` and `ProtocolSession` from Handshake through Play. The 26.1.2 profile validates the handshake protocol, negotiates the vanilla core known pack, sends the full synchronized registry set, completes Configuration, sends the flat-overworld Play bootstrap, validates teleport and chunk-batch acknowledgements, and enters a movement-aware Play loop. The server tracks each player's authoritative position and rotation, updates the chunk-cache center only after crossing a chunk boundary, sends newly visible chunks, unloads chunks that leave the 3×3 view, and continues Keep Alive validation while processing movement. Block interactions, entities, shared world ticks, and persistence are not implemented yet.
 
 ## M9 — Binary NBT foundation
 
@@ -77,6 +80,7 @@ Completed:
 - Add an exact built-in packet table for the implemented states.
 - Disconnect mismatched clients before Login Start is consumed.
 - Negotiate the vanilla `minecraft/core/26.1.2` known pack with bounded response decoding.
+- Accept the vanilla `minecraft:brand` Configuration custom payload before Known Packs.
 - Add all 28 required 26.1.2 synchronized registries and 382 entry identifiers.
 - Send Registry Data packets in deterministic order after Feature Flags and before Tags.
 - Disconnect during Configuration when the required core pack is declined.
@@ -87,7 +91,7 @@ Remaining cross-version validation:
 
 ## M12 — Minimal Play state
 
-Status: complete for the first single-chunk 26.1.2 Play milestone.
+Status: complete for the first 26.1.2 Play bootstrap milestone.
 
 Completed:
 
@@ -96,8 +100,8 @@ Completed:
 - Send default spawn and absolute player-position synchronization.
 - Validate the client's teleport acknowledgement and reject the wrong teleport ID.
 - Implement Keep Alive on the live socket path with exact response validation.
-- Keep test execution finite while the real TCP path continues periodic Keep Alive rounds.
-- Send the chunk cache center and one deterministic flat in-memory chunk.
+- Keep test execution finite while the real TCP path continues Keep Alive rounds.
+- Send the initial chunk cache center and deterministic flat in-memory chunk.
 - Encode block-state and biome palette containers in vanilla section order.
 - Send full skylight data and negotiate Chunk Batch Start/Finished/Received.
 - Send a welcome system message and a graceful Play disconnect on bootstrap failure.
@@ -105,10 +109,37 @@ Completed:
 Remaining cross-client validation:
 
 - Add integration fixtures captured from a real 26.1.2 client.
-- Confirm the complete single-chunk join sequence against the vanilla client.
+- Confirm the complete join sequence against the vanilla client.
 - Verify initial chunk rendering, skylight, and spawn stability in a manual vanilla-client smoke test.
 
-## M13 — Persistent world foundation
+## M13 — Player movement and chunk-view streaming
+
+Status: complete for the first per-connection 26.1.2 movement milestone.
+
+Completed:
+
+- Add exact protocol-775 packet IDs for Client Tick End and all four serverbound movement packets.
+- Decode position, rotation, position-plus-rotation, and status-only movement payloads with exact lengths.
+- Reject NaN, infinity, coordinates outside the supported world range, unknown movement-flag bits, and trailing bytes.
+- Reject movement received before the initial teleport acknowledgement.
+- Store authoritative per-connection position, yaw, pitch, on-ground state, and horizontal-collision state.
+- Convert player coordinates to chunk coordinates correctly across negative boundaries.
+- Add deterministic `ChunkView` reconciliation backed by ordered sets.
+- Keep a 3×3 visible chunk set centered on the player's current chunk.
+- Update the client chunk-cache center only when the player crosses a chunk boundary.
+- Batch only newly visible flat chunks and send Forget Level Chunk for chunks leaving the view.
+- Continue accepting movement and chunk acknowledgements while Keep Alive is pending.
+- Use Client Tick End packets to advance the per-connection Keep Alive cadence without blocking movement handling.
+- Add exact-byte, malformed-input, boundary-crossing, and deterministic-set tests.
+
+Remaining runtime work:
+
+- Move from per-connection timing to a shared authoritative 20 TPS runtime.
+- Add ordered connection input queues and deterministic world mutation.
+- Add collision, movement-speed, and fall-state validation.
+- Broadcast player state to other connected clients.
+
+## M14 — Persistent world foundation
 
 Status: started with deterministic in-memory primitives.
 
@@ -118,14 +149,13 @@ Completed foundation:
 - Add region-independent chunk coordinates and version-neutral block-state and biome IDs.
 - Implement mutable 16×16×16 chunk sections and 4×4×4 biome containers.
 - Track non-air block counts incrementally.
-- Build a deterministic four-layer flat overworld chunk.
+- Build deterministic four-layer flat overworld chunks at arbitrary chunk positions.
 - Keep protocol serialization and version-specific numeric IDs outside the world crate.
 
 Remaining:
 
-- Add authoritative player movement and chunk subscription state.
-- Stream and unload chunks as the view center changes.
 - Add block mutation and interaction handling.
+- Add an authoritative shared tick loop and ordered input queues.
 - Add NBT-backed Anvil region reading.
 - Add safe asynchronous loading and saving.
 - Preserve deterministic world mutation through the authoritative tick loop.
@@ -135,6 +165,7 @@ Remaining:
 - Do not attempt all Minecraft versions at once.
 - Do not scatter packet IDs throughout gameplay code.
 - Do not treat generated Mojang code as publishable original source.
-- Network I/O may be asynchronous, but authoritative world mutations must be ordered and deterministic.
+- Network I/O may be concurrent, but authoritative world mutations must be ordered and deterministic.
 - Every externally supplied length must have a limit before allocation.
+- Reject non-finite or unreasonable movement input before mutating player state.
 - Add tests for exact wire bytes in addition to round-trip tests.
