@@ -23,7 +23,7 @@ The current server milestone provides:
 - A built-in Minecraft Java Edition 26.1.2 profile (protocol 775)
 - Static-overworld Join Game, default spawn, player-position synchronization, and Keep Alive
 
-The socket runtime now uses `ProtocolProfile` and `ProtocolSession` from Handshake through Play. The 26.1.2 profile validates the handshake protocol, negotiates the vanilla core known pack, sends the full synchronized registry set, completes Configuration, sends a static-overworld Play bootstrap, validates the teleport acknowledgement, and runs a bounded Keep Alive exchange. Static chunk data is not implemented yet.
+The socket runtime now uses `ProtocolProfile` and `ProtocolSession` from Handshake through Play. The 26.1.2 profile validates the handshake protocol, negotiates the vanilla core known pack, sends the full synchronized registry set, completes Configuration, sends a static-overworld Play bootstrap, validates the teleport acknowledgement, and runs a bounded Keep Alive exchange. This initial Play flow is intentionally static and deterministic; static chunk data is not implemented yet.
 
 ## M9 — Binary NBT foundation
 
