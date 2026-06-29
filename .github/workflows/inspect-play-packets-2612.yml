@@ -28,7 +28,9 @@ jobs:
           git apply --check /tmp/minimal-play.patch
           git apply /tmp/minimal-play.patch
           python3 - <<'PY'
+          import re
           from pathlib import Path
+
           path = Path('crates/ferrum-server/src/main.rs')
           text = path.read_text()
           text = text.replace('''#[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,18 +59,19 @@ jobs:
               handle_connection_protocol_with_play_loop(reader, writer, config, Some(1))
           }''')
           text = text.replace('play_loop: PlayLoop', 'play_round_limit: Option<usize>')
-          text = text.replace('play_loop,', 'play_round_limit,')
-          text = text.replace(
-              'run_keep_alive_loop(reader, writer, profile, session, play_loop)',
-              'run_keep_alive_loop(reader, writer, profile, session, play_round_limit)',
+          text = text.replace('play_loop', 'play_round_limit')
+          text = re.sub(
+              r'(?ms)^(\s*)if let PlayLoop::Rounds\(rounds\) = play_round_limit\s*&& completed_rounds >= rounds\s*\{\s*return Ok\(\(\)\);\s*\}',
+              lambda match: (
+                  f'{match.group(1)}if play_round_limit.is_some_and('
+                  '|rounds| completed_rounds >= rounds) {\n'
+                  f'{match.group(1)}    return Ok(());\n'
+                  f'{match.group(1)}}}'
+              ),
+              text,
           )
-          text = text.replace('''        if let PlayLoop::Rounds(rounds) = play_round_limit
-                      && completed_rounds >= rounds
-                  {
-                      return Ok(());
-                  }''', '''        if play_round_limit.is_some_and(|rounds| completed_rounds >= rounds) {
-                      return Ok(());
-                  }''')
+          if 'PlayLoop' in text or 'play_loop' in text:
+              raise SystemExit('test-only PlayLoop rewrite was incomplete')
           path.write_text(text)
           PY
           cargo fmt --all
