@@ -1,24 +1,53 @@
-name: Export current Play PR source
+name: Apply static world milestone
 
 on:
   pull_request:
     branches:
       - master
 
+permissions:
+  contents: write
+
 jobs:
-  export:
+  apply:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: feature/minimal-play-26-1-2
-      - uses: actions/upload-artifact@v4
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          name: rom-current-play-branch
-          path: |
-            Cargo.toml
-            Cargo.lock
-            README.md
-            crates
-            docs
-          if-no-files-found: error
+          components: rustfmt, clippy
+      - name: Apply implementation
+        run: |
+          base64 -d tools/static-world.patch.gz.b64 | gzip -d > /tmp/static-world.patch
+          git apply --check /tmp/static-world.patch
+          git apply /tmp/static-world.patch
+          cargo fmt --all
+          rm tools/static-world.patch.gz.b64
+          rm .github/workflows/export-current-play-branch.yml
+          rm .github/workflows/export-current-play-pr.yml
+          git fetch origin master --depth=1
+          git checkout FETCH_HEAD -- .github/workflows/ci.yml
+      - name: Validate workspace
+        run: |
+          set -o pipefail
+          {
+            cargo fmt --all --check
+            cargo clippy --workspace --all-targets -- -D warnings
+            cargo test --workspace
+          } 2>&1 | tee validation.log
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: static-world-validation-log
+          path: validation.log
+          if-no-files-found: warn
+      - name: Commit implementation
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "Send a static flat world chunk"
+          git push origin HEAD:feature/minimal-play-26-1-2
