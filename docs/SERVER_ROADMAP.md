@@ -106,6 +106,7 @@ Remaining cross-client validation:
 
 - Add integration fixtures captured from a real 26.1.2 client.
 - Confirm the complete single-chunk join sequence against the vanilla client.
+- Verify initial chunk rendering, skylight, and spawn stability in a manual vanilla-client smoke test.
 
 ## M13 — Persistent world foundation
 
