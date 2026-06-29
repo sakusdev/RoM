@@ -31,6 +31,7 @@ The native server currently supports:
 - System chat messages
 - Live Keep Alive request/response validation while movement packets continue to be processed
 - Graceful Play disconnects when bootstrap or movement validation fails
+- Version-neutral 20 TPS scheduling, bounded input queues, and deterministic per-tick mutation primitives
 
 The implemented connection flow is:
 
@@ -61,7 +62,7 @@ The world is intentionally small and deterministic while the gameplay foundation
 Not implemented yet:
 
 - Collision or movement-speed enforcement
-- A shared multi-player tick/world runtime
+- Wiring network workers and shared world state into the authoritative runtime
 - Block breaking and placement
 - Entities and entity tracking
 - Inventory and container behavior
@@ -162,6 +163,7 @@ RoM separates version-independent server behavior from version-specific wire met
 Core server crates:
 
 - `ferrum-server` — native TCP server and connection runtime
+- `ferrum-runtime` — fixed-rate ticks, bounded connection inputs, and deterministic mutation ordering
 - `ferrum-protocol` — packet tables, protocol phases, and connection state validation
 - `ferrum-configuration` — Configuration-state payload codecs
 - `ferrum-play` — bounded Play-state wire codecs and movement decoding
@@ -175,6 +177,8 @@ Design rules:
 - Version-specific packet IDs stay outside gameplay code
 - Untrusted lengths are bounded before allocation
 - NaN, infinity, invalid movement flags, and out-of-range coordinates are rejected
+- Connection inputs are globally bounded and drained in stable fair rounds
+- Tick catch-up is capped so overload cannot create an unbounded catch-up spiral
 - Authoritative state transitions and loaded-chunk set differences remain deterministic
 - Wire codecs are tested with exact-byte fixtures
 - Unsupported protocol input fails explicitly instead of being guessed
@@ -183,7 +187,7 @@ Design rules:
 
 The next server milestones are:
 
-1. Add an authoritative 20 TPS world/runtime loop and ordered input queues
+1. Wire network workers and shared world state into the authoritative 20 TPS runtime
 2. Add mutable block storage and block breaking/placement
 3. Broadcast block and player changes across connections
 4. Add entities and entity tracking
