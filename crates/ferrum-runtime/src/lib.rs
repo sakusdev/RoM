@@ -155,7 +155,10 @@ impl<T> BoundedInputQueue<T> {
 
     /// Remove all queued input and sequence state for a disconnected client.
     pub fn remove_connection(&mut self, connection: ConnectionId) -> usize {
-        let removed = self.pending.remove(&connection).map_or(0, |queue| queue.len());
+        let removed = self
+            .pending
+            .remove(&connection)
+            .map_or(0, |queue| queue.len());
         self.len -= removed;
         self.next_sequence.remove(&connection);
         removed
@@ -321,11 +324,7 @@ pub struct DeterministicRuntime<S, E> {
 
 impl<S, E> DeterministicRuntime<S, E> {
     #[must_use]
-    pub fn new(
-        state: S,
-        queue_capacity: NonZeroUsize,
-        max_events_per_tick: NonZeroUsize,
-    ) -> Self {
+    pub fn new(state: S, queue_capacity: NonZeroUsize, max_events_per_tick: NonZeroUsize) -> Self {
         Self {
             state,
             inputs: BoundedInputQueue::new(queue_capacity),
@@ -385,18 +384,9 @@ mod tests {
     #[test]
     fn assigns_independent_monotonic_sequences() {
         let mut queue = BoundedInputQueue::try_new(8).unwrap();
-        assert_eq!(
-            queue.push(ConnectionId::new(2), "a").unwrap().get(),
-            0
-        );
-        assert_eq!(
-            queue.push(ConnectionId::new(2), "b").unwrap().get(),
-            1
-        );
-        assert_eq!(
-            queue.push(ConnectionId::new(9), "c").unwrap().get(),
-            0
-        );
+        assert_eq!(queue.push(ConnectionId::new(2), "a").unwrap().get(), 0);
+        assert_eq!(queue.push(ConnectionId::new(2), "b").unwrap().get(), 1);
+        assert_eq!(queue.push(ConnectionId::new(9), "c").unwrap().get(), 0);
     }
 
     #[test]
