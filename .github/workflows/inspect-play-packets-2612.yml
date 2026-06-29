@@ -30,7 +30,8 @@ jobs:
           rm tools/minimal-play.patch.part-*
           rm tools/inspect-play-packets-2612.sh
           rm .github/workflows/inspect-play-packets-2612.yml
-          git checkout origin/master -- .github/workflows/ci.yml
+          git fetch origin master --depth=1
+          git checkout FETCH_HEAD -- .github/workflows/ci.yml
       - name: Validate workspace
         run: |
           cargo fmt --all --check
