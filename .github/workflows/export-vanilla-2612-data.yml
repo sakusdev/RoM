@@ -1,74 +1,20 @@
-name: Capture vanilla 26.1.2 registries
+name: Export registry branch source
 
 on:
   push:
     branches:
       - feature/registry-data-26-1-2
-  pull_request:
-    branches:
-      - master
 
 jobs:
-  capture:
+  export:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: feature/registry-data-26-1-2
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '25'
-      - name: Download and verify official server
-        run: |
-          curl --fail --location --retry 3 \
-            --output server-26.1.2.jar \
-            https://piston-data.mojang.com/v1/objects/97ccd4c0ed3f81bbb7bfacddd1090b0c56f9bc51/server.jar
-          echo '97ccd4c0ed3f81bbb7bfacddd1090b0c56f9bc51  server-26.1.2.jar' | sha1sum --check
-      - name: Start offline vanilla server
-        run: |
-          mkdir vanilla-server
-          cp server-26.1.2.jar vanilla-server/server.jar
-          cat > vanilla-server/eula.txt <<'EOF'
-          eula=true
-          EOF
-          cat > vanilla-server/server.properties <<'EOF'
-          online-mode=false
-          server-port=25566
-          network-compression-threshold=256
-          view-distance=2
-          simulation-distance=2
-          spawn-protection=0
-          EOF
-          cd vanilla-server
-          java -Xms512M -Xmx1G -jar server.jar nogui > server.log 2>&1 &
-          echo $! > server.pid
-          for attempt in $(seq 1 180); do
-            if grep -q 'Done (' server.log; then
-              exit 0
-            fi
-            if ! kill -0 "$(cat server.pid)" 2>/dev/null; then
-              cat server.log
-              exit 1
-            fi
-            sleep 1
-          done
-          cat server.log
-          echo 'vanilla server did not finish startup' >&2
-          exit 1
-      - name: Capture configuration transcript
-        run: python3 tools/capture_registry_manifest_2612.py
-      - name: Stop server
-        if: always()
-        run: |
-          if test -f vanilla-server/server.pid; then
-            kill "$(cat vanilla-server/server.pid)" || true
-          fi
       - uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: vanilla-26.1.2-registry-capture
-          path: |
-            registry-manifest-26.1.2.json
-            vanilla-server/server.log
-          if-no-files-found: warn
+          name: rom-registry-branch-source
+          path: .
+          include-hidden-files: true
+          if-no-files-found: error
