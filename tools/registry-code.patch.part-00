@@ -1,0 +1,220 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index a24477e..0621f52 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -225,6 +225,7 @@ dependencies = [
+  "anyhow",
+  "clap",
+  "ferrum-configuration",
++ "ferrum-nbt",
+  "ferrum-protocol",
+  "ferrum-version-26-1-2",
+  "serde_json",
+diff --git a/README.md b/README.md
+index 389d303..b28c465 100644
+--- a/README.md
++++ b/README.md
+@@ -104,6 +104,7 @@ Current server runtime scope:
+ - Offline-mode Login Success with Java-compatible offline UUIDs
+ - Login Acknowledged and Configuration-state transitions
+ - Vanilla core Known Packs negotiation
++- All 28 synchronized 26.1.2 Registry Data packets (382 vanilla entries)
+ - Feature Flags, Tags, and Finish Configuration packets
+ - Strict protocol mismatch disconnects for built-in profiles
+ - Manual packet-ID profiles remain available for protocol experiments
+@@ -130,7 +131,7 @@ features = "minecraft:vanilla"
+ 
+ The same configuration is available at `examples/server-26.1.2.toml`. A built-in profile owns its version name, protocol number, and packet IDs, so a `[protocol]` section must not be added alongside `profile = "26.1.2"`.
+ 
+-The current server reaches the Play protocol state after Configuration, but it does **not** yet send the mandatory registry dataset, Join Game, chunks, or player-position packets. A matching vanilla client therefore cannot enter a playable world yet.
++The current server synchronizes the complete 26.1.2 vanilla registry manifest and reaches the Play protocol state after Configuration. It does **not** yet send Join Game, chunks, or player-position packets, so a matching vanilla client cannot enter a playable world yet.
+ 
+ Tagged releases matching `v*` run `.github/workflows/release.yml`, build `ferrum-server` with Cargo's `release` profile on each supported native runner, package the binary with README and LICENSE, and attach the archives to the GitHub Release.
+ 
+diff --git a/crates/ferrum-server/Cargo.toml b/crates/ferrum-server/Cargo.toml
+index 83190c1..589d295 100644
+--- a/crates/ferrum-server/Cargo.toml
++++ b/crates/ferrum-server/Cargo.toml
+@@ -14,6 +14,7 @@ path = "src/main.rs"
+ anyhow.workspace = true
+ clap.workspace = true
+ ferrum-configuration = { path = "../ferrum-configuration" }
++ferrum-nbt = { path = "../ferrum-nbt" }
+ ferrum-protocol = { path = "../ferrum-protocol" }
+ ferrum-version-26-1-2 = { path = "../ferrum-version-26-1-2" }
+ serde_json.workspace = true
+diff --git a/crates/ferrum-server/src/main.rs b/crates/ferrum-server/src/main.rs
+index 08b0f26..244115e 100644
+--- a/crates/ferrum-server/src/main.rs
++++ b/crates/ferrum-server/src/main.rs
+@@ -9,8 +9,9 @@ use codec::{
+ };
+ use ferrum_configuration::{
+     KnownPack, KnownPackDecodeLimits, decode_known_packs, encode_feature_flags, encode_known_packs,
+-    encode_tags,
++    encode_registry_data, encode_tags,
+ };
++use ferrum_nbt::{Tag, encode_anonymous};
+ use ferrum_protocol::{HandshakeIntent, PacketKind, PacketTable, ProtocolProfile, ProtocolSession};
+ use ferrum_version_26_1_2 as version_26_1_2;
+ use identity::offline_player_identity;
+@@ -813,7 +814,19 @@ fn handle_configuration_protocol<R: Read, W: Write>(
+     }
+     session.login_acknowledged()?;
+ 
+-    negotiate_known_packs(reader, writer, config, profile)?;
++    let accepted_known_packs = negotiate_known_packs(reader, writer, config, profile)?;
++    if config.profile_name.as_deref() == Some(version_26_1_2::PROFILE_NAME)
++        && !version_26_1_2::accepts_vanilla_core_pack(&accepted_known_packs)
++    {
++        write_configuration_disconnect(
++            writer,
++            profile,
++            "Minecraft 26.1.2 requires the bundled minecraft/core/26.1.2 data pack",
++        )?;
++        session.disconnect();
++        writer.flush()?;
++        return Ok(());
++    }
+ 
+     if let Some(packet_id) = profile.packets().id(PacketKind::FeatureFlags) {
+         let body = encode_feature_flags(&config.configuration_features)?;
+@@ -825,6 +838,8 @@ fn handle_configuration_protocol<R: Read, W: Write>(
+             })?,
+         )?;
+     }
++    send_registry_data(writer, config, profile)?;
++
+     if let Some(packet_id) = profile.packets().id(PacketKind::UpdateTags) {
+         let body = encode_tags(&[])?;
+         write_packet(
+@@ -863,6 +878,51 @@ fn handle_configuration_protocol<R: Read, W: Write>(
+     Ok(())
+ }
+ 
++fn send_registry_data<W: Write>(
++    writer: &mut W,
++    config: &ServerConfig,
++    profile: &ProtocolProfile,
++) -> Result<()> {
++    if config.profile_name.as_deref() != Some(version_26_1_2::PROFILE_NAME) {
++        return Ok(());
++    }
++
++    let packet_id = profile.packets().require(PacketKind::RegistryData)?;
++    for registry in version_26_1_2::configuration_registries() {
++        let body = encode_registry_data(&registry)?;
++        write_packet(
++            writer,
++            &build_packet(packet_id, |output| {
++                output.extend_from_slice(&body);
++                Ok(())
++            })?,
++        )?;
++    }
++    Ok(())
++}
++
++fn write_configuration_disconnect<W: Write>(
++    writer: &mut W,
++    profile: &ProtocolProfile,
++    message: &str,
++) -> Result<()> {
++    let mut body = Vec::new();
++    encode_anonymous(&mut body, &Tag::String(message.to_owned()))?;
++    write_packet(
++        writer,
++        &build_packet(
++            profile
++                .packets()
++                .require(PacketKind::ConfigurationDisconnect)?,
++            |output| {
++                output.extend_from_slice(&body);
++                Ok(())
++            },
++        )?,
++    )?;
++    Ok(())
++}
++
+ fn negotiate_known_packs<R: Read, W: Write>(
+     reader: &mut R,
+     writer: &mut W,
+@@ -1435,6 +1495,17 @@ mod tests {
+         assert_eq!(features_reader.read_varint().unwrap(), 1);
+         assert_eq!(features_reader.read_string().unwrap(), "minecraft:vanilla");
+ 
++        for expected in version_26_1_2::SYNCHRONIZED_REGISTRIES {
++            let packet = read_packet(&mut cursor).unwrap();
++            let mut registry_reader = PacketReader::new(&packet);
++            assert_eq!(registry_reader.read_varint().unwrap(), 0x07);
++            assert_eq!(registry_reader.read_string().unwrap(), expected.id);
++            assert_eq!(
++                registry_reader.read_varint().unwrap(),
++                i32::try_from(expected.entries.len()).unwrap()
++            );
++        }
++
+         let tags = read_packet(&mut cursor).unwrap();
+         let mut tags_reader = PacketReader::new(&tags);
+         assert_eq!(tags_reader.read_varint().unwrap(), 0x0d);
+@@ -1444,6 +1515,74 @@ mod tests {
+         assert_eq!(PacketReader::new(&finish).read_varint().unwrap(), 0x03);
+     }
+ 
++    #[test]
++    fn builtin_profile_disconnects_when_core_pack_is_declined() {
++        let mut config = ServerConfig::for_profile(Some("26.1.2")).unwrap();
++        config.allow_offline_login = true;
++
++        let mut input = Vec::new();
++        write_packet(
++            &mut input,
++            &build_packet(0, |body| {
++                write_varint_vec(body, 775);
++                write_string(body, "localhost")?;
++                body.extend_from_slice(&25565u16.to_be_bytes());
++                write_varint_vec(body, 2);
++                Ok(())
++            })
++            .unwrap(),
++        )
++        .unwrap();
++        write_packet(
++            &mut input,
++            &build_packet(0, |body| {
++                write_string(body, "Steve")?;
++                body.extend_from_slice(&[0; 16]);
++                Ok(())
++            })
++            .unwrap(),
++        )
++        .unwrap();
++        write_packet(&mut input, &build_packet(0x03, |_| Ok(())).unwrap()).unwrap();
++        let declined = encode_known_packs(&[]).unwrap();
++        write_packet(
++            &mut input,
++            &build_packet(0x07, |body| {
++                body.extend_from_slice(&declined);
++                Ok(())
++            })
++            .unwrap(),
++        )
++        .unwrap();
++
++        let mut output = Vec::new();
++        handle_connection_protocol(Cursor::new(input), &mut output, &config).unwrap();
++        let mut cursor = Cursor::new(output);
++
++        assert_eq!(
++            PacketReader::new(&read_packet(&mut cursor).unwrap())
++                .read_varint()
++                .unwrap(),
++            0x02
++        );
++        assert_eq!(
++            PacketReader::new(&read_packet(&mut cursor).unwrap())
++                .read_varint()
++                .unwrap(),
++            0x0e
++        );

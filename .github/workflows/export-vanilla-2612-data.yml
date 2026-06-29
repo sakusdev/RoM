@@ -1,23 +1,10 @@
 name: Export registry branch source
 
 on:
-  push:
-    branches:
-      - feature/registry-data-26-1-2
-  pull_request:
-    branches:
-      - master
+  workflow_dispatch:
 
 jobs:
-  export:
+  disabled:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: feature/registry-data-26-1-2
-      - uses: actions/upload-artifact@v4
-        with:
-          name: rom-registry-branch-source
-          path: .
-          include-hidden-files: true
-          if-no-files-found: error
+      - run: echo "Source export complete."

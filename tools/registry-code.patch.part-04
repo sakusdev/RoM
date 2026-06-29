@@ -1,0 +1,216 @@
++    "minecraft:feel_goat_horn",
++    "minecraft:ponder_goat_horn",
++    "minecraft:seek_goat_horn",
++    "minecraft:sing_goat_horn",
++    "minecraft:yearn_goat_horn",
++];
++
++static REGISTRY_TEST_ENVIRONMENT: &[&str] = &["minecraft:default"];
++
++static REGISTRY_TEST_INSTANCE: &[&str] = &["minecraft:always_pass"];
++
++static REGISTRY_DIALOG: &[&str] = &[
++    "minecraft:custom_options",
++    "minecraft:quick_actions",
++    "minecraft:server_links",
++];
++
++static REGISTRY_WORLD_CLOCK: &[&str] = &["minecraft:overworld", "minecraft:the_end"];
++
++static REGISTRY_TIMELINE: &[&str] = &[
++    "minecraft:day",
++    "minecraft:early_game",
++    "minecraft:moon",
++    "minecraft:villager_schedule",
++];
++
++/// Build Registry Data bodies that reference the accepted vanilla core pack.
++#[must_use]
++pub fn configuration_registries() -> Vec<RegistryData> {
++    SYNCHRONIZED_REGISTRIES
++        .iter()
++        .map(|registry| {
++            RegistryData::new(
++                registry.id,
++                registry
++                    .entries
++                    .iter()
++                    .map(|entry| RegistryEntry::new(*entry, None))
++                    .collect(),
++            )
++        })
++        .collect()
++}
+diff --git a/docs/ROADMAP.md b/docs/ROADMAP.md
+index 2f712c5..a699d80 100644
+--- a/docs/ROADMAP.md
++++ b/docs/ROADMAP.md
+@@ -82,6 +82,8 @@
+ - Connections are handled independently so slow clients do not block status responses.
+ - Packet framing, VarInt, string, and packet-reader code is isolated in the server codec module.
+ - Status responses include vanilla-style server list metadata: favicon, sample players, secure-chat flags, and optional hidden player counts.
+-- Minecraft Java Edition `26.*.*` status metadata and packet IDs are configurable because protocol numbers and packet tables may shift across experiment snapshots.
++- Minecraft Java Edition `26.1.2` is the first concrete built-in profile, including strict protocol validation and vanilla Known Packs negotiation.
++- The 26.1.2 profile synchronizes all 28 data-driven registries and 382 vanilla entry identifiers using references to the accepted `minecraft/core/26.1.2` pack.
++- Manual packet tables remain available for protocol experiments outside built-in profiles.
+ - Generated reports and replay cases are ready to feed later Rust-native server subsystems.
+ - Actual gameplay subsystem implementation is intentionally outside the porting kit CLI.
+diff --git a/tools/generate_registry_manifest_2612.py b/tools/generate_registry_manifest_2612.py
+new file mode 100755
+index 0000000..c085293
+--- /dev/null
++++ b/tools/generate_registry_manifest_2612.py
+@@ -0,0 +1,153 @@
++#!/usr/bin/env python3
++"""Generate the Rust 26.1.2 synchronized-registry manifest.
++
++First generate the official vanilla data pack with Java 25:
++
++    java -DbundlerMainClass=net.minecraft.data.Main \
++      -jar server-26.1.2.jar --server --reports
++
++Then run:
++
++    python tools/generate_registry_manifest_2612.py generated/data \
++      crates/ferrum-version-26-1-2/src/registries.rs
++"""
++
++from __future__ import annotations
++
++import argparse
++import hashlib
++from pathlib import Path
++
++MINECRAFT_VERSION = "26.1.2"
++OFFICIAL_SERVER_SHA1 = "97ccd4c0ed3f81bbb7bfacddd1090b0c56f9bc51"
++SYNCHRONIZED_REGISTRIES = (
++    "minecraft:worldgen/biome",
++    "minecraft:chat_type",
++    "minecraft:trim_pattern",
++    "minecraft:trim_material",
++    "minecraft:wolf_variant",
++    "minecraft:wolf_sound_variant",
++    "minecraft:pig_variant",
++    "minecraft:pig_sound_variant",
++    "minecraft:frog_variant",
++    "minecraft:cat_variant",
++    "minecraft:cat_sound_variant",
++    "minecraft:cow_sound_variant",
++    "minecraft:cow_variant",
++    "minecraft:chicken_sound_variant",
++    "minecraft:chicken_variant",
++    "minecraft:zombie_nautilus_variant",
++    "minecraft:painting_variant",
++    "minecraft:dimension_type",
++    "minecraft:damage_type",
++    "minecraft:banner_pattern",
++    "minecraft:enchantment",
++    "minecraft:jukebox_song",
++    "minecraft:instrument",
++    "minecraft:test_environment",
++    "minecraft:test_instance",
++    "minecraft:dialog",
++    "minecraft:world_clock",
++    "minecraft:timeline",
++)
++
++
++def rust_constant(registry_id: str) -> str:
++    return "REGISTRY_" + registry_id.split(":", 1)[1].upper().replace("/", "_").replace("-", "_")
++
++
++def collect(data_root: Path) -> list[tuple[str, list[str]]]:
++    manifest: list[tuple[str, list[str]]] = []
++    for registry_id in SYNCHRONIZED_REGISTRIES:
++        namespace, path = registry_id.split(":", 1)
++        registry_root = data_root / namespace / path
++        files = sorted(registry_root.rglob("*.json"))
++        if not files:
++            raise SystemExit(f"registry has no generated entries: {registry_id} ({registry_root})")
++        entries = [
++            f"{namespace}:{file.relative_to(registry_root).with_suffix('').as_posix()}"
++            for file in files
++        ]
++        manifest.append((registry_id, entries))
++    return manifest
++
++
++def render(manifest: list[tuple[str, list[str]]]) -> str:
++    canonical = "".join(
++        registry_id + "\0" + "\0".join(entries) + "\n"
++        for registry_id, entries in manifest
++    ).encode()
++    digest = hashlib.sha256(canonical).hexdigest()
++    entry_count = sum(len(entries) for _, entries in manifest)
++
++    lines = [
++        "//! Generated Minecraft Java Edition 26.1.2 synchronized registry manifest.\n",
++        "//!\n",
++        "//! Entry identifiers were generated from the SHA-1-verified official 26.1.2\n",
++        "//! server data pack. Registry order follows the vanilla synchronized-registry\n",
++        "//! declaration; entries are in deterministic resource-key order, matching the\n",
++        "//! vanilla known-pack registry loader. Values are omitted on the wire only after\n",
++        "//! the client accepts `minecraft/core/26.1.2`.\n\n",
++        "use ferrum_configuration::{RegistryData, RegistryEntry};\n\n",
++        f"pub const REGISTRY_COUNT: usize = {len(manifest)};\n",
++        f"pub const REGISTRY_ENTRY_COUNT: usize = {entry_count};\n",
++        f'pub const REGISTRY_MANIFEST_SHA256: &str = "{digest}";\n',
++        f'pub const OFFICIAL_SERVER_SHA1: &str = "{OFFICIAL_SERVER_SHA1}";\n\n',
++        "#[derive(Debug, Clone, Copy, PartialEq, Eq)]\n",
++        "pub struct RegistryManifest {\n",
++        "    pub id: &'static str,\n",
++        "    pub entries: &'static [&'static str],\n",
++        "}\n\n",
++        "pub static SYNCHRONIZED_REGISTRIES: &[RegistryManifest] = &[\n",
++    ]
++    for registry_id, _ in manifest:
++        lines.append(
++            f'    RegistryManifest {{ id: "{registry_id}", entries: {rust_constant(registry_id)} }},\n'
++        )
++    lines.append("];\n\n")
++
++    for registry_id, entries in manifest:
++        lines.append(f"static {rust_constant(registry_id)}: &[&str] = &[\n")
++        lines.extend(f'    "{entry}",\n' for entry in entries)
++        lines.append("];\n\n")
++
++    lines.extend(
++        [
++            "/// Build Registry Data bodies that reference the accepted vanilla core pack.\n",
++            "#[must_use]\n",
++            "pub fn configuration_registries() -> Vec<RegistryData> {\n",
++            "    SYNCHRONIZED_REGISTRIES\n",
++            "        .iter()\n",
++            "        .map(|registry| {\n",
++            "            RegistryData::new(\n",
++            "                registry.id,\n",
++            "                registry\n",
++            "                    .entries\n",
++            "                    .iter()\n",
++            "                    .map(|entry| RegistryEntry::new(*entry, None))\n",
++            "                    .collect(),\n",
++            "            )\n",
++            "        })\n",
++            "        .collect()\n",
++            "}\n",
++        ]
++    )
++    return "".join(lines)
++
++
++def main() -> None:
++    parser = argparse.ArgumentParser()
++    parser.add_argument("data_root", type=Path)
++    parser.add_argument("output", type=Path)
++    args = parser.parse_args()
++    manifest = collect(args.data_root)
++    args.output.parent.mkdir(parents=True, exist_ok=True)
++    args.output.write_text(render(manifest), encoding="utf-8")
++    print(
++        f"generated {args.output}: {len(manifest)} registries, "
++        f"{sum(len(entries) for _, entries in manifest)} entries"
++    )
++
++
++if __name__ == "__main__":
++    main()

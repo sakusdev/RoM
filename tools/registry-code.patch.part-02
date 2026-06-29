@@ -1,0 +1,220 @@
++        entries: REGISTRY_BANNER_PATTERN,
++    },
++    RegistryManifest {
++        id: "minecraft:enchantment",
++        entries: REGISTRY_ENCHANTMENT,
++    },
++    RegistryManifest {
++        id: "minecraft:jukebox_song",
++        entries: REGISTRY_JUKEBOX_SONG,
++    },
++    RegistryManifest {
++        id: "minecraft:instrument",
++        entries: REGISTRY_INSTRUMENT,
++    },
++    RegistryManifest {
++        id: "minecraft:test_environment",
++        entries: REGISTRY_TEST_ENVIRONMENT,
++    },
++    RegistryManifest {
++        id: "minecraft:test_instance",
++        entries: REGISTRY_TEST_INSTANCE,
++    },
++    RegistryManifest {
++        id: "minecraft:dialog",
++        entries: REGISTRY_DIALOG,
++    },
++    RegistryManifest {
++        id: "minecraft:world_clock",
++        entries: REGISTRY_WORLD_CLOCK,
++    },
++    RegistryManifest {
++        id: "minecraft:timeline",
++        entries: REGISTRY_TIMELINE,
++    },
++];
++
++static REGISTRY_WORLDGEN_BIOME: &[&str] = &[
++    "minecraft:badlands",
++    "minecraft:bamboo_jungle",
++    "minecraft:basalt_deltas",
++    "minecraft:beach",
++    "minecraft:birch_forest",
++    "minecraft:cherry_grove",
++    "minecraft:cold_ocean",
++    "minecraft:crimson_forest",
++    "minecraft:dark_forest",
++    "minecraft:deep_cold_ocean",
++    "minecraft:deep_dark",
++    "minecraft:deep_frozen_ocean",
++    "minecraft:deep_lukewarm_ocean",
++    "minecraft:deep_ocean",
++    "minecraft:desert",
++    "minecraft:dripstone_caves",
++    "minecraft:end_barrens",
++    "minecraft:end_highlands",
++    "minecraft:end_midlands",
++    "minecraft:eroded_badlands",
++    "minecraft:flower_forest",
++    "minecraft:forest",
++    "minecraft:frozen_ocean",
++    "minecraft:frozen_peaks",
++    "minecraft:frozen_river",
++    "minecraft:grove",
++    "minecraft:ice_spikes",
++    "minecraft:jagged_peaks",
++    "minecraft:jungle",
++    "minecraft:lukewarm_ocean",
++    "minecraft:lush_caves",
++    "minecraft:mangrove_swamp",
++    "minecraft:meadow",
++    "minecraft:mushroom_fields",
++    "minecraft:nether_wastes",
++    "minecraft:ocean",
++    "minecraft:old_growth_birch_forest",
++    "minecraft:old_growth_pine_taiga",
++    "minecraft:old_growth_spruce_taiga",
++    "minecraft:pale_garden",
++    "minecraft:plains",
++    "minecraft:river",
++    "minecraft:savanna",
++    "minecraft:savanna_plateau",
++    "minecraft:small_end_islands",
++    "minecraft:snowy_beach",
++    "minecraft:snowy_plains",
++    "minecraft:snowy_slopes",
++    "minecraft:snowy_taiga",
++    "minecraft:soul_sand_valley",
++    "minecraft:sparse_jungle",
++    "minecraft:stony_peaks",
++    "minecraft:stony_shore",
++    "minecraft:sunflower_plains",
++    "minecraft:swamp",
++    "minecraft:taiga",
++    "minecraft:the_end",
++    "minecraft:the_void",
++    "minecraft:warm_ocean",
++    "minecraft:warped_forest",
++    "minecraft:windswept_forest",
++    "minecraft:windswept_gravelly_hills",
++    "minecraft:windswept_hills",
++    "minecraft:windswept_savanna",
++    "minecraft:wooded_badlands",
++];
++
++static REGISTRY_CHAT_TYPE: &[&str] = &[
++    "minecraft:chat",
++    "minecraft:emote_command",
++    "minecraft:msg_command_incoming",
++    "minecraft:msg_command_outgoing",
++    "minecraft:say_command",
++    "minecraft:team_msg_command_incoming",
++    "minecraft:team_msg_command_outgoing",
++];
++
++static REGISTRY_TRIM_PATTERN: &[&str] = &[
++    "minecraft:bolt",
++    "minecraft:coast",
++    "minecraft:dune",
++    "minecraft:eye",
++    "minecraft:flow",
++    "minecraft:host",
++    "minecraft:raiser",
++    "minecraft:rib",
++    "minecraft:sentry",
++    "minecraft:shaper",
++    "minecraft:silence",
++    "minecraft:snout",
++    "minecraft:spire",
++    "minecraft:tide",
++    "minecraft:vex",
++    "minecraft:ward",
++    "minecraft:wayfinder",
++    "minecraft:wild",
++];
++
++static REGISTRY_TRIM_MATERIAL: &[&str] = &[
++    "minecraft:amethyst",
++    "minecraft:copper",
++    "minecraft:diamond",
++    "minecraft:emerald",
++    "minecraft:gold",
++    "minecraft:iron",
++    "minecraft:lapis",
++    "minecraft:netherite",
++    "minecraft:quartz",
++    "minecraft:redstone",
++    "minecraft:resin",
++];
++
++static REGISTRY_WOLF_VARIANT: &[&str] = &[
++    "minecraft:ashen",
++    "minecraft:black",
++    "minecraft:chestnut",
++    "minecraft:pale",
++    "minecraft:rusty",
++    "minecraft:snowy",
++    "minecraft:spotted",
++    "minecraft:striped",
++    "minecraft:woods",
++];
++
++static REGISTRY_WOLF_SOUND_VARIANT: &[&str] = &[
++    "minecraft:angry",
++    "minecraft:big",
++    "minecraft:classic",
++    "minecraft:cute",
++    "minecraft:grumpy",
++    "minecraft:puglin",
++    "minecraft:sad",
++];
++
++static REGISTRY_PIG_VARIANT: &[&str] = &["minecraft:cold", "minecraft:temperate", "minecraft:warm"];
++
++static REGISTRY_PIG_SOUND_VARIANT: &[&str] =
++    &["minecraft:big", "minecraft:classic", "minecraft:mini"];
++
++static REGISTRY_FROG_VARIANT: &[&str] =
++    &["minecraft:cold", "minecraft:temperate", "minecraft:warm"];
++
++static REGISTRY_CAT_VARIANT: &[&str] = &[
++    "minecraft:all_black",
++    "minecraft:black",
++    "minecraft:british_shorthair",
++    "minecraft:calico",
++    "minecraft:jellie",
++    "minecraft:persian",
++    "minecraft:ragdoll",
++    "minecraft:red",
++    "minecraft:siamese",
++    "minecraft:tabby",
++    "minecraft:white",
++];
++
++static REGISTRY_CAT_SOUND_VARIANT: &[&str] = &["minecraft:classic", "minecraft:royal"];
++
++static REGISTRY_COW_SOUND_VARIANT: &[&str] = &["minecraft:classic", "minecraft:moody"];
++
++static REGISTRY_COW_VARIANT: &[&str] = &["minecraft:cold", "minecraft:temperate", "minecraft:warm"];
++
++static REGISTRY_CHICKEN_SOUND_VARIANT: &[&str] = &["minecraft:classic", "minecraft:picky"];
++
++static REGISTRY_CHICKEN_VARIANT: &[&str] =
++    &["minecraft:cold", "minecraft:temperate", "minecraft:warm"];
++
++static REGISTRY_ZOMBIE_NAUTILUS_VARIANT: &[&str] = &["minecraft:temperate", "minecraft:warm"];
++
++static REGISTRY_PAINTING_VARIANT: &[&str] = &[
++    "minecraft:alban",
++    "minecraft:aztec",
++    "minecraft:aztec2",
++    "minecraft:backyard",
++    "minecraft:baroque",
++    "minecraft:bomb",
++    "minecraft:bouquet",
++    "minecraft:burning_skull",
++    "minecraft:bust",
++    "minecraft:cavebird",
++    "minecraft:changing",
++    "minecraft:cotan",
++    "minecraft:courbet",
