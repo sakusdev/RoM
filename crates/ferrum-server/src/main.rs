@@ -2098,7 +2098,12 @@ mod tests {
         assert_eq!(level_chunk_reader.read_varint().unwrap(), 0x2d);
         assert_eq!(
             level_chunk_reader.take_remaining(),
-            encode_level_chunk_with_light(&static_chunk().unwrap()).unwrap()
+            encode_level_chunk_with_light(
+                &play_runtime::SharedWorld::static_flat()
+                    .chunk_snapshot(ChunkPos { x: 0, z: 0 })
+                    .unwrap(),
+            )
+            .unwrap()
         );
 
         let chunk_batch_finished = read_packet(&mut cursor).unwrap();
