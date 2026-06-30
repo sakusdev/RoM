@@ -53,19 +53,13 @@ jobs:
           marker = '''    #[test]
     fn rejects_invalid_registry_json() {'''
           test = '''    #[test]
-    fn rejects_mismatched_or_invalid_embedded_jar_provenance() {
+    fn rejects_mismatched_embedded_jar_version() {
         let directory = tempdir().unwrap();
         let game_jar = build_game_jar();
         let outer = build_outer_jar(&game_jar);
         let path = directory.path().join("server.jar");
-        fs::write(&path, &outer).unwrap();
+        fs::write(&path, outer).unwrap();
         assert!(resolve_game_jar(&path, "different-version").is_err());
-
-        let broken = String::from_utf8(outer)
-            .err()
-            .map(|_| ())
-            .is_none();
-        assert!(broken);
     }
 
 '''
