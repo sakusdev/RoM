@@ -24,15 +24,14 @@ jobs:
           ref: feature/rompack-generation
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
-      - name: Capture integration diagnostics
+      - name: Repair and apply integration patch
         run: |
-          set +e
-          {
-            python3 - <<'PY'
+          python3 - <<'PY'
           from pathlib import Path
 
           path = Path('tools/apply_rompack_generation_patch.py')
           text = path.read_text(encoding='utf-8')
+
           marker = '''replace_between(
               "docs/BOOTSTRAP.md",
               "## Planned next stages",'''
@@ -52,7 +51,38 @@ jobs:
               "4. Preserve bounded decoding, deterministic ordering, source hashes, and local-only artifact boundaries for every new section.\\n",
           )
           '''
-          path.write_text(text[:index] + replacement, encoding='utf-8')
+          text = text[:index] + replacement
+
+          old_status = '''replace_once(
+              "crates/rom-bootstrap/src/main.rs",
+              "                println!(\\"Native server installed: {}\\", report.native_server_installed);\\n",
+              "                println!(\\"Version pack verified: {}\\", report.version_pack_verified);\\n"
+              "                if let Some(path) = &report.version_pack_path {\\n"
+              "                    println!(\\"Version pack: {}\\", path.display());\\n"
+              "                }\\n"
+              "                println!(\\"Native server installed: {}\\", report.native_server_installed);\\n",
+          )
+          '''
+          new_status = '''replace_once(
+              "crates/rom-bootstrap/src/main.rs",
+              "                println!(\\n"
+              "                    \\"Native server installed: {}\\",\\n"
+              "                    report.native_server_installed\\n"
+              "                );\\n",
+              "                println!(\\"Version pack verified: {}\\", report.version_pack_verified);\\n"
+              "                if let Some(path) = &report.version_pack_path {\\n"
+              "                    println!(\\"Version pack: {}\\", path.display());\\n"
+              "                }\\n"
+              "                println!(\\n"
+              "                    \\"Native server installed: {}\\",\\n"
+              "                    report.native_server_installed\\n"
+              "                );\\n",
+          )
+          '''
+          if text.count(old_status) != 1:
+              raise SystemExit(f'expected one status patch, found {text.count(old_status)}')
+          text = text.replace(old_status, new_status, 1)
+          path.write_text(text, encoding='utf-8')
 
           rompack = Path('crates/ferrum-rompack/src/lib.rs')
           source = rompack.read_text(encoding='utf-8')
@@ -68,14 +98,25 @@ jobs:
           )
           rompack.write_text(source, encoding='utf-8')
           PY
-            python3 tools/apply_rompack_generation_patch.py
-          } > rompack-patch-diagnostics.txt 2>&1
-          printf '\nstatus=%s\n' "$?" >> rompack-patch-diagnostics.txt
-          git checkout -- . ':!.github/workflows/apply-rompack-generation.yml' ':!rompack-patch-diagnostics.txt' || true
-      - name: Commit diagnostics
+          python3 tools/apply_rompack_generation_patch.py
+      - name: Remove temporary patch machinery
+        run: |
+          rm -f rompack-patch-diagnostics.txt
+          rm tools/apply_rompack_generation_patch.py
+          rm .github/workflows/apply-rompack-generation.yml
+      - name: Regenerate lockfile and format
+        run: |
+          cargo generate-lockfile
+          cargo fmt --all
+      - name: Validate workspace
+        run: |
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+      - name: Commit implementation
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add rompack-patch-diagnostics.txt
-          git commit -m "Capture rompack integration diagnostics"
+          git add -A
+          git diff --cached --check
+          git commit -m "Generate and validate deterministic local version packs"
           git push origin HEAD:feature/rompack-generation
