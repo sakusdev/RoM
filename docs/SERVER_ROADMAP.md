@@ -189,11 +189,14 @@ Completed foundation:
 - Enqueue decoded block break/place events into the live Play path's deterministic world runtime.
 - Move accepted block mutations from per-connection local stores into shared server world state.
 - Encode clientbound Block Update packets and send accepted mutations when the profile exposes `BlockUpdate`.
+- Register exact protocol-775 IDs for Player Action, Use Item On, Block Update, and Block Changed Ack.
+- Acknowledge client prediction sequences and support the complete 26.1.2 Player Action enum.
+- Apply simplified adjacent-face stone placement while rejecting world-border hits.
 - Keep protocol serialization and version-specific numeric IDs outside the world crate.
 
 Remaining:
 
-- Verify exact 26.1.2 packet IDs for Player Action, Use Item On, and Block Update before adding them to the built-in profile.
+- Add inventory-aware placement, block replaceability, reach, collision, game-mode, and tool-speed validation.
 - Replace the current shared mutex world path with dedicated bounded network-worker queues and one authoritative tick owner.
 - Broadcast accepted block mutations back to affected clients.
 - Wire live network workers into the shared authoritative world runtime.

@@ -158,6 +158,13 @@ pub fn encode_play_disconnect(message: &str) -> Result<Vec<u8>, PlayEncodeError>
     encode_component(message)
 }
 
+pub fn encode_block_changed_ack(sequence: i32) -> Result<Vec<u8>, PlayEncodeError> {
+    require_non_negative("block change sequence", sequence)?;
+    let mut output = Vec::new();
+    write_varint(&mut output, sequence);
+    Ok(output)
+}
+
 pub fn encode_block_update(
     position: BlockPosition,
     state: BlockStateId,
@@ -667,6 +674,18 @@ mod tests {
         assert!(encode_chunk_batch_start().is_empty());
         assert_eq!(encode_chunk_batch_finished(1).unwrap(), vec![1]);
         assert_eq!(encode_set_chunk_cache_center(0, 0), vec![0, 0]);
+    }
+
+    #[test]
+    fn encodes_block_change_ack_exactly() {
+        assert_eq!(encode_block_changed_ack(300).unwrap(), vec![0xac, 0x02]);
+        assert_eq!(
+            encode_block_changed_ack(-1).unwrap_err(),
+            PlayEncodeError::NegativeValue {
+                field: "block change sequence",
+                value: -1,
+            }
+        );
     }
 
     #[test]

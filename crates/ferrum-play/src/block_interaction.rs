@@ -27,6 +27,7 @@ pub enum PlayerActionStatus {
     DropItem,
     ReleaseUseItem,
     SwapItemWithOffhand,
+    Stab,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,7 +54,7 @@ pub fn decode_player_action(payload: &[u8]) -> Result<PlayerAction, BlockInterac
     let status = decode_player_action_status(reader.read_varint()?)?;
     let position = reader.read_block_position()?;
     let face = decode_block_face(i32::from(reader.read_i8()?))?;
-    let sequence = reader.read_varint()?;
+    let sequence = decode_sequence(reader.read_varint()?)?;
     reader.require_empty()?;
     Ok(PlayerAction {
         status,
@@ -78,7 +79,7 @@ pub fn decode_use_item_on_block(
     }
     let inside_block = reader.read_bool()?;
     let world_border_hit = reader.read_bool()?;
-    let sequence = reader.read_varint()?;
+    let sequence = decode_sequence(reader.read_varint()?)?;
     reader.require_empty()?;
     Ok(UseItemOnBlock {
         hand,
@@ -115,11 +116,41 @@ pub fn player_action_to_world_event(action: PlayerAction, air: BlockStateId) -> 
 pub fn use_item_on_block_to_world_event(
     interaction: UseItemOnBlock,
     placed_state: BlockStateId,
-) -> WorldEvent {
-    WorldEvent::BlockMutation(BlockMutation {
-        position: block_position_to_world(interaction.position),
+) -> Option<WorldEvent> {
+    if interaction.world_border_hit {
+        return None;
+    }
+    let [dx, dy, dz] = interaction.face.offset();
+    Some(WorldEvent::BlockMutation(BlockMutation {
+        position: BlockPos {
+            x: interaction.position.x + dx,
+            y: interaction.position.y + dy,
+            z: interaction.position.z + dz,
+        },
         state: placed_state,
-    })
+    }))
+}
+
+impl BlockFace {
+    #[must_use]
+    const fn offset(self) -> [i32; 3] {
+        match self {
+            Self::Down => [0, -1, 0],
+            Self::Up => [0, 1, 0],
+            Self::North => [0, 0, -1],
+            Self::South => [0, 0, 1],
+            Self::West => [-1, 0, 0],
+            Self::East => [1, 0, 0],
+        }
+    }
+}
+
+fn decode_sequence(value: i32) -> Result<i32, BlockInteractionDecodeError> {
+    if value < 0 {
+        Err(BlockInteractionDecodeError::NegativeSequence(value))
+    } else {
+        Ok(value)
+    }
 }
 
 fn decode_hand(value: i32) -> Result<InteractionHand, BlockInteractionDecodeError> {
@@ -153,6 +184,7 @@ fn decode_player_action_status(
         4 => Ok(PlayerActionStatus::DropItem),
         5 => Ok(PlayerActionStatus::ReleaseUseItem),
         6 => Ok(PlayerActionStatus::SwapItemWithOffhand),
+        7 => Ok(PlayerActionStatus::Stab),
         other => Err(BlockInteractionDecodeError::InvalidPlayerActionStatus(
             other,
         )),
@@ -261,6 +293,8 @@ pub enum BlockInteractionDecodeError {
     InvalidBlockFace(i32),
     #[error("invalid player action status {0}")]
     InvalidPlayerActionStatus(i32),
+    #[error("block interaction sequence cannot be negative: {0}")]
+    NegativeSequence(i32),
     #[error("boolean field must be 0 or 1, got {0}")]
     InvalidBool(u8),
     #[error("cursor coordinate {axis} is not finite: {value}")]
@@ -326,6 +360,19 @@ mod tests {
     }
 
     #[test]
+    fn decodes_26_1_2_stab_action() {
+        let mut payload = Vec::new();
+        write_varint(&mut payload, 7);
+        payload.extend_from_slice(&0_i64.to_be_bytes());
+        payload.push(0);
+        write_varint(&mut payload, 1);
+        assert_eq!(
+            decode_player_action(&payload).unwrap().status,
+            PlayerActionStatus::Stab
+        );
+    }
+
+    #[test]
     fn decodes_use_item_on_block_exactly() {
         let mut payload = Vec::new();
         write_varint(&mut payload, 1);
@@ -357,8 +404,8 @@ mod tests {
     #[test]
     fn rejects_invalid_block_interaction_payloads() {
         assert_eq!(
-            decode_player_action(&[7]).unwrap_err(),
-            BlockInteractionDecodeError::InvalidPlayerActionStatus(7)
+            decode_player_action(&[8]).unwrap_err(),
+            BlockInteractionDecodeError::InvalidPlayerActionStatus(8)
         );
 
         let mut payload = Vec::new();
@@ -423,10 +470,25 @@ mod tests {
                 },
                 stone,
             ),
-            WorldEvent::BlockMutation(BlockMutation {
-                position: BlockPos { x: 4, y: 65, z: -2 },
+            Some(WorldEvent::BlockMutation(BlockMutation {
+                position: BlockPos { x: 5, y: 65, z: -2 },
                 state: stone,
-            })
+            }))
+        );
+        assert_eq!(
+            use_item_on_block_to_world_event(
+                UseItemOnBlock {
+                    hand: InteractionHand::Main,
+                    position,
+                    face: BlockFace::Up,
+                    cursor: [0.5, 0.5, 0.5],
+                    inside_block: false,
+                    world_border_hit: true,
+                    sequence: 6,
+                },
+                stone,
+            ),
+            None
         );
     }
 }
