@@ -21,17 +21,18 @@ use ferrum_play::{
     encode_system_chat,
 };
 use ferrum_protocol::{HandshakeIntent, PacketKind, PacketTable, ProtocolProfile, ProtocolSession};
+use ferrum_rompack::{RomPack, read_rompack};
 use ferrum_runtime::ConnectionId;
 use ferrum_version_26_1_2 as version_26_1_2;
 use ferrum_world::ChunkPos;
 use identity::offline_player_identity;
 use serde_json::{Map, Value, json};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fs,
     io::{self, Read, Write},
     net::{TcpListener, TcpStream},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicI32, AtomicU64, Ordering},
@@ -69,6 +70,10 @@ struct Cli {
     /// Path to the server configuration file.
     #[arg(long, value_name = "PATH")]
     config: PathBuf,
+
+    /// Locally generated and integrity-verified RoM version pack.
+    #[arg(long, value_name = "PATH")]
+    version_pack: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -214,6 +219,9 @@ fn run(cli: Cli) -> Result<()> {
     config
         .protocol_profile()
         .context("cannot build configured protocol profile")?;
+    if let Some(version_pack) = &cli.version_pack {
+        validate_version_pack(version_pack)?;
+    }
     let state = Arc::new(ServerState::new(config.online_players));
     let listener = TcpListener::bind(&config.bind)
         .with_context(|| format!("cannot bind Minecraft status listener on {}", config.bind))?;
@@ -237,6 +245,68 @@ fn run(cli: Cli) -> Result<()> {
             }
             Err(error) => eprintln!("incoming connection failed: {error}"),
         }
+    }
+    Ok(())
+}
+
+fn validate_version_pack(path: &Path) -> Result<()> {
+    if !path.is_file() {
+        bail!(
+            "version pack {} does not exist or is not a file",
+            path.display()
+        );
+    }
+    let canonical = path
+        .canonicalize()
+        .with_context(|| format!("cannot resolve {}", path.display()))?;
+    let (pack, summary) =
+        read_rompack(&canonical).with_context(|| format!("cannot load {}", canonical.display()))?;
+    validate_builtin_26_1_2_pack(&pack)?;
+    println!(
+        "loaded RoM version pack {} (SHA-256 {}, {} registries / {} entries)",
+        canonical.display(),
+        summary.sha256,
+        summary.registry_count,
+        summary.registry_entry_count
+    );
+    Ok(())
+}
+
+fn validate_builtin_26_1_2_pack(pack: &RomPack) -> Result<()> {
+    if pack.metadata.minecraft_version != version_26_1_2::PROFILE_NAME
+        || pack.metadata.protocol != version_26_1_2::PROTOCOL_VERSION
+    {
+        bail!("version pack does not match the built-in Minecraft 26.1.2 profile");
+    }
+    if !pack
+        .metadata
+        .source
+        .official_server_sha1
+        .eq_ignore_ascii_case(version_26_1_2::OFFICIAL_SERVER_SHA1)
+    {
+        bail!("version pack official-source SHA-1 does not match the built-in profile");
+    }
+
+    let expected: BTreeMap<_, _> = version_26_1_2::SYNCHRONIZED_REGISTRIES
+        .iter()
+        .map(|registry| (registry.id, registry.entries.to_vec()))
+        .collect();
+    let actual: BTreeMap<_, _> = pack
+        .registries
+        .iter()
+        .map(|registry| {
+            (
+                registry.id.as_str(),
+                registry
+                    .entries
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect();
+    if actual != expected {
+        bail!("version pack synchronized registries do not match the built-in profile");
     }
     Ok(())
 }

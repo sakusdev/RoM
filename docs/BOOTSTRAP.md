@@ -13,18 +13,20 @@
 
 ## Current bootstrap stage
 
-The initial implementation supports the `official_source_verified` stage:
+The implementation supports `official_source_verified` and `version_pack_generated`:
 
 1. Resolve Minecraft Java Edition 26.1.2 from the official version manifest.
 2. Verify the version metadata SHA-1.
-3. Download the official server JAR from an official HTTPS host.
-4. Verify the JAR size and SHA-1.
-5. Write a local `rom-bootstrap.json` and `versions/26.1.2/rompack.json` provenance record.
-6. Create a local-only `eula.txt`, `NOTICE.txt`, and `server.toml`.
-7. Build or install the native `ferrum-server` binary.
-8. Run the native server from the prepared instance.
+3. Download and verify the official server JAR from an approved HTTPS host.
+4. Resolve the bundled game JAR without executing Java or bytecode, and verify its listed SHA-256 when valid bundled metadata provides one.
+5. Scan only the 28 synchronized-registry resource directories.
+6. Parse every selected resource as bounded JSON and derive its resource identifier.
+7. Record each selected source path, size, and SHA-256 without copying the JSON payload into the pack.
+8. Compare the resulting 28 registries and 382 identifiers with the built-in 26.1.2 manifest.
+9. Write a deterministic `.rompack` with a container SHA-256 trailer and provenance metadata.
+10. Revalidate the pack before `rom-bootstrap run`, then pass it to the native server for a second profile check.
 
-This stage does **not** decompile, translate, execute, or redistribute the official server JAR. Data extraction and deterministic version-pack generation remain future work and must preserve the same provenance and local-only boundaries.
+The extractor does **not** decompile, translate, execute, or bytecode-patch the official server JAR. The generated pack is local-only provenance and derived runtime metadata.
 
 ## Build the tools
 
@@ -44,6 +46,15 @@ Review the Minecraft EULA first, then explicitly acknowledge it:
 ```
 
 The command refuses unsupported Minecraft versions and download URLs outside official Mojang/Microsoft HTTPS hosts.
+
+## Generate the local version pack
+
+```bash
+./target/release/rom-bootstrap generate \
+  --instance ./rom-instance
+```
+
+Use `--force` to regenerate an already valid pack. Generation is deterministic for the same verified source JAR and extractor version.
 
 ## Install the local native server
 
@@ -99,6 +110,7 @@ rom-instance/
 │           └── server.jar
 ├── versions/
 │   └── 26.1.2/
+│       ├── 26.1.2.rompack
 │       └── rompack.json
 ├── eula.txt
 ├── NOTICE.txt
@@ -114,8 +126,7 @@ RoM currently defaults to a loopback bind and offline-mode development login. Th
 
 ## Planned next stages
 
-1. Add a deterministic local extractor for data that RoM actually needs at runtime.
-2. Define a compact, versioned `.rompack` container with source hashes and patch-set metadata.
-3. Validate every generated value against captured protocol fixtures and independent tests.
-4. Load generated version packs without executing the official JAR.
-5. Package `rom-bootstrap` alongside `rom-server` in native release archives.
+1. Package `rom-bootstrap` alongside `rom-server` in native release archives.
+2. Move packet tables and additional version-specific runtime metadata into generated packs.
+3. Add more independently testable extractors only when the server consumes their output.
+4. Preserve bounded decoding, deterministic ordering, source hashes, and local-only artifact boundaries for every new section.
