@@ -389,7 +389,7 @@ fn download_verified_artifact(
     let temporary = path.with_extension("jar.part");
     let _ = fs::remove_file(&temporary);
 
-    let mut response = client
+    let response = client
         .get(url.clone())
         .send()
         .with_context(|| format!("cannot download {url}"))?
