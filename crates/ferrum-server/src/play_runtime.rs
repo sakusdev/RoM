@@ -21,6 +21,7 @@ use ferrum_world::{
     ChunkViewDelta, FlatWorldSpec, StaticChunk, WorldEvent,
 };
 use std::{
+    collections::{BTreeMap, VecDeque},
     io::{Read, Write},
     num::NonZeroUsize,
     sync::Mutex,
@@ -31,6 +32,8 @@ const CLIENT_TICKS_PER_SECOND: usize = 20;
 const LOCAL_WORLD_CONNECTION_ID: ConnectionId = ConnectionId::new(1);
 const LOCAL_WORLD_QUEUE_CAPACITY: usize = 128;
 const LOCAL_WORLD_EVENTS_PER_TICK: usize = 16;
+const MAX_PENDING_WORLD_UPDATES_PER_CONNECTION: usize = 256;
+const MAX_WORLD_UPDATES_PER_DRAIN: usize = 64;
 
 type LocalWorldRuntime = DeterministicRuntime<ChunkStore, WorldEvent>;
 
@@ -43,6 +46,53 @@ pub(super) struct SharedWorld {
 struct SharedWorldInner {
     runtime: LocalWorldRuntime,
     tick: Tick,
+    subscribers: BTreeMap<ConnectionId, PendingWorldUpdates>,
+}
+
+#[derive(Debug, Default)]
+struct PendingWorldUpdates {
+    updates: VecDeque<AppliedWorldEvent>,
+}
+
+impl PendingWorldUpdates {
+    fn push(&mut self, event: AppliedWorldEvent) {
+        let position = applied_world_event_position(&event);
+        if let Some(existing) = self
+            .updates
+            .iter_mut()
+            .find(|existing| applied_world_event_position(existing) == position)
+        {
+            *existing = event;
+            return;
+        }
+
+        if self.updates.len() == MAX_PENDING_WORLD_UPDATES_PER_CONNECTION {
+            self.updates.pop_front();
+        }
+        self.updates.push_back(event);
+    }
+
+    fn drain(&mut self, limit: usize) -> Vec<AppliedWorldEvent> {
+        let count = limit.min(self.updates.len());
+        self.updates.drain(..count).collect()
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        self.updates.len()
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct SharedWorldSubscription<'a> {
+    world: &'a SharedWorld,
+    connection: ConnectionId,
+}
+
+impl Drop for SharedWorldSubscription<'_> {
+    fn drop(&mut self) {
+        self.world.unsubscribe(self.connection);
+    }
 }
 
 impl SharedWorld {
@@ -51,6 +101,7 @@ impl SharedWorld {
             inner: Mutex::new(SharedWorldInner {
                 runtime: new_local_world_runtime(center)?,
                 tick: Tick::ZERO,
+                subscribers: BTreeMap::new(),
             }),
         })
     }
@@ -69,6 +120,53 @@ impl SharedWorld {
             .lock()
             .map_err(|_| anyhow::anyhow!("shared world lock poisoned"))?;
         ensure_chunks_loaded(inner.runtime.state_mut(), positions)
+    }
+
+    pub(super) fn subscribe(
+        &self,
+        connection: ConnectionId,
+    ) -> Result<SharedWorldSubscription<'_>> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|_| anyhow::anyhow!("shared world lock poisoned"))?;
+        if inner.subscribers.contains_key(&connection) {
+            bail!(
+                "connection {} is already subscribed to the shared world",
+                connection.get()
+            );
+        }
+        inner
+            .subscribers
+            .insert(connection, PendingWorldUpdates::default());
+        Ok(SharedWorldSubscription {
+            world: self,
+            connection,
+        })
+    }
+
+    fn unsubscribe(&self, connection: ConnectionId) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.subscribers.remove(&connection);
+        }
+    }
+
+    fn drain_updates(
+        &self,
+        connection: ConnectionId,
+        limit: usize,
+    ) -> Result<Vec<AppliedWorldEvent>> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|_| anyhow::anyhow!("shared world lock poisoned"))?;
+        let pending = inner.subscribers.get_mut(&connection).with_context(|| {
+            format!(
+                "connection {} is not subscribed to the shared world",
+                connection.get()
+            )
+        })?;
+        Ok(pending.drain(limit))
     }
 
     pub(super) fn chunk_snapshot(&self, pos: ChunkPos) -> Result<StaticChunk> {
@@ -95,7 +193,34 @@ impl SharedWorld {
             .map_err(|_| anyhow::anyhow!("shared world lock poisoned"))?;
         inner.tick = next_tick(inner.tick)?;
         let tick = inner.tick;
-        apply_world_event(&mut inner.runtime, connection, tick, event)
+        let applied = apply_world_event(&mut inner.runtime, connection, tick, event)?;
+        for applied_event in applied.iter().copied() {
+            for (subscriber, pending) in &mut inner.subscribers {
+                if *subscriber != connection {
+                    pending.push(applied_event);
+                }
+            }
+        }
+        Ok(applied)
+    }
+
+    #[cfg(test)]
+    fn subscriber_count(&self) -> usize {
+        self.inner
+            .lock()
+            .expect("shared world lock must not be poisoned in tests")
+            .subscribers
+            .len()
+    }
+
+    #[cfg(test)]
+    fn pending_update_count(&self, connection: ConnectionId) -> usize {
+        self.inner
+            .lock()
+            .expect("shared world lock must not be poisoned in tests")
+            .subscribers
+            .get(&connection)
+            .map_or(0, PendingWorldUpdates::len)
     }
 
     #[cfg(test)]
@@ -270,6 +395,10 @@ pub(super) fn run_play_loop<R: Read, W: Write>(
                 }
             }
 
+            let pending_updates =
+                shared_world.drain_updates(connection, MAX_WORLD_UPDATES_PER_DRAIN)?;
+            send_world_updates(writer, profile, &pending_updates)?;
+
             if keep_alive_acknowledged && ticks_since_request >= tick_interval {
                 break;
             }
@@ -393,6 +522,9 @@ fn send_world_updates<W: Write>(
     profile: &ProtocolProfile,
     applied_events: &[AppliedWorldEvent],
 ) -> Result<()> {
+    if applied_events.is_empty() {
+        return Ok(());
+    }
     if profile.packets().id(PacketKind::BlockUpdate).is_none() {
         return Ok(());
     }
@@ -411,6 +543,12 @@ fn send_world_updates<W: Write>(
     }
     writer.flush()?;
     Ok(())
+}
+
+fn applied_world_event_position(event: &AppliedWorldEvent) -> BlockPos {
+    match event {
+        AppliedWorldEvent::BlockMutation(mutation) => mutation.position,
+    }
 }
 
 fn block_position_from_world(position: BlockPos) -> BlockPosition {
@@ -579,6 +717,97 @@ mod tests {
         let mut output = Vec::new();
         send_block_changed_ack(&mut output, &profile, 300).unwrap();
         assert_eq!(output, [3, 0x04, 0xac, 0x02]);
+    }
+
+    #[test]
+    fn shared_world_broadcasts_mutations_to_other_subscribers_only() {
+        let world = SharedWorld::static_flat();
+        let first = ConnectionId::new(1);
+        let second = ConnectionId::new(2);
+        let first_subscription = world.subscribe(first).unwrap();
+        let second_subscription = world.subscribe(second).unwrap();
+        assert_eq!(world.subscriber_count(), 2);
+
+        let position = BlockPos { x: 2, y: 65, z: 3 };
+        let state = BlockStateId::new(version_26_1_2::STONE_BLOCK_STATE_ID);
+        let applied = world
+            .apply_event(
+                first,
+                WorldEvent::BlockMutation(BlockMutation { position, state }),
+            )
+            .unwrap();
+
+        assert!(world.drain_updates(first, usize::MAX).unwrap().is_empty());
+        assert_eq!(world.drain_updates(second, usize::MAX).unwrap(), applied);
+
+        drop(second_subscription);
+        assert_eq!(world.subscriber_count(), 1);
+        drop(first_subscription);
+        assert_eq!(world.subscriber_count(), 0);
+    }
+
+    #[test]
+    fn shared_world_coalesces_repeated_updates_for_the_same_block() {
+        let world = SharedWorld::static_flat();
+        let source = ConnectionId::new(1);
+        let receiver = ConnectionId::new(2);
+        let _receiver_subscription = world.subscribe(receiver).unwrap();
+        let position = BlockPos { x: 4, y: 65, z: 4 };
+        let stone = BlockStateId::new(version_26_1_2::STONE_BLOCK_STATE_ID);
+        let air = BlockStateId::new(version_26_1_2::AIR_BLOCK_STATE_ID);
+
+        world
+            .apply_event(
+                source,
+                WorldEvent::BlockMutation(BlockMutation {
+                    position,
+                    state: stone,
+                }),
+            )
+            .unwrap();
+        let latest = world
+            .apply_event(
+                source,
+                WorldEvent::BlockMutation(BlockMutation {
+                    position,
+                    state: air,
+                }),
+            )
+            .unwrap();
+
+        assert_eq!(world.pending_update_count(receiver), 1);
+        assert_eq!(world.drain_updates(receiver, 1).unwrap(), latest);
+    }
+
+    #[test]
+    fn shared_world_bounds_pending_peer_updates() {
+        let world = SharedWorld::static_flat();
+        let source = ConnectionId::new(1);
+        let receiver = ConnectionId::new(2);
+        let _receiver_subscription = world.subscribe(receiver).unwrap();
+        let stone = BlockStateId::new(version_26_1_2::STONE_BLOCK_STATE_ID);
+
+        for index in 0..MAX_PENDING_WORLD_UPDATES_PER_CONNECTION + 5 {
+            let position = BlockPos {
+                x: -16 + i32::try_from(index % 48).unwrap(),
+                y: 65,
+                z: -16 + i32::try_from(index / 48).unwrap(),
+            };
+            world
+                .apply_event(
+                    source,
+                    WorldEvent::BlockMutation(BlockMutation {
+                        position,
+                        state: stone,
+                    }),
+                )
+                .unwrap();
+        }
+
+        assert_eq!(
+            world.pending_update_count(receiver),
+            MAX_PENDING_WORLD_UPDATES_PER_CONNECTION
+        );
     }
 
     #[test]
