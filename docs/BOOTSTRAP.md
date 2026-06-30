@@ -18,7 +18,7 @@ The implementation supports `official_source_verified` and `version_pack_generat
 1. Resolve Minecraft Java Edition 26.1.2 from the official version manifest.
 2. Verify the version metadata SHA-1.
 3. Download and verify the official server JAR from an approved HTTPS host.
-4. Resolve the bundled game JAR without executing Java or bytecode.
+4. Resolve the bundled game JAR without executing Java or bytecode. When `META-INF/versions.list` is present, its version label must match the requested version and its embedded-JAR SHA-256 must be valid and exact.
 5. Scan only the 28 synchronized-registry resource directories.
 6. Parse every selected resource as bounded JSON and derive its resource identifier.
 7. Record each selected source path, size, and SHA-256 without copying the JSON payload into the pack.
