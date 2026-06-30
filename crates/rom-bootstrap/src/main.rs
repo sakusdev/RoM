@@ -113,7 +113,10 @@ fn main() -> Result<()> {
                         "downloaded"
                     }
                 );
-                println!("Next: rom-bootstrap install-local --instance {}", report.instance.display());
+                println!(
+                    "Next: rom-bootstrap install-local --instance {}",
+                    report.instance.display()
+                );
             }
         }
         Command::InstallLocal {
@@ -135,7 +138,10 @@ fn main() -> Result<()> {
             } else {
                 println!("Instance: {}", report.instance.display());
                 println!("Prepared: {}", report.prepared);
-                println!("Minecraft EULA accepted: {}", report.minecraft_eula_accepted);
+                println!(
+                    "Minecraft EULA accepted: {}",
+                    report.minecraft_eula_accepted
+                );
                 println!(
                     "Minecraft version: {}",
                     report.minecraft_version.as_deref().unwrap_or("unknown")
@@ -146,8 +152,14 @@ fn main() -> Result<()> {
                         .protocol
                         .map_or_else(|| "unknown".to_owned(), |value| value.to_string())
                 );
-                println!("Official source verified: {}", report.official_source_verified);
-                println!("Native server installed: {}", report.native_server_installed);
+                println!(
+                    "Official source verified: {}",
+                    report.official_source_verified
+                );
+                println!(
+                    "Native server installed: {}",
+                    report.native_server_installed
+                );
             }
         }
         Command::Run {

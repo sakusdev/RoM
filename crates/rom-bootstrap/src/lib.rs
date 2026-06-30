@@ -207,7 +207,10 @@ pub fn install_local_server(options: &InstallLocalOptions) -> Result<PathBuf> {
         let workspace = absolute_path(&options.workspace)?;
         let cargo_toml = workspace.join("Cargo.toml");
         if !cargo_toml.is_file() {
-            bail!("workspace does not contain Cargo.toml: {}", workspace.display());
+            bail!(
+                "workspace does not contain Cargo.toml: {}",
+                workspace.display()
+            );
         }
         let status = Command::new("cargo")
             .args(["build", "--locked", "--release", "-p", "ferrum-server"])
@@ -278,11 +281,16 @@ pub fn status_instance(instance: impl AsRef<Path>) -> Result<StatusReport> {
     })
 }
 
-pub fn run_instance(instance: impl AsRef<Path>, server_args: &[impl AsRef<OsStr>]) -> Result<ExitStatus> {
+pub fn run_instance(
+    instance: impl AsRef<Path>,
+    server_args: &[impl AsRef<OsStr>],
+) -> Result<ExitStatus> {
     let instance = absolute_path(instance.as_ref())?;
     let status = status_instance(&instance)?;
     if !status.minecraft_eula_accepted {
-        bail!("Minecraft EULA acceptance is missing; run rom-bootstrap prepare with explicit acceptance");
+        bail!(
+            "Minecraft EULA acceptance is missing; run rom-bootstrap prepare with explicit acceptance"
+        );
     }
     if !status.official_source_verified {
         bail!("official Minecraft source artifact is missing or failed integrity verification");
@@ -316,13 +324,15 @@ fn build_http_client() -> Result<Client> {
 fn resolve_official_server_artifact(client: &Client, version: &str) -> Result<DownloadArtifact> {
     let manifest_url = ensure_official_url(VERSION_MANIFEST_URL)?;
     let manifest_bytes = download_metadata(client, manifest_url)?;
-    let manifest: VersionManifest =
-        serde_json::from_slice(&manifest_bytes).context("cannot parse official version manifest")?;
+    let manifest: VersionManifest = serde_json::from_slice(&manifest_bytes)
+        .context("cannot parse official version manifest")?;
     let entry = manifest
         .versions
         .into_iter()
         .find(|entry| entry.id == version)
-        .with_context(|| format!("Minecraft version {version} was not found in the official manifest"))?;
+        .with_context(|| {
+            format!("Minecraft version {version} was not found in the official manifest")
+        })?;
 
     let metadata_url = ensure_official_url(&entry.url)?;
     let metadata_bytes = download_metadata(client, metadata_url)?;
@@ -353,7 +363,10 @@ fn download_metadata(client: &Client, url: Url) -> Result<Vec<u8>> {
         .with_context(|| format!("cannot download {url}"))?
         .error_for_status()
         .with_context(|| format!("official endpoint returned an error for {url}"))?;
-    if response.content_length().is_some_and(|length| length > MAX_METADATA_BYTES) {
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_METADATA_BYTES)
+    {
         bail!("metadata response exceeds the allowed size");
     }
     let bytes = response.bytes().context("cannot read metadata response")?;
@@ -363,13 +376,16 @@ fn download_metadata(client: &Client, url: Url) -> Result<Vec<u8>> {
     Ok(bytes.to_vec())
 }
 
-fn download_verified_artifact(client: &Client, artifact: &DownloadArtifact, path: &Path) -> Result<()> {
+fn download_verified_artifact(
+    client: &Client,
+    artifact: &DownloadArtifact,
+    path: &Path,
+) -> Result<()> {
     let url = ensure_official_url(&artifact.url)?;
     let parent = path
         .parent()
         .with_context(|| format!("artifact path has no parent: {}", path.display()))?;
-    fs::create_dir_all(parent)
-        .with_context(|| format!("cannot create {}", parent.display()))?;
+    fs::create_dir_all(parent).with_context(|| format!("cannot create {}", parent.display()))?;
     let temporary = path.with_extension("jar.part");
     let _ = fs::remove_file(&temporary);
 
@@ -496,8 +512,7 @@ fn write_bytes(path: PathBuf, value: &[u8]) -> Result<()> {
 }
 
 fn verify_file(path: &Path, expected_sha1: &str, expected_size: u64) -> Result<bool> {
-    let metadata = fs::metadata(path)
-        .with_context(|| format!("cannot stat {}", path.display()))?;
+    let metadata = fs::metadata(path).with_context(|| format!("cannot stat {}", path.display()))?;
     if metadata.len() != expected_size {
         return Ok(false);
     }
@@ -569,8 +584,8 @@ fn eula_is_accepted(path: &Path) -> Result<bool> {
     if !path.is_file() {
         return Ok(false);
     }
-    let text = fs::read_to_string(path)
-        .with_context(|| format!("cannot read {}", path.display()))?;
+    let text =
+        fs::read_to_string(path).with_context(|| format!("cannot read {}", path.display()))?;
     Ok(text.lines().any(|line| {
         let line = line.trim();
         !line.starts_with('#') && line.eq_ignore_ascii_case("eula=true")
@@ -608,8 +623,12 @@ fn copy_executable(source: &Path, destination: &Path) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&temporary, fs::Permissions::from_mode(0o755))
-            .with_context(|| format!("cannot set executable permissions on {}", temporary.display()))?;
+        fs::set_permissions(&temporary, fs::Permissions::from_mode(0o755)).with_context(|| {
+            format!(
+                "cannot set executable permissions on {}",
+                temporary.display()
+            )
+        })?;
     }
     if destination.exists() {
         fs::remove_file(destination)
@@ -635,7 +654,10 @@ mod tests {
 
     #[test]
     fn sha1_matches_known_vector() {
-        assert_eq!(sha1_bytes(b"abc"), "a9993e364706816aba3e25717850c26c9cd0d89d");
+        assert_eq!(
+            sha1_bytes(b"abc"),
+            "a9993e364706816aba3e25717850c26c9cd0d89d"
+        );
     }
 
     #[test]
