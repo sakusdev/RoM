@@ -11,6 +11,7 @@ members = [
     "crates/ferrum-play",
     "crates/ferrum-world",
     "crates/ferrum-version-26-1-2",
+    "crates/ferrum-rompack",
     "crates/rom-bootstrap",
 ]
 resolver = "2"
