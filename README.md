@@ -28,6 +28,7 @@ The native server currently supports:
 - Initial and dynamically streamed chunks serialized from authoritative shared-world snapshots
 - Live simplified block breaking and adjacent-face stone placement
 - Clientbound Block Update and Block Changed Ack responses for accepted interactions
+- Bounded per-connection peer update queues with same-position coalescing
 - Per-connection authoritative `PlayerState`
 - Deterministic 3×3 chunk views around the player's current chunk
 - Chunk-cache-center updates only when the player crosses a chunk boundary
@@ -72,7 +73,7 @@ Not implemented yet:
 - Collision or movement-speed enforcement
 - Dedicated network-worker to authoritative-world-runtime queues
 - Full item, inventory, replaceability, reach, collision, and game-mode validation for block interactions
-- Multi-client broadcasting of block breaking and placement results
+- Dedicated outbound writer workers; peer updates currently drain on normal incoming Play traffic
 - Entities and entity tracking
 - Inventory and container behavior
 - Procedural world generation
