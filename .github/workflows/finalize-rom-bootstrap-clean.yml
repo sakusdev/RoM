@@ -1,0 +1,51 @@
+name: Finalize clean RoM Bootstrap
+
+on:
+  pull_request:
+    branches:
+      - master
+    types:
+      - synchronize
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      github.head_ref == 'feature/rom-bootstrap'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/rom-bootstrap
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Apply final Clippy fix
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('crates/rom-bootstrap/src/lib.rs')
+          text = path.read_text(encoding='utf-8')
+          old = '    let mut response = client\n        .get(url.clone())'
+          new = '    let response = client\n        .get(url.clone())'
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one response binding, found {text.count(old)}')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+          rm .github/workflows/finalize-rom-bootstrap-clean.yml
+      - name: Validate finalized workspace
+        run: |
+          cargo fmt --all
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+      - name: Commit finalized implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Finalize clean RoM Bootstrap implementation"
+          git push origin HEAD:feature/rom-bootstrap
