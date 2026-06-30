@@ -28,17 +28,20 @@ jobs:
         run: cargo generate-lockfile
       - name: Format
         run: cargo fmt --all
-      - name: Validate
+      - name: Capture validation diagnostics
         run: |
-          cargo clippy --workspace --all-targets -- -D warnings
-          cargo test --workspace
-      - name: Remove temporary workflow
-        run: rm .github/workflows/finalize-rom-bootstrap.yml
-      - name: Commit generated lockfile and formatting
+          set +e
+          cargo clippy --workspace --all-targets -- -D warnings > rom-bootstrap-diagnostics.txt 2>&1
+          clippy_status=$?
+          cargo test --workspace >> rom-bootstrap-diagnostics.txt 2>&1
+          test_status=$?
+          printf '\nclippy_status=%s\ntest_status=%s\n' "$clippy_status" "$test_status" >> rom-bootstrap-diagnostics.txt
+          exit 0
+      - name: Commit diagnostics and generated files
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git diff --cached --check
-          git commit -m "Finalize RoM Bootstrap implementation"
+          git commit -m "Capture RoM Bootstrap validation diagnostics"
           git push origin HEAD:feature/rom-bootstrap
