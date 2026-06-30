@@ -25,7 +25,7 @@ The current server milestone provides:
 - Palette-encoded in-memory flat chunks with full skylight and chunk-batch negotiation
 - All four serverbound movement packet forms with bounded decoding
 - Bounded serverbound player-action and use-item-on-block payload decoding
-- Per-connection deterministic world-runtime application for decoded block mutation events
+- Shared in-memory world-runtime state for decoded block mutation events
 - Clientbound block-update payload encoding and optional local mutation writeback for profiles that expose that packet ID
 - Per-connection player position, rotation, movement flags, and current-chunk state
 - Deterministic 3×3 chunk views with cache-center updates, new chunk batches, and unloads
@@ -36,7 +36,7 @@ The current server milestone provides:
 - Live online-player count in server-list status responses
 - Version-neutral in-memory world coordinates, sections, block states, biome IDs, and chunk views
 
-The socket runtime now uses `ProtocolProfile` and `ProtocolSession` from Handshake through Play. The 26.1.2 profile validates the handshake protocol, negotiates the vanilla core known pack, sends the full synchronized registry set, completes Configuration, sends the flat-overworld Play bootstrap, validates teleport and chunk-batch acknowledgements, and enters a movement-aware Play loop. The server tracks each player's authoritative position and rotation, updates the chunk-cache center only after crossing a chunk boundary, sends newly visible chunks, unloads chunks that leave the 3×3 view, keeps the server-list online-player count synchronized with Play connections, and continues Keep Alive validation while processing movement. The standalone `ferrum-runtime` crate now provides deterministic scheduling and bounded input-ordering primitives, and the Play loop can route decoded block mutation events through a local deterministic world runtime. If the active profile exposes a clientbound Block Update packet ID, accepted local mutations are written back to the client. Entities, the live shared-world runtime, verified 26.1.2 block interaction packet IDs, multi-client block update broadcasting, and persistence are not implemented yet.
+The socket runtime now uses `ProtocolProfile` and `ProtocolSession` from Handshake through Play. The 26.1.2 profile validates the handshake protocol, negotiates the vanilla core known pack, sends the full synchronized registry set, completes Configuration, sends the flat-overworld Play bootstrap, validates teleport and chunk-batch acknowledgements, and enters a movement-aware Play loop. The server tracks each player's authoritative position and rotation, updates the chunk-cache center only after crossing a chunk boundary, sends newly visible chunks, unloads chunks that leave the 3×3 view, keeps the server-list online-player count synchronized with Play connections, and continues Keep Alive validation while processing movement. The standalone `ferrum-runtime` crate now provides deterministic scheduling and bounded input-ordering primitives, and the Play loop can route decoded block mutation events through shared in-memory world state. If the active profile exposes a clientbound Block Update packet ID, accepted mutations are written back to the acting client. Entities, dedicated network-worker queues, verified 26.1.2 block interaction packet IDs, multi-client block update broadcasting, and persistence are not implemented yet.
 
 ## M9 — Binary NBT foundation
 
@@ -186,14 +186,15 @@ Completed foundation:
 - Apply deterministic world-coordinate block mutations with chunk/local coordinate reporting.
 - Store loaded chunks in deterministic coordinate order and route world-coordinate mutations to the owning chunk.
 - Expose runtime-compatible world events and verify loaded chunks mutate through `DeterministicRuntime` in authoritative order.
-- Enqueue decoded block break/place events into the live Play path's local deterministic world runtime.
-- Encode clientbound Block Update packets and send accepted local mutations when the profile exposes `BlockUpdate`.
+- Enqueue decoded block break/place events into the live Play path's deterministic world runtime.
+- Move accepted block mutations from per-connection local stores into shared server world state.
+- Encode clientbound Block Update packets and send accepted mutations when the profile exposes `BlockUpdate`.
 - Keep protocol serialization and version-specific numeric IDs outside the world crate.
 
 Remaining:
 
 - Verify exact 26.1.2 packet IDs for Player Action, Use Item On, and Block Update before adding them to the built-in profile.
-- Promote per-connection local world runtimes into one shared authoritative world runtime.
+- Replace the current shared mutex world path with dedicated bounded network-worker queues and one authoritative tick owner.
 - Broadcast accepted block mutations back to affected clients.
 - Wire live network workers into the shared authoritative world runtime.
 - Add NBT-backed Anvil region reading.

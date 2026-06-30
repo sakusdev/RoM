@@ -23,14 +23,77 @@ use ferrum_world::{
 use std::{
     io::{Read, Write},
     num::NonZeroUsize,
+    sync::Mutex,
 };
 
 const CLIENT_TICKS_PER_SECOND: usize = 20;
+#[cfg(test)]
 const LOCAL_WORLD_CONNECTION_ID: ConnectionId = ConnectionId::new(1);
 const LOCAL_WORLD_QUEUE_CAPACITY: usize = 128;
 const LOCAL_WORLD_EVENTS_PER_TICK: usize = 16;
 
 type LocalWorldRuntime = DeterministicRuntime<ChunkStore, WorldEvent>;
+
+#[derive(Debug)]
+pub(super) struct SharedWorld {
+    inner: Mutex<SharedWorldInner>,
+}
+
+#[derive(Debug)]
+struct SharedWorldInner {
+    runtime: LocalWorldRuntime,
+    tick: Tick,
+}
+
+impl SharedWorld {
+    pub(super) fn new(center: ChunkPos) -> Result<Self> {
+        Ok(Self {
+            inner: Mutex::new(SharedWorldInner {
+                runtime: new_local_world_runtime(center)?,
+                tick: Tick::ZERO,
+            }),
+        })
+    }
+
+    pub(super) fn static_flat() -> Self {
+        Self::new(ChunkPos {
+            x: STATIC_CHUNK_X,
+            z: STATIC_CHUNK_Z,
+        })
+        .expect("static flat world constants must build a valid chunk store")
+    }
+
+    fn ensure_chunks_loaded(&self, positions: &[ChunkPos]) -> Result<()> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|_| anyhow::anyhow!("shared world lock poisoned"))?;
+        ensure_chunks_loaded(inner.runtime.state_mut(), positions)
+    }
+
+    fn apply_event(
+        &self,
+        connection: ConnectionId,
+        event: WorldEvent,
+    ) -> Result<Vec<AppliedWorldEvent>> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|_| anyhow::anyhow!("shared world lock poisoned"))?;
+        inner.tick = next_tick(inner.tick)?;
+        let tick = inner.tick;
+        apply_world_event(&mut inner.runtime, connection, tick, event)
+    }
+
+    #[cfg(test)]
+    fn world_block(&self, position: BlockPos) -> Result<BlockStateId> {
+        let inner = self
+            .inner
+            .lock()
+            .map_err(|_| anyhow::anyhow!("shared world lock poisoned"))?;
+        Ok(inner.runtime.state().world_block(position)?)
+    }
+}
 
 pub(super) fn is_movement_packet_id(profile: &ProtocolProfile, packet_id: i32) -> bool {
     matches!(
@@ -51,6 +114,8 @@ pub(super) fn run_play_loop<R: Read, W: Write>(
     writer: &mut W,
     profile: &ProtocolProfile,
     session: &mut ProtocolSession,
+    shared_world: &SharedWorld,
+    connection: ConnectionId,
     play_round_limit: Option<usize>,
 ) -> Result<()> {
     if play_round_limit == Some(0) {
@@ -66,11 +131,9 @@ pub(super) fn run_play_loop<R: Read, W: Write>(
         STATIC_CHUNK_RADIUS,
     )?;
     view.mark_loaded(player.chunk_pos());
-    let mut world_runtime = new_local_world_runtime(view.center())?;
-    let mut world_tick = Tick::ZERO;
     if play_round_limit.is_none() {
         let initial_delta = view.synchronize()?;
-        ensure_chunks_loaded(world_runtime.state_mut(), &initial_delta.newly_visible)?;
+        shared_world.ensure_chunks_loaded(&initial_delta.newly_visible)?;
         send_chunk_view_delta(writer, profile, view.center(), &initial_delta)?;
     }
 
@@ -150,7 +213,7 @@ pub(super) fn run_play_loop<R: Read, W: Write>(
                     let current_chunk = player.chunk_pos();
                     if current_chunk != previous_chunk {
                         let delta = view.recenter(current_chunk)?;
-                        ensure_chunks_loaded(world_runtime.state_mut(), &delta.newly_visible)?;
+                        shared_world.ensure_chunks_loaded(&delta.newly_visible)?;
                         send_chunk_view_delta(writer, profile, current_chunk, &delta)?;
                     }
                 }
@@ -160,9 +223,7 @@ pub(super) fn run_play_loop<R: Read, W: Write>(
                         action,
                         BlockStateId::new(version_26_1_2::AIR_BLOCK_STATE_ID),
                     ) {
-                        world_tick = next_tick(world_tick)?;
-                        let applied =
-                            apply_local_world_event(&mut world_runtime, world_tick, event)?;
+                        let applied = shared_world.apply_event(connection, event)?;
                         send_world_updates(writer, profile, &applied)?;
                     }
                 }
@@ -172,8 +233,7 @@ pub(super) fn run_play_loop<R: Read, W: Write>(
                         interaction,
                         BlockStateId::new(version_26_1_2::STONE_BLOCK_STATE_ID),
                     );
-                    world_tick = next_tick(world_tick)?;
-                    let applied = apply_local_world_event(&mut world_runtime, world_tick, event)?;
+                    let applied = shared_world.apply_event(connection, event)?;
                     send_world_updates(writer, profile, &applied)?;
                 }
                 _ => {
@@ -253,13 +313,14 @@ fn next_tick(tick: Tick) -> Result<Tick> {
     Ok(Tick::new(next))
 }
 
-fn apply_local_world_event(
+fn apply_world_event(
     runtime: &mut LocalWorldRuntime,
+    connection: ConnectionId,
     tick: Tick,
     event: WorldEvent,
 ) -> Result<Vec<AppliedWorldEvent>> {
     runtime
-        .push_input(LOCAL_WORLD_CONNECTION_ID, event)
+        .push_input(connection, event)
         .context("local world input queue is full")?;
 
     let mut apply_error = None;
@@ -277,6 +338,15 @@ fn apply_local_world_event(
         bail!("cannot apply local world event: {error}");
     }
     Ok(applied_events)
+}
+
+#[cfg(test)]
+fn apply_local_world_event(
+    runtime: &mut LocalWorldRuntime,
+    tick: Tick,
+    event: WorldEvent,
+) -> Result<Vec<AppliedWorldEvent>> {
+    apply_world_event(runtime, LOCAL_WORLD_CONNECTION_ID, tick, event)
 }
 
 fn send_world_updates<W: Write>(
@@ -458,6 +528,37 @@ mod tests {
         );
         expected.push(1);
         assert_eq!(output, expected);
+    }
+
+    #[test]
+    fn shared_world_applies_events_from_multiple_connections_to_one_store() {
+        let world = SharedWorld::static_flat();
+        let position = BlockPos { x: 2, y: 65, z: 2 };
+        let stone = BlockStateId::new(version_26_1_2::STONE_BLOCK_STATE_ID);
+        let air = BlockStateId::new(version_26_1_2::AIR_BLOCK_STATE_ID);
+
+        let first = world
+            .apply_event(
+                ConnectionId::new(1),
+                WorldEvent::BlockMutation(BlockMutation {
+                    position,
+                    state: stone,
+                }),
+            )
+            .unwrap();
+        let second = world
+            .apply_event(
+                ConnectionId::new(2),
+                WorldEvent::BlockMutation(BlockMutation {
+                    position,
+                    state: air,
+                }),
+            )
+            .unwrap();
+
+        assert_eq!(first.len(), 1);
+        assert_eq!(second.len(), 1);
+        assert_eq!(world.world_block(position).unwrap(), air);
     }
 
     trait TestBlockPositionPack {

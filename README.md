@@ -24,7 +24,8 @@ The native server currently supports:
 - All four serverbound movement forms: position, rotation, position + rotation, and status-only
 - Finite coordinate, coordinate-range, movement-flag, and exact-payload validation
 - Bounded serverbound block interaction payload decoding and local deterministic mutation application
-- Clientbound block-update payload encoding for accepted local mutations when the active protocol profile exposes that packet ID
+- Shared in-memory world state for accepted block mutations across Play connections
+- Clientbound block-update payload encoding for accepted mutations when the active protocol profile exposes that packet ID
 - Per-connection authoritative `PlayerState`
 - Deterministic 3×3 chunk views around the player's current chunk
 - Chunk-cache-center updates only when the player crosses a chunk boundary
@@ -65,7 +66,7 @@ The world is intentionally small and deterministic while the gameplay foundation
 Not implemented yet:
 
 - Collision or movement-speed enforcement
-- Wiring network workers and shared world state into the authoritative runtime
+- Dedicated network-worker to authoritative-world-runtime queues
 - Verified 26.1.2 packet IDs for live block breaking and placement packets in the built-in profile
 - Multi-client broadcasting of block breaking and placement results
 - Entities and entity tracking

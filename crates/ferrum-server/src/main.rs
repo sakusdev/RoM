@@ -21,6 +21,7 @@ use ferrum_play::{
     encode_system_chat,
 };
 use ferrum_protocol::{HandshakeIntent, PacketKind, PacketTable, ProtocolProfile, ProtocolSession};
+use ferrum_runtime::ConnectionId;
 use ferrum_version_26_1_2 as version_26_1_2;
 use ferrum_world::{BiomeId, BlockStateId, ChunkPos, FlatWorldSpec, StaticChunk};
 use identity::offline_player_identity;
@@ -33,7 +34,7 @@ use std::{
     path::PathBuf,
     sync::{
         Arc,
-        atomic::{AtomicI32, Ordering},
+        atomic::{AtomicI32, AtomicU64, Ordering},
     },
     thread,
     time::Duration,
@@ -129,12 +130,16 @@ struct Handshake {
 #[derive(Debug)]
 struct ServerState {
     online_players: AtomicI32,
+    next_connection_id: AtomicU64,
+    world: play_runtime::SharedWorld,
 }
 
 impl ServerState {
     fn new(initial_online_players: i32) -> Self {
         Self {
             online_players: AtomicI32::new(initial_online_players),
+            next_connection_id: AtomicU64::new(1),
+            world: play_runtime::SharedWorld::static_flat(),
         }
     }
 
@@ -144,13 +149,28 @@ impl ServerState {
 
     fn enter_play(&self) -> OnlinePlayerGuard<'_> {
         self.online_players.fetch_add(1, Ordering::Relaxed);
-        OnlinePlayerGuard { state: self }
+        let id = self.next_connection_id.fetch_add(1, Ordering::Relaxed);
+        OnlinePlayerGuard {
+            state: self,
+            connection_id: ConnectionId::new(id),
+        }
+    }
+
+    fn world(&self) -> &play_runtime::SharedWorld {
+        &self.world
     }
 }
 
 #[derive(Debug)]
 struct OnlinePlayerGuard<'a> {
     state: &'a ServerState,
+    connection_id: ConnectionId,
+}
+
+impl OnlinePlayerGuard<'_> {
+    fn connection_id(&self) -> ConnectionId {
+        self.connection_id
+    }
 }
 
 impl Drop for OnlinePlayerGuard<'_> {
@@ -163,6 +183,12 @@ impl Drop for OnlinePlayerGuard<'_> {
 struct ServerContext<'a> {
     config: &'a ServerConfig,
     state: &'a ServerState,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PlayWorldContext<'a> {
+    shared_world: &'a play_runtime::SharedWorld,
+    connection: ConnectionId,
 }
 
 fn main() -> Result<()> {
@@ -1037,9 +1063,19 @@ fn handle_play_protocol<R: Read, W: Write>(
         return Ok(());
     }
 
-    let _online_player = context.state.enter_play();
-    let result =
-        run_static_play_session(reader, writer, config, profile, session, play_round_limit);
+    let online_player = context.state.enter_play();
+    let result = run_static_play_session(
+        reader,
+        writer,
+        config,
+        profile,
+        session,
+        PlayWorldContext {
+            shared_world: context.state.world(),
+            connection: online_player.connection_id(),
+        },
+        play_round_limit,
+    );
     if let Err(error) = result {
         let reason = format!("Ferrum closed the connection: {error}");
         if let Ok(payload) = encode_play_disconnect(&reason) {
@@ -1058,6 +1094,7 @@ fn run_static_play_session<R: Read, W: Write>(
     config: &ServerConfig,
     profile: &ProtocolProfile,
     session: &mut ProtocolSession,
+    world: PlayWorldContext<'_>,
     play_round_limit: Option<usize>,
 ) -> Result<()> {
     let chunk = static_chunk()?;
@@ -1113,7 +1150,7 @@ fn run_static_play_session<R: Read, W: Write>(
     writer.flush()?;
 
     wait_for_play_bootstrap_acknowledgements(reader, profile, STATIC_TELEPORT_ID)?;
-    run_keep_alive_loop(reader, writer, profile, session, play_round_limit)
+    run_keep_alive_loop(reader, writer, profile, session, world, play_round_limit)
 }
 
 fn static_chunk() -> Result<StaticChunk> {
@@ -1259,9 +1296,18 @@ fn run_keep_alive_loop<R: Read, W: Write>(
     writer: &mut W,
     profile: &ProtocolProfile,
     session: &mut ProtocolSession,
+    world: PlayWorldContext<'_>,
     play_round_limit: Option<usize>,
 ) -> Result<()> {
-    play_runtime::run_play_loop(reader, writer, profile, session, play_round_limit)
+    play_runtime::run_play_loop(
+        reader,
+        writer,
+        profile,
+        session,
+        world.shared_world,
+        world.connection,
+        play_round_limit,
+    )
 }
 
 #[cfg(test)]
