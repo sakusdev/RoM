@@ -5,6 +5,10 @@
 .idea/
 .vscode/
 
+# Local RoM Bootstrap instances may contain official Minecraft files.
+/rom-instance/
+**/cache/official/
+
 # Fixture build intermediates. Keep committed jar fixtures that tests read directly.
 /fixtures/sample/out/
 /fixtures/m1-bytecode/out/classes/
