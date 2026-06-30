@@ -5,20 +5,32 @@ use super::{
 use crate::codec::{PacketReader, read_packet};
 use anyhow::{Context, Result, bail};
 use ferrum_play::{
-    PlayerMovement, PlayerState, decode_move_player_position, decode_move_player_position_rotation,
-    decode_move_player_rotation, decode_move_player_status, encode_chunk_batch_finished,
-    encode_chunk_batch_start, encode_forget_level_chunk, encode_keep_alive,
-    encode_level_chunk_with_light, encode_set_chunk_cache_center,
+    BlockPosition, PlayerMovement, PlayerState, decode_move_player_position,
+    decode_move_player_position_rotation, decode_move_player_rotation, decode_move_player_status,
+    decode_player_action, decode_use_item_on_block, encode_block_update,
+    encode_chunk_batch_finished, encode_chunk_batch_start, encode_forget_level_chunk,
+    encode_keep_alive, encode_level_chunk_with_light, encode_set_chunk_cache_center,
+    player_action_to_world_event, use_item_on_block_to_world_event,
 };
 use ferrum_protocol::{
     PacketDirection, PacketKind, ProtocolPhase, ProtocolProfile, ProtocolSession,
 };
+use ferrum_runtime::{ConnectionId, DeterministicRuntime, Tick};
 use ferrum_world::{
-    BiomeId, BlockStateId, ChunkPos, ChunkView, ChunkViewDelta, FlatWorldSpec, StaticChunk,
+    AppliedWorldEvent, BiomeId, BlockPos, BlockStateId, ChunkPos, ChunkStore, ChunkView,
+    ChunkViewDelta, FlatWorldSpec, StaticChunk, WorldEvent,
 };
-use std::io::{Read, Write};
+use std::{
+    io::{Read, Write},
+    num::NonZeroUsize,
+};
 
 const CLIENT_TICKS_PER_SECOND: usize = 20;
+const LOCAL_WORLD_CONNECTION_ID: ConnectionId = ConnectionId::new(1);
+const LOCAL_WORLD_QUEUE_CAPACITY: usize = 128;
+const LOCAL_WORLD_EVENTS_PER_TICK: usize = 16;
+
+type LocalWorldRuntime = DeterministicRuntime<ChunkStore, WorldEvent>;
 
 pub(super) fn is_movement_packet_id(profile: &ProtocolProfile, packet_id: i32) -> bool {
     matches!(
@@ -54,8 +66,11 @@ pub(super) fn run_play_loop<R: Read, W: Write>(
         STATIC_CHUNK_RADIUS,
     )?;
     view.mark_loaded(player.chunk_pos());
+    let mut world_runtime = new_local_world_runtime(view.center())?;
+    let mut world_tick = Tick::ZERO;
     if play_round_limit.is_none() {
         let initial_delta = view.synchronize()?;
+        ensure_chunks_loaded(world_runtime.state_mut(), &initial_delta.newly_visible)?;
         send_chunk_view_delta(writer, profile, view.center(), &initial_delta)?;
     }
 
@@ -135,8 +150,31 @@ pub(super) fn run_play_loop<R: Read, W: Write>(
                     let current_chunk = player.chunk_pos();
                     if current_chunk != previous_chunk {
                         let delta = view.recenter(current_chunk)?;
+                        ensure_chunks_loaded(world_runtime.state_mut(), &delta.newly_visible)?;
                         send_chunk_view_delta(writer, profile, current_chunk, &delta)?;
                     }
+                }
+                Some(PacketKind::PlayerAction) => {
+                    let action = decode_player_action(packet_reader.take_remaining())?;
+                    if let Some(event) = player_action_to_world_event(
+                        action,
+                        BlockStateId::new(version_26_1_2::AIR_BLOCK_STATE_ID),
+                    ) {
+                        world_tick = next_tick(world_tick)?;
+                        let applied =
+                            apply_local_world_event(&mut world_runtime, world_tick, event)?;
+                        send_world_updates(writer, profile, &applied)?;
+                    }
+                }
+                Some(PacketKind::UseItemOn) => {
+                    let interaction = decode_use_item_on_block(packet_reader.take_remaining())?;
+                    let event = use_item_on_block_to_world_event(
+                        interaction,
+                        BlockStateId::new(version_26_1_2::STONE_BLOCK_STATE_ID),
+                    );
+                    world_tick = next_tick(world_tick)?;
+                    let applied = apply_local_world_event(&mut world_runtime, world_tick, event)?;
+                    send_world_updates(writer, profile, &applied)?;
                 }
                 _ => {
                     ignored_packets = ignored_packets
@@ -156,6 +194,121 @@ pub(super) fn run_play_loop<R: Read, W: Write>(
         keep_alive_id = keep_alive_id
             .checked_add(1)
             .context("keep alive id overflow")?;
+    }
+}
+
+fn new_local_world_runtime(center: ChunkPos) -> Result<LocalWorldRuntime> {
+    let mut store = ChunkStore::new();
+    seed_chunk_square(&mut store, center, STATIC_CHUNK_RADIUS)?;
+    Ok(DeterministicRuntime::new(
+        store,
+        non_zero_usize(LOCAL_WORLD_QUEUE_CAPACITY),
+        non_zero_usize(LOCAL_WORLD_EVENTS_PER_TICK),
+    ))
+}
+
+fn non_zero_usize(value: usize) -> NonZeroUsize {
+    NonZeroUsize::new(value).expect("local world runtime constants must be non-zero")
+}
+
+fn seed_chunk_square(store: &mut ChunkStore, center: ChunkPos, radius: i32) -> Result<()> {
+    for z in center
+        .z
+        .checked_sub(radius)
+        .context("visible chunk z minimum overflow")?
+        ..=center
+            .z
+            .checked_add(radius)
+            .context("visible chunk z maximum overflow")?
+    {
+        for x in center
+            .x
+            .checked_sub(radius)
+            .context("visible chunk x minimum overflow")?
+            ..=center
+                .x
+                .checked_add(radius)
+                .context("visible chunk x maximum overflow")?
+        {
+            store.insert(flat_chunk(ChunkPos { x, z })?);
+        }
+    }
+    Ok(())
+}
+
+fn ensure_chunks_loaded(store: &mut ChunkStore, positions: &[ChunkPos]) -> Result<()> {
+    for pos in positions {
+        if store.chunk(*pos).is_none() {
+            store.insert(flat_chunk(*pos)?);
+        }
+    }
+    Ok(())
+}
+
+fn next_tick(tick: Tick) -> Result<Tick> {
+    let next = tick
+        .get()
+        .checked_add(1)
+        .context("local world tick overflow")?;
+    Ok(Tick::new(next))
+}
+
+fn apply_local_world_event(
+    runtime: &mut LocalWorldRuntime,
+    tick: Tick,
+    event: WorldEvent,
+) -> Result<Vec<AppliedWorldEvent>> {
+    runtime
+        .push_input(LOCAL_WORLD_CONNECTION_ID, event)
+        .context("local world input queue is full")?;
+
+    let mut apply_error = None;
+    let mut applied_events = Vec::new();
+    runtime.execute_tick(tick, |store, _tick, envelope| {
+        if apply_error.is_none() {
+            match store.apply_event(envelope.payload) {
+                Ok(applied) => applied_events.push(applied),
+                Err(error) => apply_error = Some(error),
+            }
+        }
+    });
+
+    if let Some(error) = apply_error {
+        bail!("cannot apply local world event: {error}");
+    }
+    Ok(applied_events)
+}
+
+fn send_world_updates<W: Write>(
+    writer: &mut W,
+    profile: &ProtocolProfile,
+    applied_events: &[AppliedWorldEvent],
+) -> Result<()> {
+    if profile.packets().id(PacketKind::BlockUpdate).is_none() {
+        return Ok(());
+    }
+
+    for event in applied_events {
+        let AppliedWorldEvent::BlockMutation(mutation) = event;
+        write_play_payload(
+            writer,
+            profile,
+            PacketKind::BlockUpdate,
+            &encode_block_update(
+                block_position_from_world(mutation.position),
+                mutation.current,
+            )?,
+        )?;
+    }
+    writer.flush()?;
+    Ok(())
+}
+
+fn block_position_from_world(position: BlockPos) -> BlockPosition {
+    BlockPosition {
+        x: position.x,
+        y: position.y,
+        z: position.z,
     }
 }
 
@@ -248,6 +401,8 @@ fn flat_chunk(pos: ChunkPos) -> Result<StaticChunk> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ferrum_protocol::PacketTable;
+    use ferrum_world::{BlockMutation, BlockPos};
 
     #[test]
     fn movement_packet_classifier_is_phase_and_direction_aware() {
@@ -257,5 +412,64 @@ mod tests {
         assert!(is_movement_packet_id(&profile, 0x20));
         assert!(is_movement_packet_id(&profile, 0x21));
         assert!(!is_movement_packet_id(&profile, 0x48));
+    }
+
+    #[test]
+    fn local_world_runtime_applies_block_events_through_authoritative_ticks() {
+        let mut runtime = new_local_world_runtime(ChunkPos { x: 0, z: 0 }).unwrap();
+        let position = BlockPos { x: 0, y: 65, z: 0 };
+        let state = BlockStateId::new(version_26_1_2::STONE_BLOCK_STATE_ID);
+
+        let applied = apply_local_world_event(
+            &mut runtime,
+            Tick::new(1),
+            WorldEvent::BlockMutation(BlockMutation { position, state }),
+        )
+        .unwrap();
+
+        assert_eq!(applied.len(), 1);
+        assert_eq!(runtime.pending_inputs(), 0);
+        assert_eq!(runtime.state().world_block(position).unwrap(), state);
+    }
+
+    #[test]
+    fn sends_block_update_when_profile_exposes_packet_id() {
+        let mut packets = PacketTable::new();
+        packets.insert(PacketKind::BlockUpdate, 0x22).unwrap();
+        let profile = ProtocolProfile::new("Test", 1, packets).unwrap();
+        let mut runtime = new_local_world_runtime(ChunkPos { x: 0, z: 0 }).unwrap();
+        let position = BlockPos { x: 1, y: 65, z: -2 };
+        let state = BlockStateId::new(1);
+        let applied = apply_local_world_event(
+            &mut runtime,
+            Tick::new(1),
+            WorldEvent::BlockMutation(BlockMutation { position, state }),
+        )
+        .unwrap();
+        let mut output = Vec::new();
+
+        send_world_updates(&mut output, &profile, &applied).unwrap();
+
+        let mut expected = vec![10, 0x22];
+        expected.extend_from_slice(
+            &BlockPosition { x: 1, y: 65, z: -2 }
+                .pack_for_test()
+                .to_be_bytes(),
+        );
+        expected.push(1);
+        assert_eq!(output, expected);
+    }
+
+    trait TestBlockPositionPack {
+        fn pack_for_test(self) -> i64;
+    }
+
+    impl TestBlockPositionPack for BlockPosition {
+        fn pack_for_test(self) -> i64 {
+            let x = i64::from(self.x) & 0x3ff_ffff;
+            let y = i64::from(self.y) & 0xfff;
+            let z = i64::from(self.z) & 0x3ff_ffff;
+            (x << 38) | (z << 12) | y
+        }
     }
 }

@@ -23,11 +23,14 @@ The native server currently supports:
 - Teleport acknowledgement validation
 - All four serverbound movement forms: position, rotation, position + rotation, and status-only
 - Finite coordinate, coordinate-range, movement-flag, and exact-payload validation
+- Bounded serverbound block interaction payload decoding and local deterministic mutation application
+- Clientbound block-update payload encoding for accepted local mutations when the active protocol profile exposes that packet ID
 - Per-connection authoritative `PlayerState`
 - Deterministic 3×3 chunk views around the player's current chunk
 - Chunk-cache-center updates only when the player crosses a chunk boundary
 - Newly visible flat-chunk batches and Forget Level Chunk unloads
 - Chunk-batch acknowledgement validation
+- Live online-player count in server-list status responses
 - System chat messages
 - Live Keep Alive request/response validation while movement packets continue to be processed
 - Graceful Play disconnects when bootstrap or movement validation fails
@@ -63,7 +66,8 @@ Not implemented yet:
 
 - Collision or movement-speed enforcement
 - Wiring network workers and shared world state into the authoritative runtime
-- Block breaking and placement
+- Verified 26.1.2 packet IDs for live block breaking and placement packets in the built-in profile
+- Multi-client broadcasting of block breaking and placement results
 - Entities and entity tracking
 - Inventory and container behavior
 - Procedural world generation

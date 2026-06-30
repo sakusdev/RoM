@@ -67,6 +67,9 @@ pub enum PacketKind {
     MovePlayerPositionRotation,
     MovePlayerRotation,
     MovePlayerStatusOnly,
+    PlayerAction,
+    UseItemOn,
+    BlockUpdate,
     ForgetLevelChunk,
 }
 
@@ -108,6 +111,9 @@ impl PacketKind {
             | Self::MovePlayerPositionRotation
             | Self::MovePlayerRotation
             | Self::MovePlayerStatusOnly
+            | Self::PlayerAction
+            | Self::UseItemOn
+            | Self::BlockUpdate
             | Self::ForgetLevelChunk => ProtocolPhase::Play,
         }
     }
@@ -129,7 +135,9 @@ impl PacketKind {
             | Self::MovePlayerPosition
             | Self::MovePlayerPositionRotation
             | Self::MovePlayerRotation
-            | Self::MovePlayerStatusOnly => PacketDirection::Serverbound,
+            | Self::MovePlayerStatusOnly
+            | Self::PlayerAction
+            | Self::UseItemOn => PacketDirection::Serverbound,
             _ => PacketDirection::Clientbound,
         }
     }
@@ -705,6 +713,8 @@ mod movement_packet_tests {
             PacketKind::MovePlayerPositionRotation,
             PacketKind::MovePlayerRotation,
             PacketKind::MovePlayerStatusOnly,
+            PacketKind::PlayerAction,
+            PacketKind::UseItemOn,
         ] {
             assert_eq!(kind.phase(), ProtocolPhase::Play);
             assert_eq!(kind.direction(), PacketDirection::Serverbound);
@@ -712,6 +722,11 @@ mod movement_packet_tests {
         assert_eq!(PacketKind::ForgetLevelChunk.phase(), ProtocolPhase::Play);
         assert_eq!(
             PacketKind::ForgetLevelChunk.direction(),
+            PacketDirection::Clientbound
+        );
+        assert_eq!(PacketKind::BlockUpdate.phase(), ProtocolPhase::Play);
+        assert_eq!(
+            PacketKind::BlockUpdate.direction(),
             PacketDirection::Clientbound
         );
     }

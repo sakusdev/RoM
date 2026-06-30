@@ -31,6 +31,10 @@ use std::{
     io::{self, Read, Write},
     net::{TcpListener, TcpStream},
     path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicI32, Ordering},
+    },
     thread,
     time::Duration,
 };
@@ -109,6 +113,9 @@ struct PacketIds {
     configuration_feature_flags_clientbound: Option<i32>,
     configuration_tags_clientbound: Option<i32>,
     configuration_registry_data_clientbound: Option<i32>,
+    play_player_action_serverbound: Option<i32>,
+    play_use_item_on_serverbound: Option<i32>,
+    play_block_update_clientbound: Option<i32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -117,6 +124,45 @@ struct Handshake {
     server_address: String,
     server_port: u16,
     next_state: i32,
+}
+
+#[derive(Debug)]
+struct ServerState {
+    online_players: AtomicI32,
+}
+
+impl ServerState {
+    fn new(initial_online_players: i32) -> Self {
+        Self {
+            online_players: AtomicI32::new(initial_online_players),
+        }
+    }
+
+    fn online_players(&self) -> i32 {
+        self.online_players.load(Ordering::Relaxed)
+    }
+
+    fn enter_play(&self) -> OnlinePlayerGuard<'_> {
+        self.online_players.fetch_add(1, Ordering::Relaxed);
+        OnlinePlayerGuard { state: self }
+    }
+}
+
+#[derive(Debug)]
+struct OnlinePlayerGuard<'a> {
+    state: &'a ServerState,
+}
+
+impl Drop for OnlinePlayerGuard<'_> {
+    fn drop(&mut self) {
+        self.state.online_players.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ServerContext<'a> {
+    config: &'a ServerConfig,
+    state: &'a ServerState,
 }
 
 fn main() -> Result<()> {
@@ -141,6 +187,7 @@ fn run(cli: Cli) -> Result<()> {
     config
         .protocol_profile()
         .context("cannot build configured protocol profile")?;
+    let state = Arc::new(ServerState::new(config.online_players));
     let listener = TcpListener::bind(&config.bind)
         .with_context(|| format!("cannot bind Minecraft status listener on {}", config.bind))?;
     println!(
@@ -154,8 +201,9 @@ fn run(cli: Cli) -> Result<()> {
                 let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
                 let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
                 let config = config.clone();
+                let state = Arc::clone(&state);
                 thread::spawn(move || {
-                    if let Err(error) = handle_client(&mut stream, &config) {
+                    if let Err(error) = handle_client(&mut stream, &config, &state) {
                         eprintln!("connection closed: {error:#}");
                     }
                 });
@@ -209,6 +257,9 @@ impl Default for PacketIds {
             configuration_feature_flags_clientbound: None,
             configuration_tags_clientbound: None,
             configuration_registry_data_clientbound: None,
+            play_player_action_serverbound: None,
+            play_use_item_on_serverbound: None,
+            play_block_update_clientbound: None,
         }
     }
 }
@@ -344,6 +395,18 @@ impl ServerConfig {
                     config.packets.configuration_registry_data_clientbound =
                         Some(parse_i32(value, line_index + 1)?)
                 }
+                ("protocol", "play_player_action_serverbound") => {
+                    config.packets.play_player_action_serverbound =
+                        Some(parse_i32(value, line_index + 1)?)
+                }
+                ("protocol", "play_use_item_on_serverbound") => {
+                    config.packets.play_use_item_on_serverbound =
+                        Some(parse_i32(value, line_index + 1)?)
+                }
+                ("protocol", "play_block_update_clientbound") => {
+                    config.packets.play_block_update_clientbound =
+                        Some(parse_i32(value, line_index + 1)?)
+                }
                 _ => bail!("unknown config key [{section}].{key}"),
             }
         }
@@ -392,7 +455,12 @@ impl ServerConfig {
         }
     }
 
+    #[cfg(test)]
     fn status_json(&self) -> String {
+        self.status_json_with_online_players(self.online_players)
+    }
+
+    fn status_json_with_online_players(&self, online_players: i32) -> String {
         let mut root = Map::new();
         root.insert(
             "version".to_owned(),
@@ -404,7 +472,7 @@ impl ServerConfig {
         if !self.hide_online_players {
             let mut players = Map::new();
             players.insert("max".to_owned(), json!(self.max_players));
-            players.insert("online".to_owned(), json!(self.online_players));
+            players.insert("online".to_owned(), json!(online_players));
             if !self.sample_players.is_empty() {
                 players.insert(
                     "sample".to_owned(),
@@ -520,6 +588,18 @@ impl ServerConfig {
             (
                 PacketKind::RegistryData,
                 self.packets.configuration_registry_data_clientbound,
+            ),
+            (
+                PacketKind::PlayerAction,
+                self.packets.play_player_action_serverbound,
+            ),
+            (
+                PacketKind::UseItemOn,
+                self.packets.play_use_item_on_serverbound,
+            ),
+            (
+                PacketKind::BlockUpdate,
+                self.packets.play_block_update_clientbound,
             ),
         ] {
             if let Some(id) = id {
@@ -655,9 +735,9 @@ fn base64_encode(bytes: &[u8]) -> String {
     output
 }
 
-fn handle_client(stream: &mut TcpStream, config: &ServerConfig) -> Result<()> {
+fn handle_client(stream: &mut TcpStream, config: &ServerConfig, state: &ServerState) -> Result<()> {
     let mut reader = stream.try_clone().context("cannot clone TCP stream")?;
-    handle_connection_protocol_with_play_round_limit(&mut reader, stream, config, None)
+    handle_connection_protocol_with_play_round_limit(&mut reader, stream, config, state, None)
 }
 
 #[cfg(test)]
@@ -666,16 +746,29 @@ fn handle_connection_protocol<R: Read, W: Write>(
     writer: W,
     config: &ServerConfig,
 ) -> Result<()> {
-    handle_connection_protocol_with_play_round_limit(reader, writer, config, Some(1))
+    let state = ServerState::new(config.online_players);
+    handle_connection_protocol_with_play_round_limit(reader, writer, config, &state, Some(1))
+}
+
+#[cfg(test)]
+fn handle_connection_protocol_with_state<R: Read, W: Write>(
+    reader: R,
+    writer: W,
+    config: &ServerConfig,
+    state: &ServerState,
+) -> Result<()> {
+    handle_connection_protocol_with_play_round_limit(reader, writer, config, state, Some(1))
 }
 
 fn handle_connection_protocol_with_play_round_limit<R: Read, W: Write>(
     mut reader: R,
     writer: W,
     config: &ServerConfig,
+    state: &ServerState,
     play_round_limit: Option<usize>,
 ) -> Result<()> {
     let profile = config.protocol_profile()?;
+    let context = ServerContext { config, state };
     let handshake_packet = read_packet(&mut reader).context("cannot read handshake packet")?;
     let handshake = parse_handshake_packet(&handshake_packet, profile.packets())?;
     let intent = handshake.intent()?;
@@ -683,12 +776,12 @@ fn handle_connection_protocol_with_play_round_limit<R: Read, W: Write>(
     session.handshake(handshake.protocol, intent)?;
     match intent {
         HandshakeIntent::Status => {
-            handle_status_protocol(reader, writer, config, &profile, &mut session)
+            handle_status_protocol(reader, writer, context, &profile, &mut session)
         }
         HandshakeIntent::Login => handle_login_protocol(
             reader,
             writer,
-            config,
+            context,
             &handshake,
             &profile,
             &mut session,
@@ -710,7 +803,7 @@ impl Handshake {
 fn handle_status_protocol<R: Read, W: Write>(
     mut reader: R,
     mut writer: W,
-    config: &ServerConfig,
+    context: ServerContext<'_>,
     profile: &ProtocolProfile,
     session: &mut ProtocolSession,
 ) -> Result<()> {
@@ -726,7 +819,14 @@ fn handle_status_protocol<R: Read, W: Write>(
         &mut writer,
         &build_packet(
             profile.packets().require(PacketKind::StatusResponse)?,
-            |body| write_string(body, &config.status_json()),
+            |body| {
+                write_string(
+                    body,
+                    &context
+                        .config
+                        .status_json_with_online_players(context.state.online_players()),
+                )
+            },
         )?,
     )?;
     session.status_response_sent()?;
@@ -764,12 +864,13 @@ fn handle_status_protocol<R: Read, W: Write>(
 fn handle_login_protocol<R: Read, W: Write>(
     mut reader: R,
     mut writer: W,
-    config: &ServerConfig,
+    context: ServerContext<'_>,
     handshake: &Handshake,
     profile: &ProtocolProfile,
     session: &mut ProtocolSession,
     play_round_limit: Option<usize>,
 ) -> Result<()> {
+    let config = context.config;
     if config.profile_name.is_some() && !profile.supports(handshake.protocol) {
         write_packet(
             &mut writer,
@@ -794,12 +895,9 @@ fn handle_login_protocol<R: Read, W: Write>(
     session.login_start(username.clone())?;
     let identity = offline_player_identity(&username);
     println!(
-        "login attempt from {} ({}) for {}:{} using protocol {} online_mode={}",
+        "login attempt from {} ({}) online_mode={}",
         identity.username,
         identity.uuid.hyphenated(),
-        handshake.server_address,
-        handshake.server_port,
-        handshake.protocol,
         config.online_mode
     );
 
@@ -821,7 +919,7 @@ fn handle_login_protocol<R: Read, W: Write>(
             handle_configuration_protocol(
                 &mut reader,
                 &mut writer,
-                config,
+                context,
                 profile,
                 session,
                 play_round_limit,
@@ -844,11 +942,12 @@ fn handle_login_protocol<R: Read, W: Write>(
 fn handle_configuration_protocol<R: Read, W: Write>(
     reader: &mut R,
     writer: &mut W,
-    config: &ServerConfig,
+    context: ServerContext<'_>,
     profile: &ProtocolProfile,
     session: &mut ProtocolSession,
     play_round_limit: Option<usize>,
 ) -> Result<()> {
+    let config = context.config;
     let login_acknowledged =
         read_packet(reader).context("cannot read login acknowledged packet")?;
     let mut login_acknowledged_reader = PacketReader::new(&login_acknowledged);
@@ -922,21 +1021,23 @@ fn handle_configuration_protocol<R: Read, W: Write>(
     }
     session.configuration_acknowledged()?;
     println!("configuration completed; connection entered Play state");
-    handle_play_protocol(reader, writer, config, profile, session, play_round_limit)
+    handle_play_protocol(reader, writer, context, profile, session, play_round_limit)
 }
 
 fn handle_play_protocol<R: Read, W: Write>(
     reader: &mut R,
     writer: &mut W,
-    config: &ServerConfig,
+    context: ServerContext<'_>,
     profile: &ProtocolProfile,
     session: &mut ProtocolSession,
     play_round_limit: Option<usize>,
 ) -> Result<()> {
+    let config = context.config;
     if config.profile_name.as_deref() != Some(version_26_1_2::PROFILE_NAME) {
         return Ok(());
     }
 
+    let _online_player = context.state.enter_play();
     let result =
         run_static_play_session(reader, writer, config, profile, session, play_round_limit);
     if let Err(error) = result {
@@ -1474,6 +1575,51 @@ mod tests {
         assert_eq!(status["enforcesSecureChat"], true);
         assert_eq!(status["previewsChat"], false);
         assert_eq!(status["favicon"], "data:image/png;base64,iVBORw0KGgo=");
+    }
+
+    #[test]
+    fn status_json_can_use_live_online_player_count() {
+        let config = ServerConfig {
+            online_players: 0,
+            max_players: 10,
+            ..ServerConfig::default()
+        };
+        let state = ServerState::new(config.online_players);
+
+        {
+            let _first_player = state.enter_play();
+            let _second_player = state.enter_play();
+
+            let mut input = Vec::new();
+            write_packet(
+                &mut input,
+                &build_packet(0, |body| {
+                    write_varint_vec(body, 2600);
+                    write_string(body, "localhost")?;
+                    body.extend_from_slice(&25565u16.to_be_bytes());
+                    write_varint_vec(body, 1);
+                    Ok(())
+                })
+                .unwrap(),
+            )
+            .unwrap();
+            write_packet(&mut input, &build_packet(0, |_| Ok(())).unwrap()).unwrap();
+
+            let mut output = Vec::new();
+            handle_connection_protocol_with_state(Cursor::new(input), &mut output, &config, &state)
+                .unwrap();
+            let response = read_packet(&mut Cursor::new(output)).unwrap();
+            let mut response_reader = PacketReader::new(&response);
+            assert_eq!(response_reader.read_varint().unwrap(), 0);
+            let status: Value = serde_json::from_str(&response_reader.read_string().unwrap())
+                .expect("status should be valid JSON");
+            assert_eq!(status["players"]["online"], 2);
+        }
+
+        let status: Value =
+            serde_json::from_str(&config.status_json_with_online_players(state.online_players()))
+                .expect("status should be valid JSON");
+        assert_eq!(status["players"]["online"], 0);
     }
 
     #[test]

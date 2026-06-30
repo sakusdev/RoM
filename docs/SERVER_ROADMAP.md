@@ -24,15 +24,19 @@ The current server milestone provides:
 - Static-overworld Join Game, default spawn, player-position synchronization, and Keep Alive
 - Palette-encoded in-memory flat chunks with full skylight and chunk-batch negotiation
 - All four serverbound movement packet forms with bounded decoding
+- Bounded serverbound player-action and use-item-on-block payload decoding
+- Per-connection deterministic world-runtime application for decoded block mutation events
+- Clientbound block-update payload encoding and optional local mutation writeback for profiles that expose that packet ID
 - Per-connection player position, rotation, movement flags, and current-chunk state
 - Deterministic 3×3 chunk views with cache-center updates, new chunk batches, and unloads
 - Version-neutral 20 TPS tick scheduling with capped catch-up
 - Globally bounded, per-connection sequenced input queues
 - Deterministic fair per-tick input draining and mutation budgets
 - Welcome system chat and graceful Play disconnects
+- Live online-player count in server-list status responses
 - Version-neutral in-memory world coordinates, sections, block states, biome IDs, and chunk views
 
-The socket runtime now uses `ProtocolProfile` and `ProtocolSession` from Handshake through Play. The 26.1.2 profile validates the handshake protocol, negotiates the vanilla core known pack, sends the full synchronized registry set, completes Configuration, sends the flat-overworld Play bootstrap, validates teleport and chunk-batch acknowledgements, and enters a movement-aware Play loop. The server tracks each player's authoritative position and rotation, updates the chunk-cache center only after crossing a chunk boundary, sends newly visible chunks, unloads chunks that leave the 3×3 view, and continues Keep Alive validation while processing movement. The standalone `ferrum-runtime` crate now provides deterministic scheduling and bounded input-ordering primitives for the next shared-world integration. Block interactions, entities, the live shared-world runtime, and persistence are not implemented yet.
+The socket runtime now uses `ProtocolProfile` and `ProtocolSession` from Handshake through Play. The 26.1.2 profile validates the handshake protocol, negotiates the vanilla core known pack, sends the full synchronized registry set, completes Configuration, sends the flat-overworld Play bootstrap, validates teleport and chunk-batch acknowledgements, and enters a movement-aware Play loop. The server tracks each player's authoritative position and rotation, updates the chunk-cache center only after crossing a chunk boundary, sends newly visible chunks, unloads chunks that leave the 3×3 view, keeps the server-list online-player count synchronized with Play connections, and continues Keep Alive validation while processing movement. The standalone `ferrum-runtime` crate now provides deterministic scheduling and bounded input-ordering primitives, and the Play loop can route decoded block mutation events through a local deterministic world runtime. If the active profile exposes a clientbound Block Update packet ID, accepted local mutations are written back to the client. Entities, the live shared-world runtime, verified 26.1.2 block interaction packet IDs, multi-client block update broadcasting, and persistence are not implemented yet.
 
 ## M9 — Binary NBT foundation
 
@@ -124,6 +128,8 @@ Completed:
 - Add exact protocol-775 packet IDs for Client Tick End and all four serverbound movement packets.
 - Decode position, rotation, position-plus-rotation, and status-only movement payloads with exact lengths.
 - Reject NaN, infinity, coordinates outside the supported world range, unknown movement-flag bits, and trailing bytes.
+- Decode and validate serverbound block interaction payloads once a profile exposes their packet IDs.
+- Convert validated block break/place interactions into version-neutral `WorldEvent` mutations.
 - Reject movement received before the initial teleport acknowledgement.
 - Store authoritative per-connection position, yaw, pitch, on-ground state, and horizontal-collision state.
 - Convert player coordinates to chunk coordinates correctly across negative boundaries.
@@ -177,12 +183,19 @@ Completed foundation:
 - Implement mutable 16×16×16 chunk sections and 4×4×4 biome containers.
 - Track non-air block counts incrementally.
 - Build deterministic four-layer flat overworld chunks at arbitrary chunk positions.
+- Apply deterministic world-coordinate block mutations with chunk/local coordinate reporting.
+- Store loaded chunks in deterministic coordinate order and route world-coordinate mutations to the owning chunk.
+- Expose runtime-compatible world events and verify loaded chunks mutate through `DeterministicRuntime` in authoritative order.
+- Enqueue decoded block break/place events into the live Play path's local deterministic world runtime.
+- Encode clientbound Block Update packets and send accepted local mutations when the profile exposes `BlockUpdate`.
 - Keep protocol serialization and version-specific numeric IDs outside the world crate.
 
 Remaining:
 
-- Add block mutation and interaction handling.
-- Integrate world mutation with the shared authoritative runtime.
+- Verify exact 26.1.2 packet IDs for Player Action, Use Item On, and Block Update before adding them to the built-in profile.
+- Promote per-connection local world runtimes into one shared authoritative world runtime.
+- Broadcast accepted block mutations back to affected clients.
+- Wire live network workers into the shared authoritative world runtime.
 - Add NBT-backed Anvil region reading.
 - Add safe asynchronous loading and saving.
 - Preserve deterministic world mutation through the authoritative tick loop.

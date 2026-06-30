@@ -8,6 +8,7 @@ mod chunk_view;
 
 pub use chunk_view::{ChunkView, ChunkViewDelta, ChunkViewError};
 
+use std::collections::BTreeMap;
 use thiserror::Error;
 
 pub const SECTION_EDGE: usize = 16;
@@ -49,6 +50,41 @@ impl BiomeId {
 pub struct ChunkPos {
     pub x: i32,
     pub z: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct BlockPos {
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BlockMutation {
+    pub position: BlockPos,
+    pub state: BlockStateId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AppliedBlockMutation {
+    pub position: BlockPos,
+    pub chunk: ChunkPos,
+    pub section_y: i32,
+    pub local_x: usize,
+    pub local_y: usize,
+    pub local_z: usize,
+    pub previous: BlockStateId,
+    pub current: BlockStateId,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorldEvent {
+    BlockMutation(BlockMutation),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppliedWorldEvent {
+    BlockMutation(AppliedBlockMutation),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -216,6 +252,54 @@ impl StaticChunk {
         self.section_mut(section_y)?.set_block(x, local_y, z, state)
     }
 
+    pub fn block(&self, x: usize, world_y: i32, z: usize) -> Result<BlockStateId, WorldError> {
+        if x >= SECTION_EDGE || z >= SECTION_EDGE {
+            return Err(WorldError::BlockCoordinateOutOfRange { x, y: 0, z });
+        }
+        let section_y = world_y.div_euclid(SECTION_EDGE as i32);
+        let local_y = world_y.rem_euclid(SECTION_EDGE as i32) as usize;
+        self.section(section_y)?.block(x, local_y, z)
+    }
+
+    pub fn apply_block_mutation(
+        &mut self,
+        mutation: BlockMutation,
+    ) -> Result<AppliedBlockMutation, WorldError> {
+        let (chunk, local_x, local_z) = split_world_block_xz(mutation.position)?;
+        if chunk != self.pos {
+            return Err(WorldError::BlockOutsideChunk {
+                position: mutation.position,
+                chunk: self.pos,
+            });
+        }
+        let section_y = mutation.position.y.div_euclid(SECTION_EDGE as i32);
+        let local_y = mutation.position.y.rem_euclid(SECTION_EDGE as i32) as usize;
+        let previous =
+            self.section_mut(section_y)?
+                .set_block(local_x, local_y, local_z, mutation.state)?;
+        Ok(AppliedBlockMutation {
+            position: mutation.position,
+            chunk,
+            section_y,
+            local_x,
+            local_y,
+            local_z,
+            previous,
+            current: mutation.state,
+        })
+    }
+
+    pub fn world_block(&self, position: BlockPos) -> Result<BlockStateId, WorldError> {
+        let (chunk, local_x, local_z) = split_world_block_xz(position)?;
+        if chunk != self.pos {
+            return Err(WorldError::BlockOutsideChunk {
+                position,
+                chunk: self.pos,
+            });
+        }
+        self.block(local_x, position.y, local_z)
+    }
+
     #[must_use]
     pub const fn pos(&self) -> ChunkPos {
         self.pos
@@ -261,6 +345,72 @@ impl StaticChunk {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ChunkStore {
+    chunks: BTreeMap<ChunkPos, StaticChunk>,
+}
+
+impl ChunkStore {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn insert(&mut self, chunk: StaticChunk) -> Option<StaticChunk> {
+        self.chunks.insert(chunk.pos(), chunk)
+    }
+
+    #[must_use]
+    pub fn chunk(&self, pos: ChunkPos) -> Option<&StaticChunk> {
+        self.chunks.get(&pos)
+    }
+
+    pub fn chunk_mut(&mut self, pos: ChunkPos) -> Option<&mut StaticChunk> {
+        self.chunks.get_mut(&pos)
+    }
+
+    pub fn world_block(&self, position: BlockPos) -> Result<BlockStateId, WorldError> {
+        let (chunk_pos, _, _) = split_world_block_xz(position)?;
+        self.chunks
+            .get(&chunk_pos)
+            .ok_or(WorldError::MissingChunk { chunk: chunk_pos })?
+            .world_block(position)
+    }
+
+    pub fn apply_block_mutation(
+        &mut self,
+        mutation: BlockMutation,
+    ) -> Result<AppliedBlockMutation, WorldError> {
+        let (chunk_pos, _, _) = split_world_block_xz(mutation.position)?;
+        self.chunks
+            .get_mut(&chunk_pos)
+            .ok_or(WorldError::MissingChunk { chunk: chunk_pos })?
+            .apply_block_mutation(mutation)
+    }
+
+    pub fn apply_event(&mut self, event: WorldEvent) -> Result<AppliedWorldEvent, WorldError> {
+        match event {
+            WorldEvent::BlockMutation(mutation) => Ok(AppliedWorldEvent::BlockMutation(
+                self.apply_block_mutation(mutation)?,
+            )),
+        }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&ChunkPos, &StaticChunk)> {
+        self.chunks.iter()
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.chunks.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.chunks.is_empty()
+    }
+}
+
 fn block_index(x: usize, y: usize, z: usize) -> Result<usize, WorldError> {
     if x >= SECTION_EDGE || y >= SECTION_EDGE || z >= SECTION_EDGE {
         return Err(WorldError::BlockCoordinateOutOfRange { x, y, z });
@@ -273,6 +423,29 @@ fn biome_index(x: usize, y: usize, z: usize) -> Result<usize, WorldError> {
         return Err(WorldError::BiomeCoordinateOutOfRange { x, y, z });
     }
     Ok((y << 4) | (z << 2) | x)
+}
+
+fn split_world_block_xz(position: BlockPos) -> Result<(ChunkPos, usize, usize), WorldError> {
+    let chunk_x = position
+        .x
+        .checked_div_euclid(SECTION_EDGE as i32)
+        .ok_or(WorldError::BlockCoordinateOverflow)?;
+    let chunk_z = position
+        .z
+        .checked_div_euclid(SECTION_EDGE as i32)
+        .ok_or(WorldError::BlockCoordinateOverflow)?;
+    let local_x = usize::try_from(position.x.rem_euclid(SECTION_EDGE as i32))
+        .map_err(|_| WorldError::BlockCoordinateOverflow)?;
+    let local_z = usize::try_from(position.z.rem_euclid(SECTION_EDGE as i32))
+        .map_err(|_| WorldError::BlockCoordinateOverflow)?;
+    Ok((
+        ChunkPos {
+            x: chunk_x,
+            z: chunk_z,
+        },
+        local_x,
+        local_z,
+    ))
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -293,6 +466,19 @@ pub enum WorldError {
     },
     #[error("block coordinate is outside a 16x16x16 section: ({x}, {y}, {z})")]
     BlockCoordinateOutOfRange { x: usize, y: usize, z: usize },
+    #[error("block coordinate arithmetic overflowed")]
+    BlockCoordinateOverflow,
+    #[error(
+        "world block ({}, {}, {}) is outside chunk ({}, {})",
+        position.x,
+        position.y,
+        position.z,
+        chunk.x,
+        chunk.z
+    )]
+    BlockOutsideChunk { position: BlockPos, chunk: ChunkPos },
+    #[error("chunk ({}, {}) is not loaded", chunk.x, chunk.z)]
+    MissingChunk { chunk: ChunkPos },
     #[error("biome coordinate is outside a 4x4x4 section: ({x}, {y}, {z})")]
     BiomeCoordinateOutOfRange { x: usize, y: usize, z: usize },
     #[error("non-empty block count overflow")]
@@ -302,6 +488,8 @@ pub enum WorldError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ferrum_runtime::{ConnectionId, DeterministicRuntime, Tick};
+    use std::num::NonZeroUsize;
 
     const AIR: BlockStateId = BlockStateId::new(0);
     const STONE: BlockStateId = BlockStateId::new(1);
@@ -363,5 +551,207 @@ mod tests {
         let mut chunk = StaticChunk::new(ChunkPos { x: 0, z: 0 }, -4, 24, AIR, PLAINS).unwrap();
         let error = chunk.set_block(0, 320, 0, STONE).unwrap_err();
         assert!(matches!(error, WorldError::SectionOutOfRange { .. }));
+    }
+
+    #[test]
+    fn applies_world_block_mutations_with_negative_coordinate_flooring() {
+        let mut chunk = StaticChunk::new(ChunkPos { x: -1, z: -1 }, -4, 24, AIR, PLAINS).unwrap();
+        let applied = chunk
+            .apply_block_mutation(BlockMutation {
+                position: BlockPos {
+                    x: -1,
+                    y: -1,
+                    z: -16,
+                },
+                state: STONE,
+            })
+            .unwrap();
+
+        assert_eq!(applied.chunk, ChunkPos { x: -1, z: -1 });
+        assert_eq!(applied.section_y, -1);
+        assert_eq!(applied.local_x, 15);
+        assert_eq!(applied.local_y, 15);
+        assert_eq!(applied.local_z, 0);
+        assert_eq!(applied.previous, AIR);
+        assert_eq!(applied.current, STONE);
+        assert_eq!(
+            chunk
+                .world_block(BlockPos {
+                    x: -1,
+                    y: -1,
+                    z: -16
+                })
+                .unwrap(),
+            STONE
+        );
+        assert_eq!(chunk.section(-1).unwrap().non_empty_block_count(), 1);
+    }
+
+    #[test]
+    fn rejects_world_block_mutations_for_other_chunks() {
+        let mut chunk = StaticChunk::new(ChunkPos { x: 0, z: 0 }, -4, 24, AIR, PLAINS).unwrap();
+        let error = chunk
+            .apply_block_mutation(BlockMutation {
+                position: BlockPos { x: 16, y: 0, z: 0 },
+                state: STONE,
+            })
+            .unwrap_err();
+        assert_eq!(
+            error,
+            WorldError::BlockOutsideChunk {
+                position: BlockPos { x: 16, y: 0, z: 0 },
+                chunk: ChunkPos { x: 0, z: 0 },
+            }
+        );
+    }
+
+    #[test]
+    fn chunk_store_applies_world_mutations_to_the_target_chunk() {
+        let mut store = ChunkStore::new();
+        store.insert(StaticChunk::new(ChunkPos { x: -1, z: 2 }, -4, 24, AIR, PLAINS).unwrap());
+
+        let applied = store
+            .apply_block_mutation(BlockMutation {
+                position: BlockPos {
+                    x: -1,
+                    y: 65,
+                    z: 32,
+                },
+                state: GRASS,
+            })
+            .unwrap();
+
+        assert_eq!(applied.chunk, ChunkPos { x: -1, z: 2 });
+        assert_eq!(
+            store
+                .world_block(BlockPos {
+                    x: -1,
+                    y: 65,
+                    z: 32
+                })
+                .unwrap(),
+            GRASS
+        );
+        assert_eq!(
+            store
+                .chunk(ChunkPos { x: -1, z: 2 })
+                .unwrap()
+                .section(4)
+                .unwrap()
+                .non_empty_block_count(),
+            1
+        );
+    }
+
+    #[test]
+    fn chunk_store_iteration_is_deterministic_and_reports_missing_chunks() {
+        let mut store = ChunkStore::new();
+        for pos in [
+            ChunkPos { x: 2, z: 0 },
+            ChunkPos { x: -1, z: 5 },
+            ChunkPos { x: 0, z: -3 },
+        ] {
+            store.insert(StaticChunk::new(pos, -4, 24, AIR, PLAINS).unwrap());
+        }
+
+        assert_eq!(
+            store.iter().map(|(pos, _)| *pos).collect::<Vec<_>>(),
+            [
+                ChunkPos { x: -1, z: 5 },
+                ChunkPos { x: 0, z: -3 },
+                ChunkPos { x: 2, z: 0 },
+            ]
+        );
+        assert_eq!(
+            store
+                .apply_block_mutation(BlockMutation {
+                    position: BlockPos { x: 16, y: 0, z: 0 },
+                    state: STONE,
+                })
+                .unwrap_err(),
+            WorldError::MissingChunk {
+                chunk: ChunkPos { x: 1, z: 0 },
+            }
+        );
+    }
+
+    #[test]
+    fn chunk_store_can_run_as_authoritative_runtime_state() {
+        let mut store = ChunkStore::new();
+        store.insert(StaticChunk::new(ChunkPos { x: 0, z: 0 }, -4, 24, AIR, PLAINS).unwrap());
+        let mut runtime = DeterministicRuntime::new(
+            store,
+            NonZeroUsize::new(8).unwrap(),
+            NonZeroUsize::new(8).unwrap(),
+        );
+
+        runtime
+            .push_input(
+                ConnectionId::new(2),
+                WorldEvent::BlockMutation(BlockMutation {
+                    position: BlockPos { x: 1, y: 64, z: 1 },
+                    state: STONE,
+                }),
+            )
+            .unwrap();
+        runtime
+            .push_input(
+                ConnectionId::new(1),
+                WorldEvent::BlockMutation(BlockMutation {
+                    position: BlockPos { x: 1, y: 64, z: 1 },
+                    state: DIRT,
+                }),
+            )
+            .unwrap();
+
+        let mut applied = Vec::new();
+        assert_eq!(
+            runtime.execute_tick(Tick::new(12), |store, tick, event| {
+                let result = store.apply_event(event.payload).unwrap();
+                applied.push((tick.get(), event.connection.get(), result));
+            }),
+            2
+        );
+
+        assert_eq!(
+            applied,
+            [
+                (
+                    12,
+                    1,
+                    AppliedWorldEvent::BlockMutation(AppliedBlockMutation {
+                        position: BlockPos { x: 1, y: 64, z: 1 },
+                        chunk: ChunkPos { x: 0, z: 0 },
+                        section_y: 4,
+                        local_x: 1,
+                        local_y: 0,
+                        local_z: 1,
+                        previous: AIR,
+                        current: DIRT,
+                    })
+                ),
+                (
+                    12,
+                    2,
+                    AppliedWorldEvent::BlockMutation(AppliedBlockMutation {
+                        position: BlockPos { x: 1, y: 64, z: 1 },
+                        chunk: ChunkPos { x: 0, z: 0 },
+                        section_y: 4,
+                        local_x: 1,
+                        local_y: 0,
+                        local_z: 1,
+                        previous: DIRT,
+                        current: STONE,
+                    })
+                ),
+            ]
+        );
+        assert_eq!(
+            runtime
+                .state()
+                .world_block(BlockPos { x: 1, y: 64, z: 1 })
+                .unwrap(),
+            STONE
+        );
     }
 }

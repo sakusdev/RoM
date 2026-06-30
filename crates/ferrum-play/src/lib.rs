@@ -2,9 +2,15 @@
 //!
 //! Packet IDs are version metadata and intentionally live outside this crate.
 
+mod block_interaction;
 mod chunk_stream;
 mod movement;
 
+pub use block_interaction::{
+    BlockFace, BlockInteractionDecodeError, InteractionHand, PlayerAction, PlayerActionStatus,
+    UseItemOnBlock, block_position_to_world, decode_player_action, decode_use_item_on_block,
+    player_action_to_world_event, use_item_on_block_to_world_event,
+};
 pub use chunk_stream::encode_forget_level_chunk;
 pub use movement::{
     MAX_PLAYER_COORDINATE, MovementDecodeError, MovementFlags, PlayerMovement, PlayerState,
@@ -15,7 +21,7 @@ pub use movement::{
 use std::collections::BTreeMap;
 
 use ferrum_nbt::{Tag, encode_anonymous};
-use ferrum_world::{ChunkSection, StaticChunk};
+use ferrum_world::{BlockStateId, ChunkSection, StaticChunk};
 use thiserror::Error;
 
 const MAX_RESOURCE_LOCATION_BYTES: usize = 32_767;
@@ -150,6 +156,16 @@ pub fn encode_system_chat(message: &str, overlay: bool) -> Result<Vec<u8>, PlayE
 
 pub fn encode_play_disconnect(message: &str) -> Result<Vec<u8>, PlayEncodeError> {
     encode_component(message)
+}
+
+pub fn encode_block_update(
+    position: BlockPosition,
+    state: BlockStateId,
+) -> Result<Vec<u8>, PlayEncodeError> {
+    let mut output = Vec::new();
+    output.extend_from_slice(&pack_block_position(position)?.to_be_bytes());
+    write_numeric_id(&mut output, "block state", state.get())?;
+    Ok(output)
 }
 
 pub fn encode_level_chunk_with_light(chunk: &StaticChunk) -> Result<Vec<u8>, PlayEncodeError> {
@@ -651,6 +667,21 @@ mod tests {
         assert!(encode_chunk_batch_start().is_empty());
         assert_eq!(encode_chunk_batch_finished(1).unwrap(), vec![1]);
         assert_eq!(encode_set_chunk_cache_center(0, 0), vec![0, 0]);
+    }
+
+    #[test]
+    fn encodes_block_update_exactly() {
+        let payload =
+            encode_block_update(BlockPosition { x: 1, y: 65, z: -2 }, BlockStateId::new(300))
+                .unwrap();
+        let mut expected = Vec::new();
+        expected.extend_from_slice(
+            &pack_block_position(BlockPosition { x: 1, y: 65, z: -2 })
+                .unwrap()
+                .to_be_bytes(),
+        );
+        expected.extend_from_slice(&[0xac, 0x02]);
+        assert_eq!(payload, expected);
     }
 
     #[test]
