@@ -19,10 +19,11 @@ RoM follows a Fabric-installer-style bootstrap model while preserving its native
 3. The official server JAR is downloaded directly on the user's machine from an official Mojang/Microsoft HTTPS endpoint.
 4. Its size and SHA-1 are checked against official metadata.
 5. The JAR remains in a local cache and is not bundled into RoM releases.
-6. RoM records the source hash and patch-set identity in local bootstrap metadata.
-7. The native `rom-server` executable is built or installed and remains the runtime.
+6. RoM scans only synchronized-registry JSON resources from the locally obtained game JAR.
+7. A deterministic, integrity-protected `.rompack` records registry IDs, source-resource hashes, source hashes, and patch-set identity.
+8. The native `rom-server` validates that pack against its built-in 26.1.2 profile before starting.
 
-The current bootstrap implementation stops at the **verified official source** stage. It does not decompile, translate, execute, patch, or redistribute the official server JAR. Deterministic local version-pack generation is planned as a later stage.
+The current bootstrap implementation supports the **version pack generated** stage. It does not decompile, translate, execute, bytecode-patch, or redistribute the official server JAR. The generated pack contains derived registry identifiers and source-resource hashes, not copied JSON payloads.
 
 See [`docs/BOOTSTRAP.md`](docs/BOOTSTRAP.md) and [`NOTICE.md`](NOTICE.md).
 
@@ -95,7 +96,7 @@ Not implemented yet:
 - World persistence and Anvil region saving
 - Multi-version gameplay compatibility
 - Fabric, Bukkit, Spigot, or Paper plugin compatibility
-- Deterministic local extraction and completed `.rompack` generation
+- Runtime replacement of the remaining built-in packet/profile constants with generated pack data
 
 > [!CAUTION]
 > The default configuration binds to loopback and uses development-only offline login. Do not expose that configuration to the public internet. It does not prove that a connecting user owns Minecraft.
@@ -123,7 +124,16 @@ Review the Minecraft EULA, then explicitly acknowledge it:
 
 This downloads the official server JAR directly from an official endpoint, validates the official version metadata and JAR SHA-1, and writes local provenance records. RoM does not execute the JAR.
 
-### 3. Install the native server
+### 3. Generate the local version pack
+
+```bash
+./target/release/rom-bootstrap generate \
+  --instance ./rom-instance
+```
+
+The extractor opens the verified local JAR, resolves the bundled game JAR when present, validates all selected JSON resources, derives the exact synchronized-registry identifiers, compares them with the built-in 26.1.2 manifest, and writes an integrity-protected `.rompack`.
+
+### 4. Install the native server
 
 ```bash
 ./target/release/rom-bootstrap install-local \
@@ -131,7 +141,7 @@ This downloads the official server JAR directly from an official endpoint, valid
   --workspace .
 ```
 
-### 4. Inspect and run
+### 5. Inspect and run
 
 ```bash
 ./target/release/rom-bootstrap status --instance ./rom-instance
@@ -175,6 +185,7 @@ rom-instance/
 │           └── server.jar
 ├── versions/
 │   └── 26.1.2/
+│       ├── 26.1.2.rompack
 │       └── rompack.json
 ├── eula.txt
 ├── NOTICE.txt
@@ -202,7 +213,8 @@ RoM separates version-independent server behavior from version-specific wire met
 
 Core crates:
 
-- `rom-bootstrap` — official-source verification and local instance management
+- `rom-bootstrap` — official-source verification, bounded local extraction, and instance management
+- `ferrum-rompack` — deterministic pack encoding, integrity validation, and bounded decoding
 - `ferrum-server` — native TCP server and connection runtime
 - `ferrum-runtime` — fixed-rate ticks, bounded inputs, and deterministic mutation ordering
 - `ferrum-protocol` — packet tables, phases, and connection-state validation
@@ -231,14 +243,13 @@ Design rules:
 The next server and bootstrap milestones are:
 
 1. Package `rom-bootstrap` alongside `rom-server` in native release archives
-2. Define a deterministic local `.rompack` format
-3. Extract only required version data into locally generated packs
-4. Wire dedicated network workers into the authoritative 20 TPS runtime
-5. Add full block interaction and inventory validation
-6. Add entities and entity tracking
-7. Add persistent Anvil region loading and saving
-8. Add Microsoft account authentication and encrypted online mode
-9. Add additional Minecraft version profiles
+2. Move more version-specific runtime metadata from built-in Rust constants into generated packs
+3. Wire dedicated network workers into the authoritative 20 TPS runtime
+4. Add full block interaction and inventory validation
+5. Add entities and entity tracking
+6. Add persistent Anvil region loading and saving
+7. Add Microsoft account authentication and encrypted online mode
+8. Add additional Minecraft version profiles
 
 See [`docs/SERVER_ROADMAP.md`](docs/SERVER_ROADMAP.md) for the detailed server plan.
 

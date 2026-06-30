@@ -154,7 +154,7 @@ pub fn decode_rompack(bytes: &[u8], limits: RomPackLimits) -> Result<RomPack> {
     let payload_end = HEADER_BYTES + json_length;
     let expected_digest = &bytes[payload_end..];
     let actual_digest = Sha256::digest(&bytes[..payload_end]);
-    if expected_digest != actual_digest.as_slice() {
+    if expected_digest != actual_digest.as_ref() {
         bail!("RoM version-pack integrity digest mismatch");
     }
 
@@ -204,14 +204,14 @@ pub fn read_rompack_with_limits(
     limits: RomPackLimits,
 ) -> Result<(RomPack, RomPackSummary)> {
     let path = path.as_ref();
-    let metadata = fs::metadata(path)
-        .with_context(|| format!("cannot stat {}", path.display()))?;
+    let metadata = fs::metadata(path).with_context(|| format!("cannot stat {}", path.display()))?;
     if metadata.len() > limits.max_file_bytes {
         bail!("RoM version pack exceeds the configured file limit");
     }
     let bytes = fs::read(path).with_context(|| format!("cannot read {}", path.display()))?;
     let pack = decode_rompack(&bytes, limits)?;
-    Ok((pack.clone(), summary(path.to_path_buf(), &bytes, &pack)))
+    let summary = summary(path.to_path_buf(), &bytes, &pack);
+    Ok((pack, summary))
 }
 
 pub fn validate_rompack(pack: &RomPack, limits: RomPackLimits) -> Result<()> {
@@ -227,8 +227,16 @@ pub fn validate_rompack(pack: &RomPack, limits: RomPackLimits) -> Result<()> {
     if metadata.protocol < 0 {
         bail!("version-pack protocol cannot be negative");
     }
-    validate_component("patch set", &metadata.patch_set, limits.max_identifier_bytes)?;
-    validate_component("extractor", &metadata.extractor, limits.max_identifier_bytes)?;
+    validate_component(
+        "patch set",
+        &metadata.patch_set,
+        limits.max_identifier_bytes,
+    )?;
+    validate_component(
+        "extractor",
+        &metadata.extractor,
+        limits.max_identifier_bytes,
+    )?;
     validate_hex(
         "official server SHA-1",
         &metadata.source.official_server_sha1,
@@ -242,11 +250,7 @@ pub fn validate_rompack(pack: &RomPack, limits: RomPackLimits) -> Result<()> {
         &metadata.source.game_jar_path,
         limits.max_path_bytes,
     )?;
-    validate_hex(
-        "game JAR SHA-256",
-        &metadata.source.game_jar_sha256,
-        64,
-    )?;
+    validate_hex("game JAR SHA-256", &metadata.source.game_jar_sha256, 64)?;
 
     if pack.registries.len() > limits.max_registries {
         bail!("version pack contains too many registries");
@@ -285,7 +289,10 @@ pub fn validate_rompack(pack: &RomPack, limits: RomPackLimits) -> Result<()> {
         }
         previous_resource = Some(&resource.path);
         if resource.size > limits.max_resource_bytes {
-            bail!("resource {} exceeds the configured size limit", resource.path);
+            bail!(
+                "resource {} exceeds the configured size limit",
+                resource.path
+            );
         }
         validate_hex("resource SHA-256", &resource.sha256, 64)?;
     }
@@ -329,7 +336,9 @@ fn validate_resource_location(label: &str, value: &str, max_bytes: usize) -> Res
         || !path.bytes().all(is_resource_path_byte)
         || path.starts_with('/')
         || path.ends_with('/')
-        || path.split('/').any(|component| component.is_empty() || component == "." || component == "..")
+        || path
+            .split('/')
+            .any(|component| component.is_empty() || component == "." || component == "..")
     {
         bail!("invalid {label}: {value}");
     }
@@ -388,10 +397,7 @@ mod tests {
             },
             registries: vec![RomPackRegistry {
                 id: "minecraft:worldgen/biome".to_owned(),
-                entries: vec![
-                    "minecraft:forest".to_owned(),
-                    "minecraft:plains".to_owned(),
-                ],
+                entries: vec!["minecraft:forest".to_owned(), "minecraft:plains".to_owned()],
             }],
             resources: vec![RomPackResource {
                 path: "data/minecraft/worldgen/biome/plains.json".to_owned(),

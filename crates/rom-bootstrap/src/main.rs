@@ -1,8 +1,8 @@
 use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
 use rom_bootstrap::{
-    InstallLocalOptions, PrepareOptions, install_local_server, prepare_instance, run_instance,
-    status_instance,
+    GenerateOptions, InstallLocalOptions, PrepareOptions, generate_version_pack,
+    install_local_server, prepare_instance, run_instance, status_instance,
 };
 use std::{ffi::OsString, path::PathBuf};
 
@@ -36,6 +36,21 @@ enum Command {
         /// Redownload the official artifact even when the local verified cache exists.
         #[arg(long)]
         force_download: bool,
+
+        /// Print the result as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Generate and verify a deterministic local .rompack from the prepared official source.
+    Generate {
+        /// Prepared RoM instance directory.
+        #[arg(long, default_value = "rom-instance")]
+        instance: PathBuf,
+
+        /// Regenerate the pack even when the recorded pack is already valid.
+        #[arg(long)]
+        force: bool,
 
         /// Print the result as JSON.
         #[arg(long)]
@@ -114,8 +129,38 @@ fn main() -> Result<()> {
                     }
                 );
                 println!(
-                    "Next: rom-bootstrap install-local --instance {}",
+                    "Next: rom-bootstrap generate --instance {}",
                     report.instance.display()
+                );
+            }
+        }
+        Command::Generate {
+            instance,
+            force,
+            json,
+        } => {
+            let report = generate_version_pack(&GenerateOptions { instance, force })?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!(
+                    "Generated RoM version pack: {}",
+                    report.version_pack.display()
+                );
+                println!("Pack SHA-256: {}", report.version_pack_sha256);
+                println!("Game JAR: {}", report.game_jar_path);
+                println!("Game JAR SHA-256: {}", report.game_jar_sha256);
+                println!(
+                    "Registries: {} / entries: {} / source resources: {}",
+                    report.registry_count, report.registry_entry_count, report.resource_count
+                );
+                println!(
+                    "Cache: {}",
+                    if report.reused_existing_pack {
+                        "reused"
+                    } else {
+                        "generated"
+                    }
                 );
             }
         }
@@ -156,6 +201,10 @@ fn main() -> Result<()> {
                     "Official source verified: {}",
                     report.official_source_verified
                 );
+                println!("Version pack verified: {}", report.version_pack_verified);
+                if let Some(path) = &report.version_pack_path {
+                    println!("Version pack: {}", path.display());
+                }
                 println!(
                     "Native server installed: {}",
                     report.native_server_installed

@@ -1,3 +1,7 @@
+mod extract;
+
+pub use extract::{GenerateOptions, GenerateReport, generate_version_pack};
+
 use anyhow::{Context, Result, bail};
 use reqwest::{Url, blocking::Client, redirect::Policy};
 use serde::{Deserialize, Serialize};
@@ -86,6 +90,9 @@ pub struct StatusReport {
     pub protocol: Option<i32>,
     pub official_server_jar: Option<PathBuf>,
     pub official_source_verified: bool,
+    pub version_pack_path: Option<PathBuf>,
+    pub version_pack_sha256: Option<String>,
+    pub version_pack_verified: bool,
     pub native_server_binary: Option<PathBuf>,
     pub native_server_installed: bool,
 }
@@ -98,12 +105,15 @@ struct BootstrapManifest {
     patch_set: String,
     stage: BootstrapStage,
     source: SourceRecord,
+    #[serde(default)]
+    pack: Option<extract::PackRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 enum BootstrapStage {
     OfficialSourceVerified,
+    VersionPackGenerated,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -252,7 +262,10 @@ pub fn status_instance(instance: impl AsRef<Path>) -> Result<StatusReport> {
     let (version, protocol, jar_path, verified) = if let Some(manifest) = &manifest {
         let jar_path = instance.join(&manifest.source.local_path);
         let verified = manifest.schema_version == BOOTSTRAP_SCHEMA_VERSION
-            && manifest.stage == BootstrapStage::OfficialSourceVerified
+            && matches!(
+                manifest.stage,
+                BootstrapStage::OfficialSourceVerified | BootstrapStage::VersionPackGenerated
+            )
             && jar_path.is_file()
             && verify_file(&jar_path, &manifest.source.sha1, manifest.source.size)?;
         (
@@ -263,6 +276,11 @@ pub fn status_instance(instance: impl AsRef<Path>) -> Result<StatusReport> {
         )
     } else {
         (None, None, None, false)
+    };
+    let pack_status = if let Some(manifest) = &manifest {
+        extract::verify_version_pack_record(&instance, manifest)?
+    } else {
+        extract::VersionPackStatus::default()
     };
 
     let native_binary = instance.join("bin").join(native_server_file_name());
@@ -276,6 +294,9 @@ pub fn status_instance(instance: impl AsRef<Path>) -> Result<StatusReport> {
         protocol,
         official_server_jar: jar_path,
         official_source_verified: verified,
+        version_pack_path: pack_status.path,
+        version_pack_sha256: pack_status.sha256,
+        version_pack_verified: pack_status.verified,
         native_server_binary: installed.then_some(native_binary),
         native_server_installed: installed,
     })
@@ -295,6 +316,12 @@ pub fn run_instance(
     if !status.official_source_verified {
         bail!("official Minecraft source artifact is missing or failed integrity verification");
     }
+    if !status.version_pack_verified {
+        bail!("local version pack is missing or invalid; run rom-bootstrap generate first");
+    }
+    let version_pack = status
+        .version_pack_path
+        .context("verified version pack path is missing")?;
     let binary = status
         .native_server_binary
         .context("native RoM server is not installed; run rom-bootstrap install-local")?;
@@ -306,6 +333,8 @@ pub fn run_instance(
     Command::new(binary)
         .arg("--config")
         .arg(&config)
+        .arg("--version-pack")
+        .arg(&version_pack)
         .args(server_args.iter().map(AsRef::as_ref))
         .current_dir(&instance)
         .status()
@@ -463,12 +492,9 @@ fn write_instance_files(
             size: artifact.size,
             local_path: relative_jar.to_owned(),
         },
+        pack: None,
     };
     write_json(instance.join("rom-bootstrap.json"), &manifest)?;
-    write_json(
-        instance.join("versions").join(version).join("rompack.json"),
-        &manifest,
-    )?;
     Ok(())
 }
 
@@ -710,6 +736,8 @@ mod tests {
         assert!(status.prepared);
         assert!(status.minecraft_eula_accepted);
         assert!(status.official_source_verified);
+        assert!(!status.version_pack_verified);
+        assert!(status.version_pack_path.is_none());
         assert!(!status.native_server_installed);
     }
 

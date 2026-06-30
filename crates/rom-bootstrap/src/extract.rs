@@ -53,7 +53,10 @@ const REGISTRY_SPECS: &[(&str, &str)] = &[
     ("minecraft:wolf_variant", "wolf_variant"),
     ("minecraft:world_clock", "world_clock"),
     ("minecraft:worldgen/biome", "worldgen/biome"),
-    ("minecraft:zombie_nautilus_variant", "zombie_nautilus_variant"),
+    (
+        "minecraft:zombie_nautilus_variant",
+        "zombie_nautilus_variant",
+    ),
 ];
 
 #[derive(Debug, Clone)]
@@ -100,7 +103,10 @@ pub fn generate_version_pack(options: &GenerateOptions) -> Result<GenerateReport
     let manifest_path = instance.join("rom-bootstrap.json");
     let mut manifest = read_bootstrap_manifest(&manifest_path)?;
     if manifest.schema_version != BOOTSTRAP_SCHEMA_VERSION {
-        bail!("unsupported bootstrap manifest schema {}", manifest.schema_version);
+        bail!(
+            "unsupported bootstrap manifest schema {}",
+            manifest.schema_version
+        );
     }
     if !eula_is_accepted(&instance.join("eula.txt"))? {
         bail!("Minecraft EULA acceptance is missing; run rom-bootstrap prepare first");
@@ -246,7 +252,11 @@ pub(super) fn verify_version_pack_record(
     })
 }
 
-fn report_from_existing(instance: PathBuf, pack: RomPack, summary: RomPackSummary) -> GenerateReport {
+fn report_from_existing(
+    instance: PathBuf,
+    pack: RomPack,
+    summary: RomPackSummary,
+) -> GenerateReport {
     GenerateReport {
         instance,
         minecraft_version: pack.metadata.minecraft_version,
@@ -301,9 +311,7 @@ fn resolve_game_jar(path: &Path) -> Result<ResolvedGameJar> {
     if let Some(expected_sha256) = candidate.sha256 {
         let actual = sha256_hex(&bytes);
         if !actual.eq_ignore_ascii_case(&expected_sha256) {
-            bail!(
-                "embedded game JAR SHA-256 mismatch: expected {expected_sha256}, got {actual}"
-            );
+            bail!("embedded game JAR SHA-256 mismatch: expected {expected_sha256}, got {actual}");
         }
     }
     ZipArchive::new(Cursor::new(&bytes)).context("embedded game JAR is not a valid ZIP/JAR")?;
@@ -369,10 +377,7 @@ fn find_single_embedded_jar<R: Read + Seek>(
     for index in 0..archive.len() {
         let file = archive.by_index(index)?;
         let name = file.name();
-        if !file.is_dir()
-            && name.starts_with("META-INF/versions/")
-            && name.ends_with(".jar")
-        {
+        if !file.is_dir() && name.starts_with("META-INF/versions/") && name.ends_with(".jar") {
             validate_zip_path(name)?;
             if file.size() > MAX_GAME_JAR_BYTES {
                 bail!("embedded game JAR exceeds the extractor limit");
@@ -385,13 +390,16 @@ fn find_single_embedded_jar<R: Read + Seek>(
             path: candidates.pop().expect("one candidate"),
             sha256: None,
         }),
-        0 => bail!("official server artifact does not contain registry resources or an embedded game JAR"),
+        0 => bail!(
+            "official server artifact does not contain registry resources or an embedded game JAR"
+        ),
         count => bail!("official server artifact contains {count} embedded game JAR candidates"),
     }
 }
 
 fn archive_contains_registry_resources<R: Read + Seek>(reader: R) -> Result<bool> {
-    let mut archive = ZipArchive::new(reader).context("official server artifact is not a valid ZIP/JAR")?;
+    let mut archive =
+        ZipArchive::new(reader).context("official server artifact is not a valid ZIP/JAR")?;
     ensure_archive_entry_limit(&archive)?;
     for index in 0..archive.len() {
         let file = archive.by_index(index)?;
@@ -407,8 +415,11 @@ fn archive_contains_registry_resources<R: Read + Seek>(reader: R) -> Result<bool
     Ok(false)
 }
 
-fn extract_registry_inventory(bytes: &[u8]) -> Result<(Vec<RomPackRegistry>, Vec<RomPackResource>)> {
-    let mut archive = ZipArchive::new(Cursor::new(bytes)).context("game JAR is not a valid ZIP/JAR")?;
+fn extract_registry_inventory(
+    bytes: &[u8],
+) -> Result<(Vec<RomPackRegistry>, Vec<RomPackResource>)> {
+    let mut archive =
+        ZipArchive::new(Cursor::new(bytes)).context("game JAR is not a valid ZIP/JAR")?;
     ensure_archive_entry_limit(&archive)?;
     let mut registries: BTreeMap<&str, BTreeSet<String>> = REGISTRY_SPECS
         .iter()
@@ -427,11 +438,12 @@ fn extract_registry_inventory(bytes: &[u8]) -> Result<(Vec<RomPackRegistry>, Vec
         let Some((registry_id, resource_id)) = registry_resource(&name)? else {
             continue;
         };
-        if file.size() > MAX_RESOURCE_BYTES {
+        let expected_size = file.size();
+        if expected_size > MAX_RESOURCE_BYTES {
             bail!("registry resource {name} exceeds the per-resource limit");
         }
         total_resource_bytes = total_resource_bytes
-            .checked_add(file.size())
+            .checked_add(expected_size)
             .context("registry resource size overflow")?;
         if total_resource_bytes > MAX_TOTAL_RESOURCE_BYTES {
             bail!("registry resources exceed the total extractor limit");
@@ -440,7 +452,7 @@ fn extract_registry_inventory(bytes: &[u8]) -> Result<(Vec<RomPackRegistry>, Vec
         file.take(MAX_RESOURCE_BYTES + 1)
             .read_to_end(&mut data)
             .with_context(|| format!("cannot read registry resource {name}"))?;
-        if data.len() as u64 != file.size() {
+        if data.len() as u64 != expected_size {
             bail!("registry resource {name} length changed while reading");
         }
         serde_json::from_slice::<serde_json::Value>(&data)
@@ -484,9 +496,7 @@ fn registry_resource(path: &str) -> Result<Option<(&'static str, String)>> {
         let Some(relative) = path.strip_prefix(&prefix) else {
             continue;
         };
-        let relative = relative
-            .strip_suffix(".json")
-            .expect("JSON suffix checked");
+        let relative = relative.strip_suffix(".json").expect("JSON suffix checked");
         if relative.is_empty()
             || relative.starts_with('/')
             || relative.ends_with('/')
@@ -612,7 +622,8 @@ mod tests {
         let mut cursor = Cursor::new(Vec::new());
         {
             let mut writer = ZipWriter::new(&mut cursor);
-            let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+            let options =
+                SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
             for (_, directory) in REGISTRY_SPECS {
                 writer
                     .start_file(format!("data/minecraft/{directory}/sample.json"), options)
@@ -628,17 +639,16 @@ mod tests {
         let mut cursor = Cursor::new(Vec::new());
         {
             let mut writer = ZipWriter::new(&mut cursor);
-            let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+            let options =
+                SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
             let digest = sha256_hex(game_jar);
             writer
                 .start_file("META-INF/versions.list", options)
                 .unwrap();
             writer
                 .write_all(
-                    format!(
-                        "{digest}\tserver-26.1.2\tMETA-INF/versions/26.1.2/server.jar\n"
-                    )
-                    .as_bytes(),
+                    format!("{digest}\tserver-26.1.2\tMETA-INF/versions/26.1.2/server.jar\n")
+                        .as_bytes(),
                 )
                 .unwrap();
             writer
@@ -657,9 +667,11 @@ mod tests {
         assert_eq!(resources.len(), REGISTRY_SPECS.len());
         assert!(registries.windows(2).all(|pair| pair[0].id < pair[1].id));
         assert!(resources.windows(2).all(|pair| pair[0].path < pair[1].path));
-        assert!(registries.iter().all(|registry| {
-            registry.entries == ["minecraft:sample".to_owned()]
-        }));
+        assert!(
+            registries
+                .iter()
+                .all(|registry| { registry.entries == ["minecraft:sample".to_owned()] })
+        );
     }
 
     #[test]
@@ -670,10 +682,7 @@ mod tests {
         let path = directory.path().join("server.jar");
         fs::write(&path, outer).unwrap();
         let resolved = resolve_game_jar(&path).unwrap();
-        assert_eq!(
-            resolved.path,
-            "META-INF/versions/26.1.2/server.jar"
-        );
+        assert_eq!(resolved.path, "META-INF/versions/26.1.2/server.jar");
         assert_eq!(resolved.sha256, sha256_hex(&game_jar));
         assert_eq!(resolved.bytes, game_jar);
     }
@@ -683,7 +692,8 @@ mod tests {
         let mut cursor = Cursor::new(Vec::new());
         {
             let mut writer = ZipWriter::new(&mut cursor);
-            let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+            let options =
+                SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
             for (_, directory) in REGISTRY_SPECS {
                 writer
                     .start_file(format!("data/minecraft/{directory}/sample.json"), options)
