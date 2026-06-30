@@ -71,6 +71,19 @@ impl SharedWorld {
         ensure_chunks_loaded(inner.runtime.state_mut(), positions)
     }
 
+    pub(super) fn chunk_snapshot(&self, pos: ChunkPos) -> Result<StaticChunk> {
+        let inner = self
+            .inner
+            .lock()
+            .map_err(|_| anyhow::anyhow!("shared world lock poisoned"))?;
+        inner
+            .runtime
+            .state()
+            .chunk(pos)
+            .cloned()
+            .with_context(|| format!("shared world is missing chunk ({}, {})", pos.x, pos.z))
+    }
+
     fn apply_event(
         &self,
         connection: ConnectionId,
@@ -134,7 +147,7 @@ pub(super) fn run_play_loop<R: Read, W: Write>(
     if play_round_limit.is_none() {
         let initial_delta = view.synchronize()?;
         shared_world.ensure_chunks_loaded(&initial_delta.newly_visible)?;
-        send_chunk_view_delta(writer, profile, view.center(), &initial_delta)?;
+        send_chunk_view_delta(writer, profile, shared_world, view.center(), &initial_delta)?;
     }
 
     let tick_interval = usize::try_from(KEEP_ALIVE_INTERVAL.as_secs())
@@ -214,7 +227,13 @@ pub(super) fn run_play_loop<R: Read, W: Write>(
                     if current_chunk != previous_chunk {
                         let delta = view.recenter(current_chunk)?;
                         shared_world.ensure_chunks_loaded(&delta.newly_visible)?;
-                        send_chunk_view_delta(writer, profile, current_chunk, &delta)?;
+                        send_chunk_view_delta(
+                            writer,
+                            profile,
+                            shared_world,
+                            current_chunk,
+                            &delta,
+                        )?;
                     }
                 }
                 Some(PacketKind::PlayerAction) => {
@@ -422,6 +441,7 @@ fn require_empty(reader: &mut PacketReader<'_>, label: &str) -> Result<()> {
 fn send_chunk_view_delta<W: Write>(
     writer: &mut W,
     profile: &ProtocolProfile,
+    shared_world: &SharedWorld,
     center: ChunkPos,
     delta: &ChunkViewDelta,
 ) -> Result<()> {
@@ -451,11 +471,12 @@ fn send_chunk_view_delta<W: Write>(
             &encode_chunk_batch_start(),
         )?;
         for pos in &delta.newly_visible {
+            let chunk = shared_world.chunk_snapshot(*pos)?;
             write_play_payload(
                 writer,
                 profile,
                 PacketKind::LevelChunkWithLight,
-                &encode_level_chunk_with_light(&flat_chunk(*pos)?)?,
+                &encode_level_chunk_with_light(&chunk)?,
             )?;
         }
         let batch_size =
@@ -558,6 +579,39 @@ mod tests {
         let mut output = Vec::new();
         send_block_changed_ack(&mut output, &profile, 300).unwrap();
         assert_eq!(output, [3, 0x04, 0xac, 0x02]);
+    }
+
+    #[test]
+    fn shared_world_chunk_snapshots_include_authoritative_mutations() {
+        let world = SharedWorld::static_flat();
+        let position = BlockPos { x: 3, y: 65, z: -4 };
+        let state = BlockStateId::new(version_26_1_2::STONE_BLOCK_STATE_ID);
+        world
+            .apply_event(
+                ConnectionId::new(1),
+                WorldEvent::BlockMutation(BlockMutation { position, state }),
+            )
+            .unwrap();
+
+        let mut snapshot = world.chunk_snapshot(ChunkPos { x: 0, z: -1 }).unwrap();
+        assert_eq!(snapshot.world_block(position).unwrap(), state);
+
+        snapshot
+            .apply_block_mutation(BlockMutation {
+                position,
+                state: BlockStateId::new(version_26_1_2::AIR_BLOCK_STATE_ID),
+            })
+            .unwrap();
+        assert_eq!(world.world_block(position).unwrap(), state);
+    }
+
+    #[test]
+    fn shared_world_chunk_snapshot_reports_missing_chunks() {
+        let world = SharedWorld::static_flat();
+        let error = world
+            .chunk_snapshot(ChunkPos { x: 100, z: 100 })
+            .unwrap_err();
+        assert!(error.to_string().contains("missing chunk (100, 100)"));
     }
 
     #[test]

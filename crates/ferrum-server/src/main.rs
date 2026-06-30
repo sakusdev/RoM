@@ -1098,7 +1098,10 @@ fn run_static_play_session<R: Read, W: Write>(
     world: PlayWorldContext<'_>,
     play_round_limit: Option<usize>,
 ) -> Result<()> {
-    let chunk = static_chunk()?;
+    let chunk = world.shared_world.chunk_snapshot(ChunkPos {
+        x: STATIC_CHUNK_X,
+        z: STATIC_CHUNK_Z,
+    })?;
 
     write_play_payload(
         writer,
