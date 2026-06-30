@@ -7,6 +7,24 @@
 use ferrum_nbt::{NbtError, Tag, encode_anonymous};
 use thiserror::Error;
 
+pub const MAX_CLIENT_LANGUAGE_BYTES: usize = 16;
+const CHAT_VISIBILITY_VARIANTS: i32 = 3;
+const MAIN_HAND_VARIANTS: i32 = 2;
+const PARTICLE_STATUS_VARIANTS: i32 = 3;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientInformation {
+    pub language: String,
+    pub view_distance: i8,
+    pub chat_visibility: i32,
+    pub chat_colors: bool,
+    pub model_customization: u8,
+    pub main_hand: i32,
+    pub text_filtering_enabled: bool,
+    pub allows_listing: bool,
+    pub particle_status: i32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct KnownPack {
     pub namespace: String,
@@ -134,10 +152,37 @@ pub enum ConfigurationDecodeError {
     NegativeLength { what: &'static str, length: i32 },
     #[error("{what} exceeds configured limit {limit}")]
     LimitExceeded { what: &'static str, limit: usize },
+    #[error("invalid boolean byte {0}")]
+    InvalidBoolean(u8),
+    #[error("invalid {what} enum value {value}; expected 0..{variant_count}")]
+    InvalidEnum {
+        what: &'static str,
+        value: i32,
+        variant_count: i32,
+    },
     #[error("Configuration string is not valid UTF-8: {0}")]
     InvalidUtf8(#[from] std::string::FromUtf8Error),
     #[error("Configuration payload contains {0} trailing bytes")]
     TrailingBytes(usize),
+}
+
+pub fn decode_client_information(
+    payload: &[u8],
+) -> Result<ClientInformation, ConfigurationDecodeError> {
+    let mut decoder = Decoder::new(payload);
+    let information = ClientInformation {
+        language: decoder.read_string(MAX_CLIENT_LANGUAGE_BYTES)?,
+        view_distance: decoder.read_i8()?,
+        chat_visibility: decoder.read_enum("chat visibility", CHAT_VISIBILITY_VARIANTS)?,
+        chat_colors: decoder.read_bool()?,
+        model_customization: decoder.read_u8()?,
+        main_hand: decoder.read_enum("main hand", MAIN_HAND_VARIANTS)?,
+        text_filtering_enabled: decoder.read_bool()?,
+        allows_listing: decoder.read_bool()?,
+        particle_status: decoder.read_enum("particle status", PARTICLE_STATUS_VARIANTS)?,
+    };
+    decoder.finish()?;
+    Ok(information)
 }
 
 pub fn encode_known_packs(packs: &[KnownPack]) -> Result<Vec<u8>, ConfigurationEncodeError> {
@@ -323,6 +368,34 @@ impl<'a> Decoder<'a> {
         Ok(String::from_utf8(self.read_bytes(length)?.to_vec())?)
     }
 
+    fn read_i8(&mut self) -> Result<i8, ConfigurationDecodeError> {
+        Ok(self.read_u8()? as i8)
+    }
+
+    fn read_bool(&mut self) -> Result<bool, ConfigurationDecodeError> {
+        match self.read_u8()? {
+            0 => Ok(false),
+            1 => Ok(true),
+            value => Err(ConfigurationDecodeError::InvalidBoolean(value)),
+        }
+    }
+
+    fn read_enum(
+        &mut self,
+        what: &'static str,
+        variant_count: i32,
+    ) -> Result<i32, ConfigurationDecodeError> {
+        let value = self.read_varint()?;
+        if !(0..variant_count).contains(&value) {
+            return Err(ConfigurationDecodeError::InvalidEnum {
+                what,
+                value,
+                variant_count,
+            });
+        }
+        Ok(value)
+    }
+
     fn read_u8(&mut self) -> Result<u8, ConfigurationDecodeError> {
         Ok(*self.read_bytes(1)?.first().expect("one byte was just read"))
     }
@@ -355,6 +428,48 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
+
+    #[test]
+    fn decodes_official_26_1_2_client_information_fixture() {
+        let payload = [
+            0x05, b'e', b'n', b'_', b'u', b's', 0x02, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00,
+        ];
+        assert_eq!(
+            decode_client_information(&payload).unwrap(),
+            ClientInformation {
+                language: "en_us".to_owned(),
+                view_distance: 2,
+                chat_visibility: 0,
+                chat_colors: true,
+                model_customization: 0,
+                main_hand: 1,
+                text_filtering_enabled: false,
+                allows_listing: false,
+                particle_status: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn client_information_decoder_rejects_invalid_values() {
+        let mut invalid = vec![
+            0x05, b'e', b'n', b'_', b'u', b's', 0x02, 0x00, 0x02, 0x00, 0x01, 0x00, 0x00, 0x00,
+        ];
+        assert!(matches!(
+            decode_client_information(&invalid),
+            Err(ConfigurationDecodeError::InvalidBoolean(2))
+        ));
+        invalid[8] = 0x01;
+        invalid[10] = 0x03;
+        assert!(matches!(
+            decode_client_information(&invalid),
+            Err(ConfigurationDecodeError::InvalidEnum {
+                what: "main hand",
+                value: 3,
+                variant_count: 2,
+            })
+        ));
+    }
 
     #[test]
     fn known_packs_round_trip() {
