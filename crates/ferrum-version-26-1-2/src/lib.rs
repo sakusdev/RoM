@@ -41,6 +41,7 @@ pub fn protocol_profile() -> Result<ProtocolProfile, ProfileError> {
         (PacketKind::LoginDisconnect, 0x00),
         (PacketKind::LoginSuccess, 0x02),
         (PacketKind::LoginAcknowledged, 0x03),
+        (PacketKind::ConfigurationClientInformation, 0x00),
         (PacketKind::ConfigurationAcknowledged, 0x03),
         (PacketKind::ConfigurationDisconnect, 0x02),
         (PacketKind::FinishConfiguration, 0x03),
@@ -116,6 +117,12 @@ mod tests {
         assert_eq!(
             packets.require(PacketKind::LoginAcknowledged).unwrap(),
             0x03
+        );
+        assert_eq!(
+            packets
+                .require(PacketKind::ConfigurationClientInformation)
+                .unwrap(),
+            0x00
         );
         assert_eq!(
             packets.require(PacketKind::FinishConfiguration).unwrap(),
