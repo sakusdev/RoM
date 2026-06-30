@@ -154,7 +154,7 @@ pub fn decode_rompack(bytes: &[u8], limits: RomPackLimits) -> Result<RomPack> {
     let payload_end = HEADER_BYTES + json_length;
     let expected_digest = &bytes[payload_end..];
     let actual_digest = Sha256::digest(&bytes[..payload_end]);
-    if expected_digest != actual_digest.as_ref() {
+    if expected_digest != &actual_digest[..] {
         bail!("RoM version-pack integrity digest mismatch");
     }
 
