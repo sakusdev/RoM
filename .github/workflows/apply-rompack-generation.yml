@@ -1,0 +1,89 @@
+name: Apply RoM version-pack generation
+
+on:
+  pull_request:
+    branches:
+      - master
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      github.head_ref == 'feature/rompack-generation'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/rompack-generation
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Repair patch tail and apply integration
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('tools/apply_rompack_generation_patch.py')
+          text = path.read_text(encoding='utf-8')
+          marker = '''replace_between(
+              "docs/BOOTSTRAP.md",
+              "## Planned next stages",'''
+          index = text.index(marker)
+          replacement = '''replace_once(
+              "docs/BOOTSTRAP.md",
+              "## Planned next stages\\n\\n"
+              "1. Add a deterministic local extractor for data that RoM actually needs at runtime.\\n"
+              "2. Define a compact, versioned `.rompack` container with source hashes and patch-set metadata.\\n"
+              "3. Validate every generated value against captured protocol fixtures and independent tests.\\n"
+              "4. Load generated version packs without executing the official JAR.\\n"
+              "5. Package `rom-bootstrap` alongside `rom-server` in native release archives.\\n",
+              "## Planned next stages\\n\\n"
+              "1. Package `rom-bootstrap` alongside `rom-server` in native release archives.\\n"
+              "2. Move packet tables and additional version-specific runtime metadata into generated packs.\\n"
+              "3. Add more independently testable extractors only when the server consumes their output.\\n"
+              "4. Preserve bounded decoding, deterministic ordering, source hashes, and local-only artifact boundaries for every new section.\\n",
+          )
+          '''
+          path.write_text(text[:index] + replacement, encoding='utf-8')
+
+          rompack = Path('crates/ferrum-rompack/src/lib.rs')
+          source = rompack.read_text(encoding='utf-8')
+          source = source.replace(
+              'if expected_digest != actual_digest.as_slice() {',
+              'if expected_digest != actual_digest.as_ref() {',
+              1,
+          )
+          source = source.replace(
+              '    let pack = decode_rompack(&bytes, limits)?;\n    Ok((pack.clone(), summary(path.to_path_buf(), &bytes, &pack)))',
+              '    let pack = decode_rompack(&bytes, limits)?;\n    let summary = summary(path.to_path_buf(), &bytes, &pack);\n    Ok((pack, summary))',
+              1,
+          )
+          rompack.write_text(source, encoding='utf-8')
+          PY
+          python3 tools/apply_rompack_generation_patch.py
+      - name: Remove temporary patch machinery
+        run: |
+          rm tools/apply_rompack_generation_patch.py
+          rm .github/workflows/apply-rompack-generation.yml
+      - name: Regenerate lockfile and format
+        run: |
+          cargo generate-lockfile
+          cargo fmt --all
+      - name: Validate workspace
+        run: |
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+      - name: Commit implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Generate and validate deterministic local version packs"
+          git push origin HEAD:feature/rompack-generation
