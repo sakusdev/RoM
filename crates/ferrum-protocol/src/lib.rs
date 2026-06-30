@@ -42,6 +42,7 @@ pub enum PacketKind {
     LoginDisconnect,
     LoginSuccess,
     ConfigurationAcknowledged,
+    ConfigurationClientInformation,
     ConfigurationDisconnect,
     RegistryData,
     FeatureFlags,
@@ -83,6 +84,7 @@ impl PacketKind {
             | Self::LoginDisconnect
             | Self::LoginSuccess => ProtocolPhase::Login,
             Self::ConfigurationAcknowledged
+            | Self::ConfigurationClientInformation
             | Self::ConfigurationDisconnect
             | Self::RegistryData
             | Self::FeatureFlags
@@ -121,6 +123,7 @@ impl PacketKind {
             | Self::LoginStart
             | Self::LoginAcknowledged
             | Self::ConfigurationAcknowledged
+            | Self::ConfigurationClientInformation
             | Self::SelectKnownPacksResponse
             | Self::ChunkBatchReceived
             | Self::AcceptTeleportation

@@ -9,8 +9,8 @@ use codec::{
     PacketReader, build_packet, read_packet, write_packet, write_string, write_varint_vec,
 };
 use ferrum_configuration::{
-    KnownPack, KnownPackDecodeLimits, decode_known_packs, encode_feature_flags, encode_known_packs,
-    encode_registry_data, encode_tags,
+    KnownPack, KnownPackDecodeLimits, decode_client_information, decode_known_packs,
+    encode_feature_flags, encode_known_packs, encode_registry_data, encode_tags,
 };
 use ferrum_nbt::{Tag, encode_anonymous};
 use ferrum_play::{
@@ -50,6 +50,7 @@ const STATIC_CHUNK_X: i32 = 0;
 const STATIC_CHUNK_Z: i32 = 0;
 const STATIC_CHUNK_BATCH_SIZE: i32 = 1;
 const STATIC_WELCOME_MESSAGE: &str = "Ferrum native Rust world loaded";
+const MAX_CONFIGURATION_AUXILIARY_PACKETS: usize = 16;
 const MAX_IGNORED_PLAY_PACKETS: usize = 1_024;
 const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(15);
 
@@ -1266,19 +1267,38 @@ fn negotiate_known_packs<R: Read, W: Write>(
     )?;
     writer.flush()?;
 
-    let response = read_packet(reader).context("cannot read Select Known Packs response")?;
-    let mut response_reader = PacketReader::new(&response);
     let expected_id = profile
         .packets()
         .require(PacketKind::SelectKnownPacksResponse)?;
-    let received_id = response_reader.read_varint()?;
-    if received_id != expected_id {
+    let client_information_id = profile
+        .packets()
+        .id(PacketKind::ConfigurationClientInformation);
+    let mut auxiliary_packets = 0_usize;
+    let accepted = loop {
+        let response = read_packet(reader).context("cannot read Select Known Packs response")?;
+        let mut response_reader = PacketReader::new(&response);
+        let received_id = response_reader.read_varint()?;
+
+        if received_id == expected_id {
+            break decode_known_packs(
+                response_reader.take_remaining(),
+                KnownPackDecodeLimits::default(),
+            )?;
+        }
+
+        if client_information_id == Some(received_id) {
+            decode_client_information(response_reader.take_remaining())?;
+            auxiliary_packets = auxiliary_packets
+                .checked_add(1)
+                .context("Configuration auxiliary packet count overflow")?;
+            if auxiliary_packets > MAX_CONFIGURATION_AUXILIARY_PACKETS {
+                bail!("Configuration auxiliary packet limit exceeded");
+            }
+            continue;
+        }
+
         bail!("expected Select Known Packs packet id {expected_id}, got {received_id}");
-    }
-    let accepted = decode_known_packs(
-        response_reader.take_remaining(),
-        KnownPackDecodeLimits::default(),
-    )?;
+    };
     let unique: BTreeSet<_> = accepted.iter().collect();
     if unique.len() != accepted.len() {
         bail!("Select Known Packs response contains duplicate entries");
@@ -1774,6 +1794,18 @@ mod tests {
         )
         .unwrap();
         write_packet(&mut input, &build_packet(0x03, |_| Ok(())).unwrap()).unwrap();
+        write_packet(
+            &mut input,
+            &build_packet(0x00, |body| {
+                body.extend_from_slice(&[
+                    0x05, b'e', b'n', b'_', b'u', b's', 0x02, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
+                    0x00,
+                ]);
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
         let accepted = encode_known_packs(&version_26_1_2::known_packs()).unwrap();
         write_packet(
             &mut input,
