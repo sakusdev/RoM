@@ -23,7 +23,7 @@ use ferrum_play::{
 use ferrum_protocol::{HandshakeIntent, PacketKind, PacketTable, ProtocolProfile, ProtocolSession};
 use ferrum_runtime::ConnectionId;
 use ferrum_version_26_1_2 as version_26_1_2;
-use ferrum_world::{BiomeId, BlockStateId, ChunkPos, FlatWorldSpec, StaticChunk};
+use ferrum_world::ChunkPos;
 use identity::offline_player_identity;
 use serde_json::{Map, Value, json};
 use std::{
@@ -1098,7 +1098,10 @@ fn run_static_play_session<R: Read, W: Write>(
     world: PlayWorldContext<'_>,
     play_round_limit: Option<usize>,
 ) -> Result<()> {
-    let chunk = static_chunk()?;
+    let chunk = world.shared_world.chunk_snapshot(ChunkPos {
+        x: STATIC_CHUNK_X,
+        z: STATIC_CHUNK_Z,
+    })?;
 
     write_play_payload(
         writer,
@@ -1152,26 +1155,6 @@ fn run_static_play_session<R: Read, W: Write>(
 
     wait_for_play_bootstrap_acknowledgements(reader, profile, STATIC_TELEPORT_ID)?;
     run_keep_alive_loop(reader, writer, profile, session, world, play_round_limit)
-}
-
-fn static_chunk() -> Result<StaticChunk> {
-    Ok(StaticChunk::flat_overworld(
-        ChunkPos {
-            x: STATIC_CHUNK_X,
-            z: STATIC_CHUNK_Z,
-        },
-        version_26_1_2::OVERWORLD_MIN_SECTION_Y,
-        version_26_1_2::OVERWORLD_SECTION_COUNT,
-        FlatWorldSpec {
-            floor_y: STATIC_FLOOR_Y,
-            air: BlockStateId::new(version_26_1_2::AIR_BLOCK_STATE_ID),
-            bedrock: BlockStateId::new(version_26_1_2::BEDROCK_BLOCK_STATE_ID),
-            stone: BlockStateId::new(version_26_1_2::STONE_BLOCK_STATE_ID),
-            dirt: BlockStateId::new(version_26_1_2::DIRT_BLOCK_STATE_ID),
-            grass: BlockStateId::new(version_26_1_2::GRASS_BLOCK_STATE_ID),
-            biome: BiomeId::new(version_26_1_2::PLAINS_BIOME_ID),
-        },
-    )?)
 }
 
 fn static_join_game(config: &ServerConfig) -> JoinGame {
@@ -2115,7 +2098,12 @@ mod tests {
         assert_eq!(level_chunk_reader.read_varint().unwrap(), 0x2d);
         assert_eq!(
             level_chunk_reader.take_remaining(),
-            encode_level_chunk_with_light(&static_chunk().unwrap()).unwrap()
+            encode_level_chunk_with_light(
+                &play_runtime::SharedWorld::static_flat()
+                    .chunk_snapshot(ChunkPos { x: 0, z: 0 })
+                    .unwrap(),
+            )
+            .unwrap()
         );
 
         let chunk_batch_finished = read_packet(&mut cursor).unwrap();

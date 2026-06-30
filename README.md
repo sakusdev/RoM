@@ -25,6 +25,7 @@ The native server currently supports:
 - Finite coordinate, coordinate-range, movement-flag, and exact-payload validation
 - Bounded protocol-775 Player Action and Use Item On decoding with prediction-sequence validation
 - Shared in-memory world state for accepted block mutations across Play connections
+- Initial and dynamically streamed chunks serialized from authoritative shared-world snapshots
 - Live simplified block breaking and adjacent-face stone placement
 - Clientbound Block Update and Block Changed Ack responses for accepted interactions
 - Per-connection authoritative `PlayerState`

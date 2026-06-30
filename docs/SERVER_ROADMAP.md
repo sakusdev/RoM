@@ -192,6 +192,7 @@ Completed foundation:
 - Register exact protocol-775 IDs for Player Action, Use Item On, Block Update, and Block Changed Ack.
 - Acknowledge client prediction sequences and support the complete 26.1.2 Player Action enum.
 - Apply simplified adjacent-face stone placement while rejecting world-border hits.
+- Serialize bootstrap and dynamically streamed chunks from shared-world snapshots so accepted mutations survive new connections and chunk re-entry.
 - Keep protocol serialization and version-specific numeric IDs outside the world crate.
 
 Remaining:
