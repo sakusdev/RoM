@@ -70,6 +70,7 @@ pub enum PacketKind {
     MovePlayerStatusOnly,
     PlayerAction,
     UseItemOn,
+    BlockChangedAck,
     BlockUpdate,
     ForgetLevelChunk,
 }
@@ -115,6 +116,7 @@ impl PacketKind {
             | Self::MovePlayerStatusOnly
             | Self::PlayerAction
             | Self::UseItemOn
+            | Self::BlockChangedAck
             | Self::BlockUpdate
             | Self::ForgetLevelChunk => ProtocolPhase::Play,
         }

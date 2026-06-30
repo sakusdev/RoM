@@ -68,6 +68,10 @@ pub fn protocol_profile() -> Result<ProtocolProfile, ProfileError> {
         (PacketKind::MovePlayerPositionRotation, 0x1f),
         (PacketKind::MovePlayerRotation, 0x20),
         (PacketKind::MovePlayerStatusOnly, 0x21),
+        (PacketKind::PlayerAction, 0x29),
+        (PacketKind::UseItemOn, 0x42),
+        (PacketKind::BlockChangedAck, 0x04),
+        (PacketKind::BlockUpdate, 0x08),
         (PacketKind::ForgetLevelChunk, 0x25),
     ] {
         packets.insert(kind, id)?;
@@ -195,6 +199,10 @@ mod tests {
             packets.require(PacketKind::MovePlayerStatusOnly).unwrap(),
             0x21
         );
+        assert_eq!(packets.require(PacketKind::PlayerAction).unwrap(), 0x29);
+        assert_eq!(packets.require(PacketKind::UseItemOn).unwrap(), 0x42);
+        assert_eq!(packets.require(PacketKind::BlockChangedAck).unwrap(), 0x04);
+        assert_eq!(packets.require(PacketKind::BlockUpdate).unwrap(), 0x08);
         assert_eq!(packets.require(PacketKind::ForgetLevelChunk).unwrap(), 0x25);
     }
 

@@ -7,7 +7,7 @@ use anyhow::{Context, Result, bail};
 use ferrum_play::{
     BlockPosition, PlayerMovement, PlayerState, decode_move_player_position,
     decode_move_player_position_rotation, decode_move_player_rotation, decode_move_player_status,
-    decode_player_action, decode_use_item_on_block, encode_block_update,
+    decode_player_action, decode_use_item_on_block, encode_block_changed_ack, encode_block_update,
     encode_chunk_batch_finished, encode_chunk_batch_start, encode_forget_level_chunk,
     encode_keep_alive, encode_level_chunk_with_light, encode_set_chunk_cache_center,
     player_action_to_world_event, use_item_on_block_to_world_event,
@@ -219,6 +219,7 @@ pub(super) fn run_play_loop<R: Read, W: Write>(
                 }
                 Some(PacketKind::PlayerAction) => {
                     let action = decode_player_action(packet_reader.take_remaining())?;
+                    let sequence = action.sequence;
                     if let Some(event) = player_action_to_world_event(
                         action,
                         BlockStateId::new(version_26_1_2::AIR_BLOCK_STATE_ID),
@@ -226,15 +227,19 @@ pub(super) fn run_play_loop<R: Read, W: Write>(
                         let applied = shared_world.apply_event(connection, event)?;
                         send_world_updates(writer, profile, &applied)?;
                     }
+                    send_block_changed_ack(writer, profile, sequence)?;
                 }
                 Some(PacketKind::UseItemOn) => {
                     let interaction = decode_use_item_on_block(packet_reader.take_remaining())?;
-                    let event = use_item_on_block_to_world_event(
+                    let sequence = interaction.sequence;
+                    if let Some(event) = use_item_on_block_to_world_event(
                         interaction,
                         BlockStateId::new(version_26_1_2::STONE_BLOCK_STATE_ID),
-                    );
-                    let applied = shared_world.apply_event(connection, event)?;
-                    send_world_updates(writer, profile, &applied)?;
+                    ) {
+                        let applied = shared_world.apply_event(connection, event)?;
+                        send_world_updates(writer, profile, &applied)?;
+                    }
+                    send_block_changed_ack(writer, profile, sequence)?;
                 }
                 _ => {
                     ignored_packets = ignored_packets
@@ -347,6 +352,21 @@ fn apply_local_world_event(
     event: WorldEvent,
 ) -> Result<Vec<AppliedWorldEvent>> {
     apply_world_event(runtime, LOCAL_WORLD_CONNECTION_ID, tick, event)
+}
+
+fn send_block_changed_ack<W: Write>(
+    writer: &mut W,
+    profile: &ProtocolProfile,
+    sequence: i32,
+) -> Result<()> {
+    write_play_payload(
+        writer,
+        profile,
+        PacketKind::BlockChangedAck,
+        &encode_block_changed_ack(sequence)?,
+    )?;
+    writer.flush()?;
+    Ok(())
 }
 
 fn send_world_updates<W: Write>(
@@ -528,6 +548,16 @@ mod tests {
         );
         expected.push(1);
         assert_eq!(output, expected);
+    }
+
+    #[test]
+    fn sends_block_change_prediction_acknowledgement() {
+        let mut packets = PacketTable::new();
+        packets.insert(PacketKind::BlockChangedAck, 0x04).unwrap();
+        let profile = ProtocolProfile::new("Test", 1, packets).unwrap();
+        let mut output = Vec::new();
+        send_block_changed_ack(&mut output, &profile, 300).unwrap();
+        assert_eq!(output, [3, 0x04, 0xac, 0x02]);
     }
 
     #[test]
