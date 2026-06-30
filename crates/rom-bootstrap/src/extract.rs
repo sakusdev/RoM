@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs::{self, File},
+    fs,
     io::{Cursor, Read, Seek},
     path::{Path, PathBuf},
 };
@@ -331,7 +331,7 @@ struct GameJarCandidate {
 fn read_versions_list<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
 ) -> Result<Option<GameJarCandidate>> {
-    let Ok(mut file) = archive.by_name("META-INF/versions.list") else {
+    let Ok(file) = archive.by_name("META-INF/versions.list") else {
         return Ok(None);
     };
     if file.size() > MAX_VERSIONS_LIST_BYTES {
@@ -429,7 +429,7 @@ fn extract_registry_inventory(
     let mut total_resource_bytes = 0_u64;
 
     for index in 0..archive.len() {
-        let mut file = archive.by_index(index)?;
+        let file = archive.by_index(index)?;
         if file.is_dir() {
             continue;
         }
@@ -572,7 +572,7 @@ fn read_zip_entry<R: Read + Seek>(
     path: &str,
     limit: u64,
 ) -> Result<Vec<u8>> {
-    let mut file = archive
+    let file = archive
         .by_name(path)
         .with_context(|| format!("embedded game JAR is missing: {path}"))?;
     if file.is_dir() || file.size() == 0 || file.size() > limit {
