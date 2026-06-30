@@ -1,4 +1,4 @@
-name: Fix RoM version-pack validation
+name: Capture finalized RoM version-pack diagnostics
 
 on:
   pull_request:
@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 jobs:
-  fix:
+  capture:
     if: >-
       github.actor != 'github-actions[bot]' &&
       github.head_ref == 'feature/rompack-generation'
@@ -22,30 +22,38 @@ jobs:
           ref: feature/rompack-generation
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
-      - name: Fix digest comparison and remove diagnostics
+      - name: Apply digest fix
         run: |
           python3 - <<'PY'
           from pathlib import Path
+
           path = Path('crates/ferrum-rompack/src/lib.rs')
           text = path.read_text(encoding='utf-8')
           old = '    if expected_digest != actual_digest.as_ref() {\n'
           new = '    if expected_digest != &actual_digest[..] {\n'
-          if text.count(old) != 1:
-              raise SystemExit(f'expected one digest comparison, found {text.count(old)}')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif new not in text:
+              raise SystemExit('digest comparison was not found')
+          path.write_text(text, encoding='utf-8')
           PY
           rm -f rompack-validation-diagnostics.txt
           rm .github/workflows/fix-rompack-validation.yml
-      - name: Validate finalized workspace
-        run: |
           cargo fmt --all
-          cargo clippy --workspace --all-targets -- -D warnings
-          cargo test --workspace
-      - name: Commit fix
+      - name: Capture validation
+        run: |
+          set +e
+          cargo clippy --workspace --all-targets -- -D warnings > rompack-fix-diagnostics.txt 2>&1
+          clippy_status=$?
+          cargo test --workspace >> rompack-fix-diagnostics.txt 2>&1
+          test_status=$?
+          printf '\nclippy_status=%s\ntest_status=%s\n' "$clippy_status" "$test_status" >> rompack-fix-diagnostics.txt
+          exit 0
+      - name: Commit source and diagnostics
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git diff --cached --check
-          git commit -m "Finalize deterministic local version-pack generation"
+          git commit -m "Capture finalized version-pack diagnostics"
           git push origin HEAD:feature/rompack-generation
