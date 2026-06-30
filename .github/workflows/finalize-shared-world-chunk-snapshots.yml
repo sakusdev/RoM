@@ -1,0 +1,51 @@
+name: Finalize shared-world chunk snapshots
+
+on:
+  pull_request:
+    branches:
+      - master
+    types:
+      - synchronize
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      github.head_ref == 'feature/shared-world-chunk-snapshots'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/shared-world-chunk-snapshots
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Update integration test expectation
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("crates/ferrum-server/src/main.rs")
+          text = path.read_text(encoding="utf-8")
+          old = "encode_level_chunk_with_light(&static_chunk().unwrap()).unwrap()"
+          new = "encode_level_chunk_with_light(\n                &play_runtime::SharedWorld::static_flat()\n                    .chunk_snapshot(ChunkPos { x: 0, z: 0 })\n                    .unwrap(),\n            )\n            .unwrap()"
+          if text.count(old) != 1:
+              raise SystemExit(f"expected one static chunk test expectation, found {text.count(old)}")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+          rm .github/workflows/finalize-shared-world-chunk-snapshots.yml
+      - name: Validate
+        run: |
+          cargo fmt --all
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+      - name: Commit final implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Update shared chunk integration fixture"
+          git push origin HEAD:feature/shared-world-chunk-snapshots
