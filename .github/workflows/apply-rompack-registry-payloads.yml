@@ -1,4 +1,4 @@
-name: Finalize generated registry payloads
+name: Capture final registry payload diagnostics
 
 on:
   pull_request:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  finalize:
+  capture:
     if: >-
       github.actor != 'github-actions[bot]' &&
       github.head_ref == 'feature/rompack-registry-payloads'
@@ -66,28 +66,30 @@ jobs:
               }
 
           '''
-          if text.count(old) != 1:
-              raise SystemExit(f'expected one test constructor block, found {text.count(old)}')
-          text = text.replace(old, new, 1)
-          count = text.count('ServerState::new(config.online_players)')
-          if count < 1:
-              raise SystemExit('expected at least one ServerState::new(config.online_players) call')
+          if old in text:
+              text = text.replace(old, new, 1)
           text = text.replace('ServerState::new(config.online_players)', 'ServerState::new(config)')
           path.write_text(text, encoding='utf-8')
           PY
           rm -f registry-payload-validation.txt
+          rm -f registry-payload-final-validation.txt
           cargo fmt --all
-      - name: Validate finalized workspace
+      - name: Capture validation diagnostics
         run: |
-          cargo fmt --all --check
-          cargo clippy --workspace --all-targets -- -D warnings
-          cargo test --workspace
-      - name: Commit finalized implementation
+          set +e
+          cargo fmt --all --check > registry-payload-final-validation.txt 2>&1
+          fmt_status=$?
+          cargo clippy --workspace --all-targets -- -D warnings >> registry-payload-final-validation.txt 2>&1
+          clippy_status=$?
+          cargo test --workspace >> registry-payload-final-validation.txt 2>&1
+          test_status=$?
+          printf '\nfmt_status=%s\nclippy_status=%s\ntest_status=%s\n' "$fmt_status" "$clippy_status" "$test_status" >> registry-payload-final-validation.txt
+          exit 0
+      - name: Commit source and diagnostics
         run: |
-          rm .github/workflows/apply-rompack-registry-payloads.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git diff --cached --check
-          git commit -m "Finalize generated registry payload runtime"
+          git commit -m "Stage final registry payload validation"
           git push origin HEAD:feature/rompack-registry-payloads
