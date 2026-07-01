@@ -1,18 +1,15 @@
-name: Export Bootstrap release bundles
+name: Apply Bootstrap naming and docs
 
 on:
   pull_request:
-    branches:
-      - master
-    types:
-      - synchronize
-      - reopened
+    branches: [master]
+    types: [synchronize]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  export:
+  apply:
     if: >-
       github.actor != 'github-actions[bot]' &&
       github.head_ref == 'feature/bootstrap-release-bundles'
@@ -25,44 +22,143 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - name: Apply release integration
-        run: python3 tools/apply_bootstrap_release_bundles.py
-      - name: Remove temporary files from exported tree
-        run: |
-          rm -f tools/apply_bootstrap_release_bundles.py
-          rm -f .github/workflows/apply-bootstrap-release-bundles.yml
-          rm -f docs/.release-bundle-stage noop x y
-      - name: Validate release workflow structure
+      - name: Apply source and documentation changes
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
-          text = Path('.github/workflows/release.yml').read_text(encoding='utf-8')
-          assert text.count('bootstrap_binary:') == 5
-          assert text.count('bootstrap_raw_asset:') == 5
-          assert '-p ferrum-server -p rom-bootstrap' in text
-          assert 'dist/rom-bootstrap-*' in text
-          assert 'NOTICE.md' in text
-          assert 'docs/BOOTSTRAP.md' in text
-          assert 'wc -l < SHA256SUMS)" -eq 15' in text
-          assert "assets | length')\" -ge 31" in text
+          def replace_once(path, old, new):
+              file = Path(path)
+              text = file.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one match, found {count}: {old[:100]!r}')
+              file.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          bootstrap = 'crates/rom-bootstrap/src/lib.rs'
+          replace_once(
+              bootstrap,
+              '    let native_binary = instance.join("bin").join(native_server_file_name());\n'
+              '    let installed = native_binary.is_file();\n\n'
+              '    Ok(StatusReport {\n',
+              '    let native_binary = installed_native_server(&instance);\n'
+              '    let installed = native_binary.is_some();\n\n'
+              '    Ok(StatusReport {\n',
+          )
+          replace_once(
+              bootstrap,
+              '        native_server_binary: installed.then_some(native_binary),\n',
+              '        native_server_binary: native_binary,\n',
+          )
+          replace_once(
+              bootstrap,
+              'fn native_server_file_name() -> &\'static str {\n'
+              '    if cfg!(windows) {\n'
+              '        "rom-server.exe"\n'
+              '    } else {\n'
+              '        "rom-server"\n'
+              '    }\n'
+              '}\n',
+              'fn installed_native_server(instance: &Path) -> Option<PathBuf> {\n'
+              '    let current = instance.join("bin").join(native_server_file_name());\n'
+              '    if current.is_file() {\n'
+              '        return Some(current);\n'
+              '    }\n'
+              '    let legacy = instance.join("bin").join(legacy_native_server_file_name());\n'
+              '    legacy.is_file().then_some(legacy)\n'
+              '}\n\n'
+              'fn native_server_file_name() -> &\'static str {\n'
+              '    if cfg!(windows) {\n'
+              '        "ferrum-server.exe"\n'
+              '    } else {\n'
+              '        "ferrum-server"\n'
+              '    }\n'
+              '}\n\n'
+              'fn legacy_native_server_file_name() -> &\'static str {\n'
+              '    if cfg!(windows) {\n'
+              '        "rom-server.exe"\n'
+              '    } else {\n'
+              '        "rom-server"\n'
+              '    }\n'
+              '}\n',
+          )
+          replace_once(
+              bootstrap,
+              '    #[test]\n    fn existing_server_configuration_is_preserved() {\n',
+              '    #[test]\n'
+              '    fn native_server_uses_release_name_and_detects_legacy_instances() {\n'
+              '        let directory = tempdir().unwrap();\n'
+              '        let instance = directory.path();\n'
+              '        fs::create_dir_all(instance.join("bin")).unwrap();\n'
+              '        let legacy = instance.join("bin").join(legacy_native_server_file_name());\n'
+              '        fs::write(&legacy, b"legacy").unwrap();\n'
+              '        assert_eq!(installed_native_server(instance), Some(legacy));\n'
+              '        assert!(native_server_file_name().starts_with("ferrum-server"));\n'
+              '    }\n\n'
+              '    #[test]\n'
+              '    fn existing_server_configuration_is_preserved() {\n',
+          )
+
+          readme = 'README.md'
+          replace_once(readme, '│   └── rom-server\n', '│   └── ferrum-server\n')
+          replace_once(
+              readme,
+              '`ferrum-server` is released as a platform-native server executable for:\n',
+              '`ferrum-server` and `rom-bootstrap` are released as platform-native executables for:\n',
+          )
+          replace_once(
+              readme,
+              'Release archives must contain RoM binaries, configuration, documentation, license, notice, and version information only. They must not contain the official Minecraft server JAR or generated data copied from it.\n\n'
+              'Expected server usage:\n',
+              'Each release archive contains both binaries, `server.toml`, the Bootstrap guide, README, NOTICE, LICENSE, and VERSION. Standalone binaries are also published separately. Official Minecraft files and locally generated `.rompack` files are never bundled.\n\n'
+              'Preferred first-run usage from an extracted release archive:\n\n'
+              '```bash\n'
+              './rom-bootstrap prepare --instance ./rom-instance --version 26.1.2 --accept-minecraft-eula\n'
+              './rom-bootstrap generate --instance ./rom-instance\n'
+              './rom-bootstrap install-local --instance ./rom-instance --server-binary ./ferrum-server\n'
+              './rom-bootstrap run --instance ./rom-instance\n'
+              '```\n\n'
+              'Expected direct server usage:\n',
+          )
+
+          docs = 'docs/BOOTSTRAP.md'
+          replace_once(docs, '│   └── rom-server\n', '│   └── ferrum-server\n')
+          replace_once(
+              docs,
+              '## Public server warning\n',
+              '## Native release archives\n\n'
+              'Platform release archives contain both `rom-bootstrap` and `ferrum-server`. After extracting an archive, prepare and generate the local instance, then install the adjacent server binary:\n\n'
+              '```bash\n'
+              './rom-bootstrap prepare --instance ./rom-instance --version 26.1.2 --accept-minecraft-eula\n'
+              './rom-bootstrap generate --instance ./rom-instance\n'
+              './rom-bootstrap install-local --instance ./rom-instance --server-binary ./ferrum-server\n'
+              './rom-bootstrap run --instance ./rom-instance\n'
+              '```\n\n'
+              'Existing development instances containing `bin/rom-server` remain readable, but new installations use `bin/ferrum-server`.\n\n'
+              '## Public server warning\n',
+          )
+          replace_once(
+              docs,
+              '1. Package `rom-bootstrap` alongside `rom-server` in native release archives.\n'
+              '2. Move packet tables and additional version-specific runtime metadata into generated packs.\n'
+              '3. Add more independently testable extractors only when the server consumes their output.\n'
+              '4. Preserve bounded decoding, deterministic ordering, source hashes, and local-only artifact boundaries for every new section.\n',
+              '1. Move packet tables and additional version-specific runtime metadata into generated packs.\n'
+              '2. Add more independently testable extractors only when the server consumes their output.\n'
+              '3. Preserve bounded decoding, deterministic ordering, source hashes, and local-only artifact boundaries for every new section.\n',
+          )
           PY
+          rm -f tools/apply_bootstrap_release_bundles.py docs/.release-bundle-stage noop x y
       - name: Validate workspace
         run: |
           cargo fmt --all
           cargo clippy --workspace --all-targets -- -D warnings
           cargo test --workspace
-      - name: Export final files and patch
+      - name: Commit source changes
         run: |
-          mkdir -p export/.github/workflows export/crates/rom-bootstrap/src export/docs
-          cp .github/workflows/release.yml export/.github/workflows/release.yml
-          cp crates/rom-bootstrap/src/lib.rs export/crates/rom-bootstrap/src/lib.rs
-          cp README.md export/README.md
-          cp docs/BOOTSTRAP.md export/docs/BOOTSTRAP.md
-          git diff --binary HEAD -- .github/workflows/release.yml crates/rom-bootstrap/src/lib.rs README.md docs/BOOTSTRAP.md > export/final.patch
-      - uses: actions/upload-artifact@v4
-        with:
-          name: bootstrap-release-final-files
-          path: export
-          if-no-files-found: error
-          retention-days: 1
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A -- README.md docs/BOOTSTRAP.md crates/rom-bootstrap/src/lib.rs tools/apply_bootstrap_release_bundles.py docs/.release-bundle-stage noop x y
+          git diff --cached --check
+          git commit -m "Align Bootstrap installs with native release names"
+          git push origin HEAD:feature/bootstrap-release-bundles
