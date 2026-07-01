@@ -1,4 +1,4 @@
-name: Capture final registry payload diagnostics
+name: Finalize generated registry payloads
 
 on:
   pull_request:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  capture:
+  finalize:
     if: >-
       github.actor != 'github-actions[bot]' &&
       github.head_ref == 'feature/rompack-registry-payloads'
@@ -22,74 +22,45 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - name: Make the test state follow its server profile
+      - name: Fix the owned test configuration borrow
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
           path = Path('crates/ferrum-server/src/main.rs')
           text = path.read_text(encoding='utf-8')
-          old = '''    #[cfg(test)]
-              fn new(initial_online_players: i32) -> Self {
-                  Self::with_world(
-                      initial_online_players,
-                      play_runtime::builtin_world_profile(),
-                  )
-                  .expect("built-in world profile must initialize")
-              }
-
-              #[cfg(test)]
-              fn with_world(initial_online_players: i32, world: RomPackWorld) -> Result<Self> {
-                  Self::with_runtime(
-                      initial_online_players,
-                      world,
-                      builtin_26_1_2_registry_payloads()?,
-                  )
-              }
-
+          old = '''        let config = ServerConfig {
+                      online_players: 0,
+                      max_players: 10,
+                      ..ServerConfig::default()
+                  };
+                  let state = ServerState::new(config);
           '''
-          new = '''    #[cfg(test)]
-              fn new(config: &ServerConfig) -> Self {
-                  let registry_payloads =
-                      if config.profile_name.as_deref() == Some(version_26_1_2::PROFILE_NAME) {
-                          builtin_26_1_2_registry_payloads()
-                              .expect("built-in registry payloads must encode")
-                      } else {
-                          Vec::new()
-                      };
-                  Self::with_runtime(
-                      config.online_players,
-                      play_runtime::builtin_world_profile(),
-                      registry_payloads,
-                  )
-                  .expect("built-in world profile must initialize")
-              }
-
+          new = '''        let config = ServerConfig {
+                      online_players: 0,
+                      max_players: 10,
+                      ..ServerConfig::default()
+                  };
+                  let state = ServerState::new(&config);
           '''
-          if old in text:
-              text = text.replace(old, new, 1)
-          text = text.replace('ServerState::new(config.online_players)', 'ServerState::new(config)')
-          path.write_text(text, encoding='utf-8')
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one owned-config state constructor, found {text.count(old)}')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
           PY
           rm -f registry-payload-validation.txt
           rm -f registry-payload-final-validation.txt
           cargo fmt --all
-      - name: Capture validation diagnostics
+      - name: Validate finalized workspace
         run: |
-          set +e
-          cargo fmt --all --check > registry-payload-final-validation.txt 2>&1
-          fmt_status=$?
-          cargo clippy --workspace --all-targets -- -D warnings >> registry-payload-final-validation.txt 2>&1
-          clippy_status=$?
-          cargo test --workspace >> registry-payload-final-validation.txt 2>&1
-          test_status=$?
-          printf '\nfmt_status=%s\nclippy_status=%s\ntest_status=%s\n' "$fmt_status" "$clippy_status" "$test_status" >> registry-payload-final-validation.txt
-          exit 0
-      - name: Commit source and diagnostics
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+      - name: Commit finalized implementation
         run: |
+          rm .github/workflows/apply-rompack-registry-payloads.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git diff --cached --check
-          git commit -m "Stage final registry payload validation"
+          git commit -m "Finalize generated registry payload runtime"
           git push origin HEAD:feature/rompack-registry-payloads
