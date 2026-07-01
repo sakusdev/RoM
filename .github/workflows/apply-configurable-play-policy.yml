@@ -1,0 +1,80 @@
+name: Apply configurable Play runtime policy
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      github.head_ref == 'feature/configurable-play-policy'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/configurable-play-policy
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - id: patch
+        name: Apply source patch
+        continue-on-error: true
+        run: |
+          rm -f play-policy-patch-diagnostics.txt
+          python3 tools/apply_configurable_play_policy.py > play-policy-patch-diagnostics.txt 2>&1
+      - name: Preserve patch diagnostics
+        if: steps.patch.outcome == 'failure'
+        run: |
+          git checkout -- . ':!play-policy-patch-diagnostics.txt' ':!.github/workflows/apply-configurable-play-policy.yml' || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add play-policy-patch-diagnostics.txt
+          git commit -m "Capture Play policy patch diagnostics"
+          git push origin HEAD:feature/configurable-play-policy
+          exit 1
+      - name: Remove patch machinery and format
+        if: steps.patch.outcome == 'success'
+        run: |
+          rm -f play-policy-patch-diagnostics.txt
+          rm tools/apply_configurable_play_policy.py
+          cargo fmt --all
+      - id: validate
+        name: Validate workspace
+        if: steps.patch.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set +e
+          cargo fmt --all --check > play-policy-validation.txt 2>&1
+          fmt_status=$?
+          cargo clippy --workspace --all-targets -- -D warnings >> play-policy-validation.txt 2>&1
+          clippy_status=$?
+          cargo test --workspace >> play-policy-validation.txt 2>&1
+          test_status=$?
+          printf '\nfmt_status=%s\nclippy_status=%s\ntest_status=%s\n' "$fmt_status" "$clippy_status" "$test_status" >> play-policy-validation.txt
+          test "$fmt_status" -eq 0 -a "$clippy_status" -eq 0 -a "$test_status" -eq 0
+      - name: Preserve validation diagnostics
+        if: steps.validate.outcome == 'failure'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Capture Play policy validation diagnostics"
+          git push origin HEAD:feature/configurable-play-policy
+          exit 1
+      - name: Commit implementation
+        if: steps.validate.outcome == 'success'
+        run: |
+          rm -f play-policy-validation.txt
+          rm .github/workflows/apply-configurable-play-policy.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Configure Play runtime policy from server.toml"
+          git push origin HEAD:feature/configurable-play-policy
