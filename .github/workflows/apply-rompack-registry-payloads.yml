@@ -1,0 +1,78 @@
+name: Apply generated registry payloads
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      github.head_ref == 'feature/rompack-registry-payloads'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/rompack-registry-payloads
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - id: patch
+        name: Apply source patch
+        continue-on-error: true
+        run: |
+          rm -f registry-payload-patch-diagnostics.txt
+          python3 tools/apply_rompack_registry_payloads.py > registry-payload-patch-diagnostics.txt 2>&1
+      - name: Preserve patch diagnostics
+        if: steps.patch.outcome == 'failure'
+        run: |
+          git checkout -- . ':!registry-payload-patch-diagnostics.txt' ':!.github/workflows/apply-rompack-registry-payloads.yml' || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add registry-payload-patch-diagnostics.txt
+          git commit -m "Capture registry payload patch diagnostics"
+          git push origin HEAD:feature/rompack-registry-payloads
+          exit 1
+      - name: Remove patch machinery and format
+        if: steps.patch.outcome == 'success'
+        run: |
+          rm -f registry-payload-patch-diagnostics.txt
+          rm tools/apply_rompack_registry_payloads.py
+          cargo fmt --all
+      - id: validate
+        name: Validate workspace
+        if: steps.patch.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set +e
+          cargo clippy --workspace --all-targets -- -D warnings > registry-payload-validation.txt 2>&1
+          clippy_status=$?
+          cargo test --workspace >> registry-payload-validation.txt 2>&1
+          test_status=$?
+          printf '\nclippy_status=%s\ntest_status=%s\n' "$clippy_status" "$test_status" >> registry-payload-validation.txt
+          test "$clippy_status" -eq 0 -a "$test_status" -eq 0
+      - name: Preserve validation diagnostics
+        if: steps.validate.outcome == 'failure'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Capture registry payload validation diagnostics"
+          git push origin HEAD:feature/rompack-registry-payloads
+          exit 1
+      - name: Commit implementation
+        if: steps.validate.outcome == 'success'
+        run: |
+          rm -f registry-payload-validation.txt
+          rm .github/workflows/apply-rompack-registry-payloads.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Load Configuration registry payloads from version packs"
+          git push origin HEAD:feature/rompack-registry-payloads
