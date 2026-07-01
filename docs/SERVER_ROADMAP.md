@@ -24,9 +24,18 @@ The current server milestone provides:
 - Static-overworld Join Game, default spawn, player-position synchronization, and Keep Alive
 - Palette-encoded in-memory flat chunks with full skylight and chunk-batch negotiation
 - All four serverbound movement packet forms with bounded decoding
+- Bounded single-packet player movement delta validation
+- Flat-floor penetration rejection for position movement
 - Bounded serverbound player-action and use-item-on-block payload decoding
+- Use Item On cursor finite and in-block range validation
+- Basic player-eye-to-block-center reach validation before block mutations
+- Non-air validation before simplified block-break mutations
+- Bedrock protection before simplified block-break mutations
+- Air-only validation before simplified placement mutations
+- Ack-only handling for world-height-outside block interactions
 - Shared in-memory world-runtime state for decoded block mutation events
 - Clientbound block-update payload encoding and optional local mutation writeback for profiles that expose that packet ID
+- Bounded peer block-update queues drained after inbound Play packets and transient read timeouts
 - Per-connection player position, rotation, movement flags, and current-chunk state
 - Deterministic 3×3 chunk views with cache-center updates, new chunk batches, and unloads
 - Version-neutral 20 TPS tick scheduling with capped catch-up
@@ -36,7 +45,7 @@ The current server milestone provides:
 - Live online-player count in server-list status responses
 - Version-neutral in-memory world coordinates, sections, block states, biome IDs, and chunk views
 
-The socket runtime now uses `ProtocolProfile` and `ProtocolSession` from Handshake through Play. The 26.1.2 profile validates the handshake protocol, negotiates the vanilla core known pack, sends the full synchronized registry set, completes Configuration, sends the flat-overworld Play bootstrap, validates teleport and chunk-batch acknowledgements, and enters a movement-aware Play loop. The server tracks each player's authoritative position and rotation, updates the chunk-cache center only after crossing a chunk boundary, sends newly visible chunks, unloads chunks that leave the 3×3 view, keeps the server-list online-player count synchronized with Play connections, and continues Keep Alive validation while processing movement. The standalone `ferrum-runtime` crate now provides deterministic scheduling and bounded input-ordering primitives, and the Play loop can route decoded block mutation events through shared in-memory world state. If the active profile exposes a clientbound Block Update packet ID, accepted mutations are written back to the acting client. Entities, dedicated network-worker queues, verified 26.1.2 block interaction packet IDs, multi-client block update broadcasting, and persistence are not implemented yet.
+The socket runtime now uses `ProtocolProfile` and `ProtocolSession` from Handshake through Play. The 26.1.2 profile validates the handshake protocol, negotiates the vanilla core known pack, sends the full synchronized registry set, completes Configuration, sends the flat-overworld Play bootstrap, validates teleport and chunk-batch acknowledgements, and enters a movement-aware Play loop. The server tracks each player's authoritative position and rotation, updates the chunk-cache center only after crossing a chunk boundary, sends newly visible chunks, unloads chunks that leave the 3×3 view, keeps the server-list online-player count synchronized with Play connections, and continues Keep Alive validation while processing movement. The standalone `ferrum-runtime` crate now provides deterministic scheduling and bounded input-ordering primitives, and the Play loop can route decoded block mutation events through shared in-memory world state. If the active profile exposes a clientbound Block Update packet ID, accepted mutations are written back to the acting client and queued for peers; the synchronous Play loop drains those peer queues after inbound packets and transient read timeouts. Entities, dedicated network-worker queues, broader multi-client entity tracking, and persistence are not implemented yet.
 
 ## M9 — Binary NBT foundation
 
@@ -128,7 +137,10 @@ Completed:
 - Add exact protocol-775 packet IDs for Client Tick End and all four serverbound movement packets.
 - Decode position, rotation, position-plus-rotation, and status-only movement payloads with exact lengths.
 - Reject NaN, infinity, coordinates outside the supported world range, unknown movement-flag bits, and trailing bytes.
+- Reject excessive single-packet position jumps before mutating player state or chunk view.
+- Reject position movement below the deterministic flat-world floor before mutating player state.
 - Decode and validate serverbound block interaction payloads once a profile exposes their packet IDs.
+- Reject Use Item On cursor coordinates outside the clicked block.
 - Convert validated block break/place interactions into version-neutral `WorldEvent` mutations.
 - Reject movement received before the initial teleport acknowledgement.
 - Store authoritative per-connection position, yaw, pitch, on-ground state, and horizontal-collision state.
@@ -143,7 +155,7 @@ Completed:
 
 Remaining movement work:
 
-- Add collision, movement-speed, and fall-state validation.
+- Add full collision, full movement-speed, and fall-state validation.
 - Broadcast player state to other connected clients.
 
 ## M14 — Authoritative tick/runtime foundation
@@ -191,14 +203,20 @@ Completed foundation:
 - Encode clientbound Block Update packets and send accepted mutations when the profile exposes `BlockUpdate`.
 - Register exact protocol-775 IDs for Player Action, Use Item On, Block Update, and Block Changed Ack.
 - Acknowledge client prediction sequences and support the complete 26.1.2 Player Action enum.
+- Reject out-of-reach block interactions before world mutation while preserving prediction acknowledgements.
+- Reject simplified block breaking against air while preserving prediction acknowledgements.
+- Reject simplified block breaking against bedrock while preserving prediction acknowledgements.
 - Apply simplified adjacent-face stone placement while rejecting world-border hits.
+- Reject simplified placement into non-air blocks while preserving prediction acknowledgements.
+- Treat block interactions outside the loaded world height as ack-only no-ops instead of connection errors.
 - Serialize bootstrap and dynamically streamed chunks from shared-world snapshots so accepted mutations survive new connections and chunk re-entry.
 - Broadcast accepted block mutations through bounded per-connection queues with same-position coalescing.
+- Drain queued peer block updates during inbound Play handling and transient read timeouts without treating those timeouts as disconnects.
 - Keep protocol serialization and version-specific numeric IDs outside the world crate.
 
 Remaining:
 
-- Add inventory-aware placement, block replaceability, reach, collision, game-mode, and tool-speed validation.
+- Add inventory-aware placement, full block replaceability, precise reach/raycast, collision, game-mode, and tool-speed validation.
 - Replace the current shared mutex world path with dedicated bounded network-worker queues and one authoritative tick owner.
 - Move outbound block updates from client-traffic-driven draining to dedicated non-blocking writer workers.
 - Wire live network workers into the shared authoritative world runtime.

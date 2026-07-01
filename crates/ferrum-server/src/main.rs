@@ -1399,6 +1399,17 @@ fn is_connection_eof(error: &anyhow::Error) -> bool {
     })
 }
 
+fn is_transient_read_timeout(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause.downcast_ref::<io::Error>().is_some_and(|io_error| {
+            matches!(
+                io_error.kind(),
+                io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock
+            )
+        })
+    })
+}
+
 fn send_registry_data<W: Write>(
     writer: &mut W,
     config: &ServerConfig,

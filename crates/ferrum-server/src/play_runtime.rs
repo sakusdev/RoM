@@ -1,6 +1,7 @@
 use super::{
     KEEP_ALIVE_INTERVAL, MAX_IGNORED_PLAY_PACKETS, STATIC_CHUNK_RADIUS, STATIC_CHUNK_X,
-    STATIC_CHUNK_Z, STATIC_FLOOR_Y, is_connection_eof, version_26_1_2, write_play_payload,
+    STATIC_CHUNK_Z, STATIC_FLOOR_Y, is_connection_eof, is_transient_read_timeout, version_26_1_2,
+    write_play_payload,
 };
 use crate::codec::{PacketReader, read_packet};
 use anyhow::{Context, Result, bail};
@@ -18,7 +19,7 @@ use ferrum_protocol::{
 use ferrum_runtime::{ConnectionId, DeterministicRuntime, Tick};
 use ferrum_world::{
     AppliedWorldEvent, BiomeId, BlockPos, BlockStateId, ChunkPos, ChunkStore, ChunkView,
-    ChunkViewDelta, FlatWorldSpec, StaticChunk, WorldEvent,
+    ChunkViewDelta, FlatWorldSpec, StaticChunk, WorldError, WorldEvent,
 };
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -34,6 +35,13 @@ const LOCAL_WORLD_QUEUE_CAPACITY: usize = 128;
 const LOCAL_WORLD_EVENTS_PER_TICK: usize = 16;
 const MAX_PENDING_WORLD_UPDATES_PER_CONNECTION: usize = 256;
 const MAX_WORLD_UPDATES_PER_DRAIN: usize = 64;
+const MAX_PLAYER_MOVE_DELTA: f64 = 100.0;
+const MAX_PLAYER_MOVE_DELTA_SQUARED: f64 = MAX_PLAYER_MOVE_DELTA * MAX_PLAYER_MOVE_DELTA;
+const MIN_PLAYER_FEET_Y: f64 = STATIC_FLOOR_Y as f64 + 1.0;
+const PLAYER_EYE_HEIGHT: f64 = 1.62;
+const MAX_BLOCK_INTERACTION_REACH: f64 = 6.0;
+const MAX_BLOCK_INTERACTION_REACH_SQUARED: f64 =
+    MAX_BLOCK_INTERACTION_REACH * MAX_BLOCK_INTERACTION_REACH;
 
 type LocalWorldRuntime = DeterministicRuntime<ChunkStore, WorldEvent>;
 
@@ -204,6 +212,18 @@ impl SharedWorld {
         Ok(applied)
     }
 
+    fn interaction_block_state(&self, position: BlockPos) -> Result<Option<BlockStateId>> {
+        let inner = self
+            .inner
+            .lock()
+            .map_err(|_| anyhow::anyhow!("shared world lock poisoned"))?;
+        match inner.runtime.state().world_block(position) {
+            Ok(state) => Ok(Some(state)),
+            Err(WorldError::SectionOutOfRange { .. }) => Ok(None),
+            Err(error) => Err(error.into()),
+        }
+    }
+
     #[cfg(test)]
     fn subscriber_count(&self) -> usize {
         self.inner
@@ -302,6 +322,15 @@ pub(super) fn run_play_loop<R: Read, W: Write>(
                     session.disconnect();
                     return Ok(());
                 }
+                Err(error) if is_transient_read_timeout(&error) => {
+                    drain_and_send_pending_world_updates(
+                        writer,
+                        profile,
+                        shared_world,
+                        connection,
+                    )?;
+                    continue;
+                }
                 Err(error) => return Err(error),
             };
             let mut packet_reader = PacketReader::new(&packet);
@@ -346,6 +375,8 @@ pub(super) fn run_play_loop<R: Read, W: Write>(
                     | PacketKind::MovePlayerStatusOnly),
                 ) => {
                     let movement = decode_movement(kind, packet_reader.take_remaining())?;
+                    validate_movement_delta(&player, movement)?;
+                    validate_movement_floor(movement)?;
                     let previous_chunk = player.chunk_pos();
                     player.apply(movement);
                     let current_chunk = player.chunk_pos();
@@ -364,10 +395,13 @@ pub(super) fn run_play_loop<R: Read, W: Write>(
                 Some(PacketKind::PlayerAction) => {
                     let action = decode_player_action(packet_reader.take_remaining())?;
                     let sequence = action.sequence;
-                    if let Some(event) = player_action_to_world_event(
-                        action,
-                        BlockStateId::new(version_26_1_2::AIR_BLOCK_STATE_ID),
-                    ) {
+                    if is_block_interaction_within_reach(&player, action.position)
+                        && let Some(event) = player_action_to_world_event(
+                            action,
+                            BlockStateId::new(version_26_1_2::AIR_BLOCK_STATE_ID),
+                        )
+                        && is_break_target_mutable(shared_world, event)?
+                    {
                         let applied = shared_world.apply_event(connection, event)?;
                         send_world_updates(writer, profile, &applied)?;
                     }
@@ -376,10 +410,13 @@ pub(super) fn run_play_loop<R: Read, W: Write>(
                 Some(PacketKind::UseItemOn) => {
                     let interaction = decode_use_item_on_block(packet_reader.take_remaining())?;
                     let sequence = interaction.sequence;
-                    if let Some(event) = use_item_on_block_to_world_event(
-                        interaction,
-                        BlockStateId::new(version_26_1_2::STONE_BLOCK_STATE_ID),
-                    ) {
+                    if is_block_interaction_within_reach(&player, interaction.position)
+                        && let Some(event) = use_item_on_block_to_world_event(
+                            interaction,
+                            BlockStateId::new(version_26_1_2::STONE_BLOCK_STATE_ID),
+                        )
+                        && is_placement_target_air(shared_world, event)?
+                    {
                         let applied = shared_world.apply_event(connection, event)?;
                         send_world_updates(writer, profile, &applied)?;
                     }
@@ -395,9 +432,7 @@ pub(super) fn run_play_loop<R: Read, W: Write>(
                 }
             }
 
-            let pending_updates =
-                shared_world.drain_updates(connection, MAX_WORLD_UPDATES_PER_DRAIN)?;
-            send_world_updates(writer, profile, &pending_updates)?;
+            drain_and_send_pending_world_updates(writer, profile, shared_world, connection)?;
 
             if keep_alive_acknowledged && ticks_since_request >= tick_interval {
                 break;
@@ -545,6 +580,16 @@ fn send_world_updates<W: Write>(
     Ok(())
 }
 
+fn drain_and_send_pending_world_updates<W: Write>(
+    writer: &mut W,
+    profile: &ProtocolProfile,
+    shared_world: &SharedWorld,
+    connection: ConnectionId,
+) -> Result<()> {
+    let pending_updates = shared_world.drain_updates(connection, MAX_WORLD_UPDATES_PER_DRAIN)?;
+    send_world_updates(writer, profile, &pending_updates)
+}
+
 fn applied_world_event_position(event: &AppliedWorldEvent) -> BlockPos {
     match event {
         AppliedWorldEvent::BlockMutation(mutation) => mutation.position,
@@ -574,6 +619,89 @@ fn require_empty(reader: &mut PacketReader<'_>, label: &str) -> Result<()> {
         bail!("{label} contains trailing bytes");
     }
     Ok(())
+}
+
+fn validate_movement_delta(player: &PlayerState, movement: PlayerMovement) -> Result<()> {
+    let Some(next_position) = movement_position(movement) else {
+        return Ok(());
+    };
+    let distance_squared = player
+        .position
+        .into_iter()
+        .zip(next_position)
+        .map(|(from, to)| {
+            let delta = from - to;
+            delta * delta
+        })
+        .sum::<f64>();
+    if distance_squared > MAX_PLAYER_MOVE_DELTA_SQUARED {
+        bail!(
+            "player movement delta exceeds {MAX_PLAYER_MOVE_DELTA} blocks: squared distance {distance_squared}"
+        );
+    }
+    Ok(())
+}
+
+fn validate_movement_floor(movement: PlayerMovement) -> Result<()> {
+    let Some(next_position) = movement_position(movement) else {
+        return Ok(());
+    };
+    if next_position[1] < MIN_PLAYER_FEET_Y {
+        bail!(
+            "player movement feet y {} is below flat-world floor {}",
+            next_position[1],
+            MIN_PLAYER_FEET_Y
+        );
+    }
+    Ok(())
+}
+
+fn movement_position(movement: PlayerMovement) -> Option<[f64; 3]> {
+    match movement {
+        PlayerMovement::Position { position, .. }
+        | PlayerMovement::PositionRotation { position, .. } => Some(position),
+        PlayerMovement::Rotation { .. } | PlayerMovement::StatusOnly { .. } => None,
+    }
+}
+
+fn is_block_interaction_within_reach(player: &PlayerState, position: BlockPosition) -> bool {
+    let eye = [
+        player.position[0],
+        player.position[1] + PLAYER_EYE_HEIGHT,
+        player.position[2],
+    ];
+    let block_center = [
+        f64::from(position.x) + 0.5,
+        f64::from(position.y) + 0.5,
+        f64::from(position.z) + 0.5,
+    ];
+    let distance_squared = eye
+        .into_iter()
+        .zip(block_center)
+        .map(|(from, to)| {
+            let delta = from - to;
+            delta * delta
+        })
+        .sum::<f64>();
+    distance_squared <= MAX_BLOCK_INTERACTION_REACH_SQUARED
+}
+
+fn is_placement_target_air(shared_world: &SharedWorld, event: WorldEvent) -> Result<bool> {
+    let WorldEvent::BlockMutation(mutation) = event;
+    Ok(matches!(
+        shared_world.interaction_block_state(mutation.position)?,
+        Some(state) if state == BlockStateId::new(version_26_1_2::AIR_BLOCK_STATE_ID)
+    ))
+}
+
+fn is_break_target_mutable(shared_world: &SharedWorld, event: WorldEvent) -> Result<bool> {
+    let WorldEvent::BlockMutation(mutation) = event;
+    Ok(matches!(
+        shared_world.interaction_block_state(mutation.position)?,
+        Some(state)
+            if state != BlockStateId::new(version_26_1_2::AIR_BLOCK_STATE_ID)
+                && state != BlockStateId::new(version_26_1_2::BEDROCK_BLOCK_STATE_ID)
+    ))
 }
 
 fn send_chunk_view_delta<W: Write>(
@@ -650,8 +778,10 @@ fn flat_chunk(pos: ChunkPos) -> Result<StaticChunk> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::codec::{build_packet, write_packet, write_varint_vec};
     use ferrum_protocol::PacketTable;
     use ferrum_world::{BlockMutation, BlockPos};
+    use std::io::{self, Cursor, Read};
 
     #[test]
     fn movement_packet_classifier_is_phase_and_direction_aware() {
@@ -717,6 +847,108 @@ mod tests {
         let mut output = Vec::new();
         send_block_changed_ack(&mut output, &profile, 300).unwrap();
         assert_eq!(output, [3, 0x04, 0xac, 0x02]);
+    }
+
+    #[test]
+    fn block_interaction_reach_uses_player_eye_to_block_center_distance() {
+        let player = PlayerState::new([0.5, 65.0, 0.5], 0.0, 0.0, false, false).unwrap();
+
+        assert!(is_block_interaction_within_reach(
+            &player,
+            BlockPosition { x: 0, y: 65, z: 0 }
+        ));
+        assert!(is_block_interaction_within_reach(
+            &player,
+            BlockPosition { x: 5, y: 65, z: 0 }
+        ));
+        assert!(!is_block_interaction_within_reach(
+            &player,
+            BlockPosition { x: 7, y: 65, z: 0 }
+        ));
+    }
+
+    #[test]
+    fn movement_delta_validation_allows_normal_steps_and_rejects_large_jumps() {
+        let player = PlayerState::new([0.5, 65.0, 0.5], 0.0, 0.0, false, false).unwrap();
+
+        validate_movement_delta(
+            &player,
+            PlayerMovement::Position {
+                position: [1.0, 65.0, 1.0],
+                flags: ferrum_play::MovementFlags {
+                    on_ground: true,
+                    horizontal_collision: false,
+                },
+            },
+        )
+        .unwrap();
+        validate_movement_delta(
+            &player,
+            PlayerMovement::Rotation {
+                yaw: 90.0,
+                pitch: 0.0,
+                flags: ferrum_play::MovementFlags {
+                    on_ground: true,
+                    horizontal_collision: false,
+                },
+            },
+        )
+        .unwrap();
+
+        let error = validate_movement_delta(
+            &player,
+            PlayerMovement::Position {
+                position: [200.5, 65.0, 0.5],
+                flags: ferrum_play::MovementFlags {
+                    on_ground: true,
+                    horizontal_collision: false,
+                },
+            },
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("movement delta exceeds"));
+    }
+
+    #[test]
+    fn movement_floor_validation_rejects_flat_floor_penetration() {
+        validate_movement_floor(PlayerMovement::Position {
+            position: [0.5, MIN_PLAYER_FEET_Y, 0.5],
+            flags: ferrum_play::MovementFlags {
+                on_ground: true,
+                horizontal_collision: false,
+            },
+        })
+        .unwrap();
+        validate_movement_floor(PlayerMovement::StatusOnly {
+            flags: ferrum_play::MovementFlags {
+                on_ground: true,
+                horizontal_collision: false,
+            },
+        })
+        .unwrap();
+
+        let error = validate_movement_floor(PlayerMovement::Position {
+            position: [0.5, MIN_PLAYER_FEET_Y - 0.01, 0.5],
+            flags: ferrum_play::MovementFlags {
+                on_ground: true,
+                horizontal_collision: false,
+            },
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("below flat-world floor"));
+    }
+
+    #[test]
+    fn block_interaction_state_checks_treat_world_height_outside_as_unavailable() {
+        let world = SharedWorld::static_flat();
+        let too_high = BlockPos { x: 0, y: 320, z: 0 };
+        let event = WorldEvent::BlockMutation(BlockMutation {
+            position: too_high,
+            state: BlockStateId::new(version_26_1_2::STONE_BLOCK_STATE_ID),
+        });
+
+        assert!(!is_placement_target_air(&world, event).unwrap());
+        assert!(!is_break_target_mutable(&world, event).unwrap());
     }
 
     #[test]
@@ -872,6 +1104,574 @@ mod tests {
         assert_eq!(first.len(), 1);
         assert_eq!(second.len(), 1);
         assert_eq!(world.world_block(position).unwrap(), air);
+    }
+
+    #[test]
+    fn play_loop_rejects_large_position_jump_before_chunk_streaming() {
+        let mut packets = PacketTable::new();
+        packets.insert(PacketKind::KeepAliveRequest, 0x2c).unwrap();
+        packets
+            .insert(PacketKind::MovePlayerPosition, 0x1e)
+            .unwrap();
+        let profile = ProtocolProfile::new("Test", 1, packets).unwrap();
+        let world = SharedWorld::static_flat();
+        let connection = ConnectionId::new(1);
+        let _subscription = world.subscribe(connection).unwrap();
+
+        let mut input = Vec::new();
+        write_packet(
+            &mut input,
+            &build_packet(0x1e, |body| {
+                for value in [500.5_f64, 65.0, 0.5] {
+                    body.extend_from_slice(&value.to_be_bytes());
+                }
+                body.push(1);
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let mut output = Vec::new();
+        let mut session = play_session();
+
+        let error = run_play_loop(
+            &mut Cursor::new(input),
+            &mut output,
+            &profile,
+            &mut session,
+            &world,
+            connection,
+            Some(1),
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("movement delta exceeds"));
+        let mut output = Cursor::new(output);
+        let keep_alive = crate::codec::read_packet(&mut output).unwrap();
+        assert_eq!(PacketReader::new(&keep_alive).read_varint().unwrap(), 0x2c);
+        assert!(crate::codec::read_packet(&mut output).is_err());
+    }
+
+    #[test]
+    fn play_loop_rejects_position_below_flat_floor() {
+        let mut packets = PacketTable::new();
+        packets.insert(PacketKind::KeepAliveRequest, 0x2c).unwrap();
+        packets
+            .insert(PacketKind::MovePlayerPosition, 0x1e)
+            .unwrap();
+        let profile = ProtocolProfile::new("Test", 1, packets).unwrap();
+        let world = SharedWorld::static_flat();
+        let connection = ConnectionId::new(1);
+        let _subscription = world.subscribe(connection).unwrap();
+
+        let mut input = Vec::new();
+        write_packet(
+            &mut input,
+            &build_packet(0x1e, |body| {
+                for value in [0.5_f64, MIN_PLAYER_FEET_Y - 0.01, 0.5] {
+                    body.extend_from_slice(&value.to_be_bytes());
+                }
+                body.push(1);
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let mut output = Vec::new();
+        let mut session = play_session();
+
+        let error = run_play_loop(
+            &mut Cursor::new(input),
+            &mut output,
+            &profile,
+            &mut session,
+            &world,
+            connection,
+            Some(1),
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("below flat-world floor"));
+        let mut output = Cursor::new(output);
+        let keep_alive = crate::codec::read_packet(&mut output).unwrap();
+        assert_eq!(PacketReader::new(&keep_alive).read_varint().unwrap(), 0x2c);
+        assert!(crate::codec::read_packet(&mut output).is_err());
+    }
+
+    #[test]
+    fn play_loop_drains_peer_updates_after_read_timeout() {
+        let mut packets = PacketTable::new();
+        packets.insert(PacketKind::KeepAliveRequest, 0x2c).unwrap();
+        packets.insert(PacketKind::KeepAliveResponse, 0x1c).unwrap();
+        packets.insert(PacketKind::BlockUpdate, 0x22).unwrap();
+        let profile = ProtocolProfile::new("Test", 1, packets).unwrap();
+        let world = SharedWorld::static_flat();
+        let connection = ConnectionId::new(2);
+        let _subscription = world.subscribe(connection).unwrap();
+        let position = BlockPos { x: 1, y: 65, z: 1 };
+        let state = BlockStateId::new(version_26_1_2::STONE_BLOCK_STATE_ID);
+        world
+            .apply_event(
+                ConnectionId::new(1),
+                WorldEvent::BlockMutation(BlockMutation { position, state }),
+            )
+            .unwrap();
+
+        let mut input = Vec::new();
+        write_packet(
+            &mut input,
+            &build_packet(0x1c, |body| {
+                body.extend_from_slice(&1_i64.to_be_bytes());
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let mut reader = TimeoutThenCursor::new(input);
+        let mut output = Vec::new();
+        let mut session = play_session();
+
+        run_play_loop(
+            &mut reader,
+            &mut output,
+            &profile,
+            &mut session,
+            &world,
+            connection,
+            Some(1),
+        )
+        .unwrap();
+
+        let mut output = Cursor::new(output);
+        let keep_alive = crate::codec::read_packet(&mut output).unwrap();
+        assert_eq!(PacketReader::new(&keep_alive).read_varint().unwrap(), 0x2c);
+        let block_update = crate::codec::read_packet(&mut output).unwrap();
+        let mut block_update_reader = PacketReader::new(&block_update);
+        assert_eq!(block_update_reader.read_varint().unwrap(), 0x22);
+        assert_eq!(
+            block_update_reader.read_i64().unwrap(),
+            BlockPosition { x: 1, y: 65, z: 1 }.pack_for_test()
+        );
+        assert_eq!(
+            block_update_reader.read_varint().unwrap(),
+            i32::try_from(state.get()).unwrap()
+        );
+    }
+
+    #[test]
+    fn play_loop_acknowledges_far_placement_without_mutating_world() {
+        let mut packets = PacketTable::new();
+        packets.insert(PacketKind::KeepAliveRequest, 0x2c).unwrap();
+        packets.insert(PacketKind::KeepAliveResponse, 0x1c).unwrap();
+        packets.insert(PacketKind::UseItemOn, 0x42).unwrap();
+        packets.insert(PacketKind::BlockChangedAck, 0x04).unwrap();
+        let profile = ProtocolProfile::new("Test", 1, packets).unwrap();
+        let world = SharedWorld::static_flat();
+        let connection = ConnectionId::new(1);
+        let _subscription = world.subscribe(connection).unwrap();
+        let placement = BlockPos { x: 8, y: 65, z: 0 };
+
+        let mut input = Vec::new();
+        write_packet(
+            &mut input,
+            &build_packet(0x42, |body| {
+                write_varint_vec(body, 0);
+                body.extend_from_slice(
+                    &BlockPosition { x: 7, y: 65, z: 0 }
+                        .pack_for_test()
+                        .to_be_bytes(),
+                );
+                write_varint_vec(body, 5);
+                for value in [0.5_f32, 0.5, 0.5] {
+                    body.extend_from_slice(&value.to_be_bytes());
+                }
+                body.push(0);
+                body.push(0);
+                write_varint_vec(body, 9);
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        write_packet(
+            &mut input,
+            &build_packet(0x1c, |body| {
+                body.extend_from_slice(&1_i64.to_be_bytes());
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let mut output = Vec::new();
+        let mut session = play_session();
+
+        run_play_loop(
+            &mut Cursor::new(input),
+            &mut output,
+            &profile,
+            &mut session,
+            &world,
+            connection,
+            Some(1),
+        )
+        .unwrap();
+
+        assert_eq!(
+            world.world_block(placement).unwrap(),
+            BlockStateId::new(version_26_1_2::AIR_BLOCK_STATE_ID)
+        );
+        let mut output = Cursor::new(output);
+        let keep_alive = crate::codec::read_packet(&mut output).unwrap();
+        assert_eq!(PacketReader::new(&keep_alive).read_varint().unwrap(), 0x2c);
+        let acknowledgement = crate::codec::read_packet(&mut output).unwrap();
+        let mut acknowledgement_reader = PacketReader::new(&acknowledgement);
+        assert_eq!(acknowledgement_reader.read_varint().unwrap(), 0x04);
+        assert_eq!(acknowledgement_reader.read_varint().unwrap(), 9);
+        assert!(crate::codec::read_packet(&mut output).is_err());
+    }
+
+    #[test]
+    fn play_loop_acknowledges_air_break_without_sending_block_update() {
+        let mut packets = PacketTable::new();
+        packets.insert(PacketKind::KeepAliveRequest, 0x2c).unwrap();
+        packets.insert(PacketKind::KeepAliveResponse, 0x1c).unwrap();
+        packets.insert(PacketKind::PlayerAction, 0x29).unwrap();
+        packets.insert(PacketKind::BlockChangedAck, 0x04).unwrap();
+        packets.insert(PacketKind::BlockUpdate, 0x22).unwrap();
+        let profile = ProtocolProfile::new("Test", 1, packets).unwrap();
+        let world = SharedWorld::static_flat();
+        let connection = ConnectionId::new(1);
+        let _subscription = world.subscribe(connection).unwrap();
+        let air_position = BlockPos { x: 0, y: 65, z: 0 };
+
+        let mut input = Vec::new();
+        write_packet(
+            &mut input,
+            &build_packet(0x29, |body| {
+                write_varint_vec(body, 2);
+                body.extend_from_slice(
+                    &BlockPosition { x: 0, y: 65, z: 0 }
+                        .pack_for_test()
+                        .to_be_bytes(),
+                );
+                body.push(1);
+                write_varint_vec(body, 11);
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        write_packet(
+            &mut input,
+            &build_packet(0x1c, |body| {
+                body.extend_from_slice(&1_i64.to_be_bytes());
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let mut output = Vec::new();
+        let mut session = play_session();
+
+        run_play_loop(
+            &mut Cursor::new(input),
+            &mut output,
+            &profile,
+            &mut session,
+            &world,
+            connection,
+            Some(1),
+        )
+        .unwrap();
+
+        assert_eq!(
+            world.world_block(air_position).unwrap(),
+            BlockStateId::new(version_26_1_2::AIR_BLOCK_STATE_ID)
+        );
+        let mut output = Cursor::new(output);
+        let keep_alive = crate::codec::read_packet(&mut output).unwrap();
+        assert_eq!(PacketReader::new(&keep_alive).read_varint().unwrap(), 0x2c);
+        let acknowledgement = crate::codec::read_packet(&mut output).unwrap();
+        let mut acknowledgement_reader = PacketReader::new(&acknowledgement);
+        assert_eq!(acknowledgement_reader.read_varint().unwrap(), 0x04);
+        assert_eq!(acknowledgement_reader.read_varint().unwrap(), 11);
+        assert!(crate::codec::read_packet(&mut output).is_err());
+    }
+
+    #[test]
+    fn play_loop_acknowledges_bedrock_break_without_mutating_world() {
+        let mut packets = PacketTable::new();
+        packets.insert(PacketKind::KeepAliveRequest, 0x2c).unwrap();
+        packets.insert(PacketKind::KeepAliveResponse, 0x1c).unwrap();
+        packets
+            .insert(PacketKind::MovePlayerPosition, 0x1e)
+            .unwrap();
+        packets.insert(PacketKind::PlayerAction, 0x29).unwrap();
+        packets.insert(PacketKind::BlockChangedAck, 0x04).unwrap();
+        packets.insert(PacketKind::BlockUpdate, 0x22).unwrap();
+        let profile = ProtocolProfile::new("Test", 1, packets).unwrap();
+        let world = SharedWorld::static_flat();
+        let connection = ConnectionId::new(1);
+        let _subscription = world.subscribe(connection).unwrap();
+        let bedrock_position = BlockPos { x: 0, y: 60, z: 0 };
+
+        let mut input = Vec::new();
+        write_packet(
+            &mut input,
+            &build_packet(0x1e, |body| {
+                for value in [0.5_f64, MIN_PLAYER_FEET_Y, 0.5] {
+                    body.extend_from_slice(&value.to_be_bytes());
+                }
+                body.push(1);
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        write_packet(
+            &mut input,
+            &build_packet(0x29, |body| {
+                write_varint_vec(body, 2);
+                body.extend_from_slice(
+                    &BlockPosition { x: 0, y: 60, z: 0 }
+                        .pack_for_test()
+                        .to_be_bytes(),
+                );
+                body.push(1);
+                write_varint_vec(body, 12);
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        write_packet(
+            &mut input,
+            &build_packet(0x1c, |body| {
+                body.extend_from_slice(&1_i64.to_be_bytes());
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let mut output = Vec::new();
+        let mut session = play_session();
+
+        run_play_loop(
+            &mut Cursor::new(input),
+            &mut output,
+            &profile,
+            &mut session,
+            &world,
+            connection,
+            Some(1),
+        )
+        .unwrap();
+
+        assert_eq!(
+            world.world_block(bedrock_position).unwrap(),
+            BlockStateId::new(version_26_1_2::BEDROCK_BLOCK_STATE_ID)
+        );
+        let mut output = Cursor::new(output);
+        let keep_alive = crate::codec::read_packet(&mut output).unwrap();
+        assert_eq!(PacketReader::new(&keep_alive).read_varint().unwrap(), 0x2c);
+        let acknowledgement = crate::codec::read_packet(&mut output).unwrap();
+        let mut acknowledgement_reader = PacketReader::new(&acknowledgement);
+        assert_eq!(acknowledgement_reader.read_varint().unwrap(), 0x04);
+        assert_eq!(acknowledgement_reader.read_varint().unwrap(), 12);
+        assert!(crate::codec::read_packet(&mut output).is_err());
+    }
+
+    #[test]
+    fn play_loop_acknowledges_occupied_placement_without_replacing_block() {
+        let mut packets = PacketTable::new();
+        packets.insert(PacketKind::KeepAliveRequest, 0x2c).unwrap();
+        packets.insert(PacketKind::KeepAliveResponse, 0x1c).unwrap();
+        packets.insert(PacketKind::UseItemOn, 0x42).unwrap();
+        packets.insert(PacketKind::BlockChangedAck, 0x04).unwrap();
+        packets.insert(PacketKind::BlockUpdate, 0x22).unwrap();
+        let profile = ProtocolProfile::new("Test", 1, packets).unwrap();
+        let world = SharedWorld::static_flat();
+        let connection = ConnectionId::new(1);
+        let _subscription = world.subscribe(connection).unwrap();
+        let occupied = BlockPos { x: 0, y: 63, z: 0 };
+        let previous = world.world_block(occupied).unwrap();
+
+        let mut input = Vec::new();
+        write_packet(
+            &mut input,
+            &build_packet(0x42, |body| {
+                write_varint_vec(body, 0);
+                body.extend_from_slice(
+                    &BlockPosition { x: 0, y: 64, z: 0 }
+                        .pack_for_test()
+                        .to_be_bytes(),
+                );
+                write_varint_vec(body, 0);
+                for value in [0.5_f32, 0.0, 0.5] {
+                    body.extend_from_slice(&value.to_be_bytes());
+                }
+                body.push(0);
+                body.push(0);
+                write_varint_vec(body, 10);
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        write_packet(
+            &mut input,
+            &build_packet(0x1c, |body| {
+                body.extend_from_slice(&1_i64.to_be_bytes());
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let mut output = Vec::new();
+        let mut session = play_session();
+
+        run_play_loop(
+            &mut Cursor::new(input),
+            &mut output,
+            &profile,
+            &mut session,
+            &world,
+            connection,
+            Some(1),
+        )
+        .unwrap();
+
+        assert_eq!(world.world_block(occupied).unwrap(), previous);
+        let mut output = Cursor::new(output);
+        let keep_alive = crate::codec::read_packet(&mut output).unwrap();
+        assert_eq!(PacketReader::new(&keep_alive).read_varint().unwrap(), 0x2c);
+        let acknowledgement = crate::codec::read_packet(&mut output).unwrap();
+        let mut acknowledgement_reader = PacketReader::new(&acknowledgement);
+        assert_eq!(acknowledgement_reader.read_varint().unwrap(), 0x04);
+        assert_eq!(acknowledgement_reader.read_varint().unwrap(), 10);
+        assert!(crate::codec::read_packet(&mut output).is_err());
+    }
+
+    #[test]
+    fn play_loop_acknowledges_height_outside_placement_without_error() {
+        let mut packets = PacketTable::new();
+        packets.insert(PacketKind::KeepAliveRequest, 0x2c).unwrap();
+        packets.insert(PacketKind::KeepAliveResponse, 0x1c).unwrap();
+        packets
+            .insert(PacketKind::MovePlayerPosition, 0x1e)
+            .unwrap();
+        packets.insert(PacketKind::UseItemOn, 0x42).unwrap();
+        packets.insert(PacketKind::BlockChangedAck, 0x04).unwrap();
+        packets.insert(PacketKind::BlockUpdate, 0x22).unwrap();
+        let profile = ProtocolProfile::new("Test", 1, packets).unwrap();
+        let world = SharedWorld::static_flat();
+        let connection = ConnectionId::new(1);
+        let _subscription = world.subscribe(connection).unwrap();
+
+        let mut input = Vec::new();
+        for y in [160.0_f64, 250.0, 318.0] {
+            write_packet(
+                &mut input,
+                &build_packet(0x1e, |body| {
+                    for value in [0.5_f64, y, 0.5] {
+                        body.extend_from_slice(&value.to_be_bytes());
+                    }
+                    body.push(1);
+                    Ok(())
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        write_packet(
+            &mut input,
+            &build_packet(0x42, |body| {
+                write_varint_vec(body, 0);
+                body.extend_from_slice(
+                    &BlockPosition { x: 0, y: 319, z: 0 }
+                        .pack_for_test()
+                        .to_be_bytes(),
+                );
+                write_varint_vec(body, 1);
+                for value in [0.5_f32, 1.0, 0.5] {
+                    body.extend_from_slice(&value.to_be_bytes());
+                }
+                body.push(0);
+                body.push(0);
+                write_varint_vec(body, 13);
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        write_packet(
+            &mut input,
+            &build_packet(0x1c, |body| {
+                body.extend_from_slice(&1_i64.to_be_bytes());
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let mut output = Vec::new();
+        let mut session = play_session();
+
+        run_play_loop(
+            &mut Cursor::new(input),
+            &mut output,
+            &profile,
+            &mut session,
+            &world,
+            connection,
+            Some(1),
+        )
+        .unwrap();
+
+        let mut output = Cursor::new(output);
+        let keep_alive = crate::codec::read_packet(&mut output).unwrap();
+        assert_eq!(PacketReader::new(&keep_alive).read_varint().unwrap(), 0x2c);
+        let acknowledgement = crate::codec::read_packet(&mut output).unwrap();
+        let mut acknowledgement_reader = PacketReader::new(&acknowledgement);
+        assert_eq!(acknowledgement_reader.read_varint().unwrap(), 0x04);
+        assert_eq!(acknowledgement_reader.read_varint().unwrap(), 13);
+        assert!(crate::codec::read_packet(&mut output).is_err());
+    }
+
+    struct TimeoutThenCursor {
+        timed_out: bool,
+        cursor: Cursor<Vec<u8>>,
+    }
+
+    impl TimeoutThenCursor {
+        fn new(input: Vec<u8>) -> Self {
+            Self {
+                timed_out: false,
+                cursor: Cursor::new(input),
+            }
+        }
+    }
+
+    impl Read for TimeoutThenCursor {
+        fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
+            if !self.timed_out {
+                self.timed_out = true;
+                return Err(io::Error::new(io::ErrorKind::TimedOut, "test timeout"));
+            }
+            self.cursor.read(output)
+        }
+    }
+
+    fn play_session() -> ProtocolSession {
+        let mut session = ProtocolSession::new();
+        session
+            .handshake(1, ferrum_protocol::HandshakeIntent::Login)
+            .unwrap();
+        session.login_start("Steve").unwrap();
+        session.login_success_sent().unwrap();
+        session.login_acknowledged().unwrap();
+        session.finish_configuration_sent().unwrap();
+        session.configuration_acknowledged().unwrap();
+        session
     }
 
     trait TestBlockPositionPack {

@@ -70,40 +70,40 @@ jobs:
             os: windows-latest
             target: x86_64-pc-windows-msvc
             source_binary: ferrum-server.exe
-            package_binary: rom-server.exe
-            raw_asset: rom-server-windows-x86_64.exe
+            package_binary: ferrum-server.exe
+            raw_asset: ferrum-server-windows-x86_64.exe
             archive: zip
             native: true
           - platform: linux-x86_64
             os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
             source_binary: ferrum-server
-            package_binary: rom-server
-            raw_asset: rom-server-linux-x86_64
+            package_binary: ferrum-server
+            raw_asset: ferrum-server-linux-x86_64
             archive: tar.gz
             native: true
           - platform: linux-aarch64
             os: ubuntu-24.04
             target: aarch64-unknown-linux-gnu
             source_binary: ferrum-server
-            package_binary: rom-server
-            raw_asset: rom-server-linux-aarch64
+            package_binary: ferrum-server
+            raw_asset: ferrum-server-linux-aarch64
             archive: tar.gz
             native: false
           - platform: macos-x86_64
             os: macos-15-intel
             target: x86_64-apple-darwin
             source_binary: ferrum-server
-            package_binary: rom-server
-            raw_asset: rom-server-macos-x86_64
+            package_binary: ferrum-server
+            raw_asset: ferrum-server-macos-x86_64
             archive: tar.gz
             native: true
           - platform: macos-aarch64
             os: macos-15
             target: aarch64-apple-darwin
             source_binary: ferrum-server
-            package_binary: rom-server
-            raw_asset: rom-server-macos-aarch64
+            package_binary: ferrum-server
+            raw_asset: ferrum-server-macos-aarch64
             archive: tar.gz
             native: true
 
@@ -208,7 +208,7 @@ jobs:
           path: |
             dist/*.zip
             dist/*.tar.gz
-            dist/rom-server-*
+            dist/ferrum-server-*
             dist/*.sha256
           if-no-files-found: error
           retention-days: 14
@@ -256,9 +256,9 @@ jobs:
 
           This experimental release includes login, Configuration, all synchronized registries, Join Game, one deterministic flat chunk with light, player-position synchronization, system chat, and Keep Alive.
 
-          Each platform provides a standalone executable and an archive containing the executable, server.toml, README.md, LICENSE, and VERSION. Verify downloads with SHA256SUMS.
+          Each platform provides a standalone ferrum-server executable and an archive containing the executable, server.toml, README.md, LICENSE, and VERSION. Verify downloads with SHA256SUMS.
 
-          Player movement processing, dynamic chunk streaming, block interaction, entities, persistence, and online-mode authentication are not implemented yet.
+          Entities, persistence, full inventory semantics, and online-mode authentication are not implemented yet.
           EOF
 
       - name: Create or update release and upload assets

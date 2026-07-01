@@ -43,12 +43,21 @@ The native server currently supports:
 - Teleport acknowledgement validation
 - All four serverbound movement forms
 - Finite coordinate, coordinate-range, movement-flag, and exact-payload validation
+- Bounded single-packet player movement delta validation
+- Flat-floor penetration rejection for position movement
 - Bounded protocol-775 Player Action and Use Item On decoding
+- Use Item On cursor finite and in-block range validation
+- Basic player-eye-to-block-center reach validation for block interactions
+- Non-air validation for simplified block breaking
+- Bedrock protection for simplified block breaking
+- Air-only validation for simplified block placement
+- Ack-only handling for world-height-outside block interactions
 - Shared in-memory world state across Play connections
 - Initial and dynamic chunks serialized from authoritative world snapshots
 - Simplified block breaking and adjacent-face stone placement
 - Block Update and Block Changed Ack responses
 - Bounded per-connection peer update queues with same-position coalescing
+- Peer block-update draining after inbound Play packets and transient read timeouts
 - Deterministic 3×3 chunk views
 - Dynamic chunk loading and unloading
 - Live online-player count in status responses
@@ -86,7 +95,7 @@ The world is intentionally small and deterministic while the gameplay foundation
 Not implemented yet:
 
 - Microsoft account authentication and encrypted online mode
-- Collision or movement-speed enforcement
+- Full collision, full movement-speed, and full reach enforcement
 - Dedicated network-worker to authoritative-world-runtime queues
 - Full item, inventory, replaceability, reach, collision, and game-mode validation
 - Dedicated outbound writer workers
@@ -197,7 +206,7 @@ The cache and generated instance data are local artifacts. Do not commit or redi
 
 ## Native releases
 
-`rom-server` and `rom-bootstrap` are intended to be released as platform-native executables for:
+`ferrum-server` is released as a platform-native server executable for:
 
 - Windows x86_64
 - Linux x86_64
@@ -206,6 +215,13 @@ The cache and generated instance data are local artifacts. Do not commit or redi
 - macOS ARM64
 
 Release archives must contain RoM binaries, configuration, documentation, license, notice, and version information only. They must not contain the official Minecraft server JAR or generated data copied from it.
+
+Expected server usage:
+
+```bash
+ferrum-server.exe --config server.toml
+./ferrum-server --config server.toml
+```
 
 ## Architecture
 

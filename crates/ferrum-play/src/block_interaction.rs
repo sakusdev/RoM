@@ -76,6 +76,9 @@ pub fn decode_use_item_on_block(
         if !value.is_finite() {
             return Err(BlockInteractionDecodeError::NonFiniteCursor { axis, value });
         }
+        if !(0.0..=1.0).contains(&value) {
+            return Err(BlockInteractionDecodeError::CursorOutOfRange { axis, value });
+        }
     }
     let inside_block = reader.read_bool()?;
     let world_border_hit = reader.read_bool()?;
@@ -299,6 +302,8 @@ pub enum BlockInteractionDecodeError {
     InvalidBool(u8),
     #[error("cursor coordinate {axis} is not finite: {value}")]
     NonFiniteCursor { axis: &'static str, value: f32 },
+    #[error("cursor coordinate {axis} is outside the block: {value}")]
+    CursorOutOfRange { axis: &'static str, value: f32 },
     #[error("block interaction payload has {count} trailing bytes")]
     TrailingBytes { count: usize },
 }
@@ -422,6 +427,24 @@ mod tests {
             decode_use_item_on_block(&payload).unwrap_err(),
             BlockInteractionDecodeError::NonFiniteCursor { axis: "x", .. }
         ));
+
+        let mut payload = Vec::new();
+        write_varint(&mut payload, 0);
+        payload.extend_from_slice(&0_i64.to_be_bytes());
+        write_varint(&mut payload, 0);
+        payload.extend_from_slice(&0.0_f32.to_be_bytes());
+        payload.extend_from_slice(&1.25_f32.to_be_bytes());
+        payload.extend_from_slice(&0.0_f32.to_be_bytes());
+        payload.push(0);
+        payload.push(0);
+        write_varint(&mut payload, 0);
+        assert_eq!(
+            decode_use_item_on_block(&payload).unwrap_err(),
+            BlockInteractionDecodeError::CursorOutOfRange {
+                axis: "y",
+                value: 1.25
+            }
+        );
     }
 
     #[test]
