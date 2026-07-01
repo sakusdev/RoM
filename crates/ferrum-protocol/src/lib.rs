@@ -2,6 +2,7 @@
 //!
 //! Socket I/O and gameplay state intentionally live outside this crate.
 
+use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     error::Error,
@@ -30,7 +31,8 @@ pub enum HandshakeIntent {
     Login,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PacketKind {
     Handshake,
     StatusRequest,
@@ -76,6 +78,50 @@ pub enum PacketKind {
 }
 
 impl PacketKind {
+    pub const ALL: &'static [Self] = &[
+        Self::Handshake,
+        Self::StatusRequest,
+        Self::PingRequest,
+        Self::StatusResponse,
+        Self::PongResponse,
+        Self::LoginStart,
+        Self::LoginAcknowledged,
+        Self::LoginDisconnect,
+        Self::LoginSuccess,
+        Self::ConfigurationAcknowledged,
+        Self::ConfigurationClientInformation,
+        Self::ConfigurationDisconnect,
+        Self::RegistryData,
+        Self::FeatureFlags,
+        Self::UpdateTags,
+        Self::SelectKnownPacksRequest,
+        Self::SelectKnownPacksResponse,
+        Self::FinishConfiguration,
+        Self::PlayLogin,
+        Self::ChunkBatchStart,
+        Self::ChunkBatchFinished,
+        Self::ChunkBatchReceived,
+        Self::LevelChunkWithLight,
+        Self::SetChunkCacheCenter,
+        Self::DefaultSpawnPosition,
+        Self::PlayerPosition,
+        Self::SystemChat,
+        Self::AcceptTeleportation,
+        Self::PlayDisconnect,
+        Self::KeepAliveRequest,
+        Self::KeepAliveResponse,
+        Self::ClientTickEnd,
+        Self::MovePlayerPosition,
+        Self::MovePlayerPositionRotation,
+        Self::MovePlayerRotation,
+        Self::MovePlayerStatusOnly,
+        Self::PlayerAction,
+        Self::UseItemOn,
+        Self::BlockChangedAck,
+        Self::BlockUpdate,
+        Self::ForgetLevelChunk,
+    ];
+
     #[must_use]
     pub const fn phase(self) -> ProtocolPhase {
         match self {

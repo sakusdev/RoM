@@ -36,6 +36,7 @@ The native server currently supports:
 - Offline-mode login with Java-compatible offline UUIDs
 - Login Acknowledged and Configuration-state transitions
 - Vanilla `minecraft/core/26.1.2` Known Packs negotiation
+- Packet IDs loaded from the generated schema-v2 `.rompack` during Bootstrap startup
 - All 28 synchronized 26.1.2 registries with 382 vanilla entries
 - Feature Flags, Tags, and Finish Configuration
 - Join Game for a deterministic flat overworld
@@ -105,7 +106,7 @@ Not implemented yet:
 - World persistence and Anvil region saving
 - Multi-version gameplay compatibility
 - Fabric, Bukkit, Spigot, or Paper plugin compatibility
-- Runtime replacement of the remaining built-in packet/profile constants with generated pack data
+- Runtime replacement of remaining built-in world, block-state, biome, and dimension constants with generated pack data
 
 > [!CAUTION]
 > The default configuration binds to loopback and uses development-only offline login. Do not expose that configuration to the public internet. It does not prove that a connecting user owns Minecraft.
@@ -140,7 +141,7 @@ This downloads the official server JAR directly from an official endpoint, valid
   --instance ./rom-instance
 ```
 
-The extractor opens the verified local JAR, resolves the bundled game JAR when present, validates all selected JSON resources, derives the exact synchronized-registry identifiers, compares them with the built-in 26.1.2 manifest, and writes an integrity-protected `.rompack`.
+The extractor opens the verified local JAR, resolves the bundled game JAR when present, validates all selected JSON resources, derives the synchronized-registry identifiers, adds the exact semantic packet table, compares both with the built-in 26.1.2 profile, and writes an integrity-protected schema-v2 `.rompack`. Existing schema-v1 packs must be regenerated with `generate --force`.
 
 ### 4. Install the native server
 
@@ -239,7 +240,7 @@ RoM separates version-independent server behavior from version-specific wire met
 Core crates:
 
 - `rom-bootstrap` — official-source verification, bounded local extraction, and instance management
-- `ferrum-rompack` — deterministic pack encoding, integrity validation, and bounded decoding
+- `ferrum-rompack` — deterministic packet/profile metadata encoding, integrity validation, and bounded decoding
 - `ferrum-server` — native TCP server and connection runtime
 - `ferrum-runtime` — fixed-rate ticks, bounded inputs, and deterministic mutation ordering
 - `ferrum-protocol` — packet tables, phases, and connection-state validation
@@ -267,14 +268,13 @@ Design rules:
 
 The next server and bootstrap milestones are:
 
-1. Package `rom-bootstrap` alongside `rom-server` in native release archives
-2. Move more version-specific runtime metadata from built-in Rust constants into generated packs
-3. Wire dedicated network workers into the authoritative 20 TPS runtime
-4. Add full block interaction and inventory validation
-5. Add entities and entity tracking
-6. Add persistent Anvil region loading and saving
-7. Add Microsoft account authentication and encrypted online mode
-8. Add additional Minecraft version profiles
+1. Move remaining world, block-state, biome, and dimension metadata into generated packs
+2. Wire dedicated network workers into the authoritative 20 TPS runtime
+3. Add full block interaction and inventory validation
+4. Add entities and entity tracking
+5. Add persistent Anvil region loading and saving
+6. Add Microsoft account authentication and encrypted online mode
+7. Add additional Minecraft version profiles
 
 See [`docs/SERVER_ROADMAP.md`](docs/SERVER_ROADMAP.md) for the detailed server plan.
 
