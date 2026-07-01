@@ -1891,7 +1891,7 @@ mod tests {
             max_players: 10,
             ..ServerConfig::default()
         };
-        let state = ServerState::new(config);
+        let state = ServerState::new(&config);
 
         {
             let _first_player = state.enter_play();
