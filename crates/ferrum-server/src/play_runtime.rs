@@ -1249,7 +1249,11 @@ mod tests {
         write_packet(
             &mut input,
             &build_packet(0x1e, |body| {
-                for value in [0.5_f64, MIN_PLAYER_FEET_Y - 0.01, 0.5] {
+                for value in [
+                    0.5_f64,
+                    f64::from(world.world_profile().floor_y) + 1.0 - 0.01,
+                    0.5,
+                ] {
                     body.extend_from_slice(&value.to_be_bytes());
                 }
                 body.push(1);
@@ -1500,7 +1504,7 @@ mod tests {
         write_packet(
             &mut input,
             &build_packet(0x1e, |body| {
-                for value in [0.5_f64, MIN_PLAYER_FEET_Y, 0.5] {
+                for value in [0.5_f64, f64::from(world.world_profile().floor_y) + 1.0, 0.5] {
                     body.extend_from_slice(&value.to_be_bytes());
                 }
                 body.push(1);
