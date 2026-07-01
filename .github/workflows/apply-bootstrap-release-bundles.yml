@@ -1,0 +1,62 @@
+name: Apply Bootstrap release bundles
+
+on:
+  pull_request:
+    branches:
+      - master
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      github.head_ref == 'feature/bootstrap-release-bundles'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/bootstrap-release-bundles
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Apply release integration
+        run: python3 tools/apply_bootstrap_release_bundles.py
+      - name: Remove temporary patch machinery
+        run: |
+          rm tools/apply_bootstrap_release_bundles.py
+          rm .github/workflows/apply-bootstrap-release-bundles.yml
+      - name: Validate release workflow structure
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          text = Path('.github/workflows/release.yml').read_text(encoding='utf-8')
+          assert text.count('bootstrap_binary:') == 5
+          assert text.count('bootstrap_raw_asset:') == 5
+          assert '-p ferrum-server -p rom-bootstrap' in text
+          assert 'dist/rom-bootstrap-*' in text
+          assert 'NOTICE.md' in text
+          assert 'docs/BOOTSTRAP.md' in text
+          assert 'wc -l < SHA256SUMS)" -eq 15' in text
+          assert "assets | length')\" -ge 31" in text
+          PY
+      - name: Validate workspace
+        run: |
+          cargo fmt --all
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+      - name: Commit implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Package RoM Bootstrap with native server releases"
+          git push origin HEAD:feature/bootstrap-release-bundles
