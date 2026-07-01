@@ -4,8 +4,9 @@ use super::{
 };
 use anyhow::{Context, Result, bail};
 use ferrum_rompack::{
-    ROMPACK_SCHEMA_VERSION, RomPack, RomPackMetadata, RomPackPacket, RomPackRegistry,
-    RomPackResource, RomPackSource, RomPackSummary, read_rompack, sha256_hex, write_rompack,
+    ROMPACK_SCHEMA_VERSION, RomPack, RomPackBiomes, RomPackBlockStates, RomPackMetadata,
+    RomPackPacket, RomPackRegistry, RomPackResource, RomPackSource, RomPackSummary, RomPackWorld,
+    read_rompack, sha256_hex, write_rompack,
 };
 use ferrum_version_26_1_2 as version_26_1_2;
 use serde::{Deserialize, Serialize};
@@ -76,6 +77,9 @@ pub struct GenerateReport {
     pub game_jar_path: String,
     pub game_jar_sha256: String,
     pub packet_count: usize,
+    pub world_data_version: i32,
+    pub overworld_min_section_y: i32,
+    pub overworld_section_count: usize,
     pub registry_count: usize,
     pub registry_entry_count: usize,
     pub resource_count: usize,
@@ -145,11 +149,13 @@ pub fn generate_version_pack(options: &GenerateOptions) -> Result<GenerateReport
     let game_jar = resolve_game_jar(&official_jar)?;
     let (registries, resources) = extract_registry_inventory(&game_jar.bytes)?;
     let packets = builtin_packet_inventory()?;
+    let world = builtin_world_metadata();
     validate_against_builtin_profile(
         &manifest.minecraft_version,
         manifest.protocol,
         &manifest.source.sha1,
         &packets,
+        &world,
         &registries,
     )?;
 
@@ -168,6 +174,7 @@ pub fn generate_version_pack(options: &GenerateOptions) -> Result<GenerateReport
             },
         },
         packets,
+        world,
         registries,
         resources,
     };
@@ -202,6 +209,9 @@ pub fn generate_version_pack(options: &GenerateOptions) -> Result<GenerateReport
         game_jar_path: game_jar.path,
         game_jar_sha256: game_jar.sha256,
         packet_count: summary.packet_count,
+        world_data_version: pack.world.data_version,
+        overworld_min_section_y: pack.world.overworld_min_section_y,
+        overworld_section_count: pack.world.overworld_section_count,
         registry_count: summary.registry_count,
         registry_entry_count: summary.registry_entry_count,
         resource_count: summary.resource_count,
@@ -252,6 +262,7 @@ pub(super) fn verify_version_pack_record(
             pack.metadata.protocol,
             &pack.metadata.source.official_server_sha1,
             &pack.packets,
+            &pack.world,
             &pack.registries,
         )
         .is_ok();
@@ -277,6 +288,9 @@ fn report_from_existing(
         game_jar_path: pack.metadata.source.game_jar_path,
         game_jar_sha256: pack.metadata.source.game_jar_sha256,
         packet_count: summary.packet_count,
+        world_data_version: pack.world.data_version,
+        overworld_min_section_y: pack.world.overworld_min_section_y,
+        overworld_section_count: pack.world.overworld_section_count,
         registry_count: summary.registry_count,
         registry_entry_count: summary.registry_entry_count,
         resource_count: summary.resource_count,
@@ -537,11 +551,30 @@ fn builtin_packet_inventory() -> Result<Vec<RomPackPacket>> {
         .collect())
 }
 
+fn builtin_world_metadata() -> RomPackWorld {
+    RomPackWorld {
+        data_version: version_26_1_2::WORLD_VERSION,
+        overworld_min_section_y: version_26_1_2::OVERWORLD_MIN_SECTION_Y,
+        overworld_section_count: version_26_1_2::OVERWORLD_SECTION_COUNT,
+        block_states: RomPackBlockStates {
+            air: version_26_1_2::AIR_BLOCK_STATE_ID,
+            stone: version_26_1_2::STONE_BLOCK_STATE_ID,
+            grass: version_26_1_2::GRASS_BLOCK_STATE_ID,
+            dirt: version_26_1_2::DIRT_BLOCK_STATE_ID,
+            bedrock: version_26_1_2::BEDROCK_BLOCK_STATE_ID,
+        },
+        biomes: RomPackBiomes {
+            plains: version_26_1_2::PLAINS_BIOME_ID,
+        },
+    }
+}
+
 fn validate_against_builtin_profile(
     version: &str,
     protocol: i32,
     official_sha1: &str,
     packets: &[RomPackPacket],
+    world: &RomPackWorld,
     registries: &[RomPackRegistry],
 ) -> Result<()> {
     if version != version_26_1_2::PROFILE_NAME {
@@ -552,6 +585,11 @@ fn validate_against_builtin_profile(
     }
     if !official_sha1.eq_ignore_ascii_case(version_26_1_2::OFFICIAL_SERVER_SHA1) {
         bail!("official server SHA-1 does not match the built-in 26.1.2 provenance record");
+    }
+
+    let expected_world = builtin_world_metadata();
+    if *world != expected_world {
+        bail!("generated world metadata does not match the built-in 26.1.2 profile");
     }
 
     let expected_packets = builtin_packet_inventory()?;
