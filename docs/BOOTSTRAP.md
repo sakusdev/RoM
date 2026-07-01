@@ -24,8 +24,9 @@ The implementation supports `official_source_verified` and `version_pack_generat
 7. Record each selected source path, size, and SHA-256 without copying the JSON payload into the pack.
 8. Add the exact 26.1.2 semantic packet table and compare it with the built-in generation profile.
 9. Compare the resulting 28 registries and 382 identifiers with the built-in 26.1.2 manifest.
-10. Write a deterministic schema-v2 `.rompack` with a container SHA-256 trailer and provenance metadata.
-11. Revalidate the pack before `rom-bootstrap run`; the native server then builds its `ProtocolProfile` from the packet IDs inside the pack.
+10. Add the world data version, overworld section range, required flat-world block-state IDs, and plains biome ID.
+11. Write a deterministic schema-v3 `.rompack` with a container SHA-256 trailer and provenance metadata.
+12. Revalidate the pack before `rom-bootstrap run`; the native server then builds its `ProtocolProfile` and initial shared world from pack metadata.
 
 The extractor does **not** decompile, translate, execute, or bytecode-patch the official server JAR. The generated pack is local-only provenance and derived runtime metadata.
 
@@ -55,7 +56,7 @@ The command refuses unsupported Minecraft versions and download URLs outside off
   --instance ./rom-instance
 ```
 
-Use `--force` to regenerate an already valid pack. Generation is deterministic for the same verified source JAR and extractor version. Schema-v1 packs are intentionally rejected after the packet-table migration and must be regenerated.
+Use `--force` to regenerate an already valid pack. Generation is deterministic for the same verified source JAR and extractor version. Schema-v1 and schema-v2 packs are intentionally rejected after the packet-table and world-metadata migrations and must be regenerated.
 
 ## Install the local native server
 
@@ -140,6 +141,6 @@ RoM currently defaults to a loopback bind and offline-mode development login. Th
 
 ## Planned next stages
 
-1. Move remaining world, block-state, biome, and dimension metadata into generated packs.
+1. Move remaining dimension registry payloads and gameplay constants into generated packs.
 2. Add more independently testable extractors only when the server consumes their output.
 3. Preserve bounded decoding, deterministic ordering, source hashes, and local-only artifact boundaries for every new section.

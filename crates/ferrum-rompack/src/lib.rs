@@ -3,12 +3,13 @@ use ferrum_protocol::{PacketKind, PacketTable};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
+    collections::BTreeSet,
     fs::{self, File},
     io::Write,
     path::{Path, PathBuf},
 };
 
-pub const ROMPACK_SCHEMA_VERSION: u32 = 2;
+pub const ROMPACK_SCHEMA_VERSION: u32 = 3;
 const ROMPACK_MAGIC: &[u8; 8] = b"ROMPACK\0";
 const HEADER_BYTES: usize = ROMPACK_MAGIC.len() + 4 + 8;
 const TRAILER_BYTES: usize = 32;
@@ -18,6 +19,7 @@ pub struct RomPackLimits {
     pub max_file_bytes: u64,
     pub max_json_bytes: u64,
     pub max_packets: usize,
+    pub max_sections: usize,
     pub max_registries: usize,
     pub max_entries_per_registry: usize,
     pub max_resources: usize,
@@ -32,6 +34,7 @@ impl Default for RomPackLimits {
             max_file_bytes: 64 * 1024 * 1024,
             max_json_bytes: 32 * 1024 * 1024,
             max_packets: 4_096,
+            max_sections: 1_024,
             max_registries: 1_024,
             max_entries_per_registry: 1_000_000,
             max_resources: 1_000_000,
@@ -46,6 +49,7 @@ impl Default for RomPackLimits {
 pub struct RomPack {
     pub metadata: RomPackMetadata,
     pub packets: Vec<RomPackPacket>,
+    pub world: RomPackWorld,
     pub registries: Vec<RomPackRegistry>,
     pub resources: Vec<RomPackResource>,
 }
@@ -66,6 +70,29 @@ pub struct RomPackSource {
     pub official_server_size: u64,
     pub game_jar_path: String,
     pub game_jar_sha256: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RomPackWorld {
+    pub data_version: i32,
+    pub overworld_min_section_y: i32,
+    pub overworld_section_count: usize,
+    pub block_states: RomPackBlockStates,
+    pub biomes: RomPackBiomes,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RomPackBlockStates {
+    pub air: u32,
+    pub stone: u32,
+    pub grass: u32,
+    pub dirt: u32,
+    pub bedrock: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RomPackBiomes {
+    pub plains: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -263,6 +290,37 @@ pub fn validate_rompack(pack: &RomPack, limits: RomPackLimits) -> Result<()> {
     )?;
     validate_hex("game JAR SHA-256", &metadata.source.game_jar_sha256, 64)?;
 
+    let world = pack.world;
+    if world.data_version < 0 {
+        bail!("world data version cannot be negative");
+    }
+    if world.overworld_section_count == 0 || world.overworld_section_count > limits.max_sections {
+        bail!("overworld section count is outside the configured range");
+    }
+    let section_count = i32::try_from(world.overworld_section_count)
+        .context("overworld section count exceeds i32")?;
+    let section_end = world
+        .overworld_min_section_y
+        .checked_add(section_count)
+        .context("overworld section range overflow")?;
+    world
+        .overworld_min_section_y
+        .checked_mul(16)
+        .context("overworld minimum block y overflow")?;
+    section_end
+        .checked_mul(16)
+        .context("overworld maximum block y overflow")?;
+    let block_states = [
+        world.block_states.air,
+        world.block_states.stone,
+        world.block_states.grass,
+        world.block_states.dirt,
+        world.block_states.bedrock,
+    ];
+    if block_states.into_iter().collect::<BTreeSet<_>>().len() != block_states.len() {
+        bail!("required flat-world block-state IDs must be distinct");
+    }
+
     if pack.packets.is_empty() {
         bail!("version pack does not contain a packet table");
     }
@@ -425,6 +483,19 @@ mod tests {
                     game_jar_sha256: "22".repeat(32),
                 },
             },
+            world: RomPackWorld {
+                data_version: 4_790,
+                overworld_min_section_y: -4,
+                overworld_section_count: 24,
+                block_states: RomPackBlockStates {
+                    air: 0,
+                    stone: 1,
+                    grass: 9,
+                    dirt: 10,
+                    bedrock: 85,
+                },
+                biomes: RomPackBiomes { plains: 40 },
+            },
             packets: vec![
                 RomPackPacket {
                     kind: PacketKind::Handshake,
@@ -488,6 +559,14 @@ mod tests {
 
     #[test]
     fn rejects_unsorted_or_unsafe_records() {
+        let mut pack = sample_pack();
+        pack.world.overworld_section_count = 0;
+        assert!(validate_rompack(&pack, RomPackLimits::default()).is_err());
+
+        let mut pack = sample_pack();
+        pack.world.block_states.stone = pack.world.block_states.air;
+        assert!(validate_rompack(&pack, RomPackLimits::default()).is_err());
+
         let mut pack = sample_pack();
         pack.packets.reverse();
         assert!(validate_rompack(&pack, RomPackLimits::default()).is_err());

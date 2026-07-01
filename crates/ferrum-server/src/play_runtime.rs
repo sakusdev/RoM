@@ -16,6 +16,7 @@ use ferrum_play::{
 use ferrum_protocol::{
     PacketDirection, PacketKind, ProtocolPhase, ProtocolProfile, ProtocolSession,
 };
+use ferrum_rompack::{RomPackBiomes, RomPackBlockStates, RomPackWorld};
 use ferrum_runtime::{ConnectionId, DeterministicRuntime, Tick};
 use ferrum_world::{
     AppliedWorldEvent, BiomeId, BlockPos, BlockStateId, ChunkPos, ChunkStore, ChunkView,
@@ -47,6 +48,7 @@ type LocalWorldRuntime = DeterministicRuntime<ChunkStore, WorldEvent>;
 
 #[derive(Debug)]
 pub(super) struct SharedWorld {
+    profile: RomPackWorld,
     inner: Mutex<SharedWorldInner>,
 }
 
@@ -103,11 +105,30 @@ impl Drop for SharedWorldSubscription<'_> {
     }
 }
 
+pub(super) fn builtin_world_profile() -> RomPackWorld {
+    RomPackWorld {
+        data_version: version_26_1_2::WORLD_VERSION,
+        overworld_min_section_y: version_26_1_2::OVERWORLD_MIN_SECTION_Y,
+        overworld_section_count: version_26_1_2::OVERWORLD_SECTION_COUNT,
+        block_states: RomPackBlockStates {
+            air: version_26_1_2::AIR_BLOCK_STATE_ID,
+            stone: version_26_1_2::STONE_BLOCK_STATE_ID,
+            grass: version_26_1_2::GRASS_BLOCK_STATE_ID,
+            dirt: version_26_1_2::DIRT_BLOCK_STATE_ID,
+            bedrock: version_26_1_2::BEDROCK_BLOCK_STATE_ID,
+        },
+        biomes: RomPackBiomes {
+            plains: version_26_1_2::PLAINS_BIOME_ID,
+        },
+    }
+}
+
 impl SharedWorld {
-    pub(super) fn new(center: ChunkPos) -> Result<Self> {
+    pub(super) fn new(center: ChunkPos, profile: RomPackWorld) -> Result<Self> {
         Ok(Self {
+            profile,
             inner: Mutex::new(SharedWorldInner {
-                runtime: new_local_world_runtime(center)?,
+                runtime: new_local_world_runtime(center, profile)?,
                 tick: Tick::ZERO,
                 subscribers: BTreeMap::new(),
             }),
@@ -115,10 +136,13 @@ impl SharedWorld {
     }
 
     pub(super) fn static_flat() -> Self {
-        Self::new(ChunkPos {
-            x: STATIC_CHUNK_X,
-            z: STATIC_CHUNK_Z,
-        })
+        Self::new(
+            ChunkPos {
+                x: STATIC_CHUNK_X,
+                z: STATIC_CHUNK_Z,
+            },
+            builtin_world_profile(),
+        )
         .expect("static flat world constants must build a valid chunk store")
     }
 
@@ -127,7 +151,7 @@ impl SharedWorld {
             .inner
             .lock()
             .map_err(|_| anyhow::anyhow!("shared world lock poisoned"))?;
-        ensure_chunks_loaded(inner.runtime.state_mut(), positions)
+        ensure_chunks_loaded(inner.runtime.state_mut(), positions, self.profile)
     }
 
     pub(super) fn subscribe(
@@ -175,6 +199,11 @@ impl SharedWorld {
             )
         })?;
         Ok(pending.drain(limit))
+    }
+
+    #[must_use]
+    pub(super) const fn world_profile(&self) -> RomPackWorld {
+        self.profile
     }
 
     pub(super) fn chunk_snapshot(&self, pos: ChunkPos) -> Result<StaticChunk> {
@@ -398,7 +427,7 @@ pub(super) fn run_play_loop<R: Read, W: Write>(
                     if is_block_interaction_within_reach(&player, action.position)
                         && let Some(event) = player_action_to_world_event(
                             action,
-                            BlockStateId::new(version_26_1_2::AIR_BLOCK_STATE_ID),
+                            BlockStateId::new(shared_world.world_profile().block_states.air),
                         )
                         && is_break_target_mutable(shared_world, event)?
                     {
@@ -413,7 +442,7 @@ pub(super) fn run_play_loop<R: Read, W: Write>(
                     if is_block_interaction_within_reach(&player, interaction.position)
                         && let Some(event) = use_item_on_block_to_world_event(
                             interaction,
-                            BlockStateId::new(version_26_1_2::STONE_BLOCK_STATE_ID),
+                            BlockStateId::new(shared_world.world_profile().block_states.stone),
                         )
                         && is_placement_target_air(shared_world, event)?
                     {
@@ -445,9 +474,9 @@ pub(super) fn run_play_loop<R: Read, W: Write>(
     }
 }
 
-fn new_local_world_runtime(center: ChunkPos) -> Result<LocalWorldRuntime> {
+fn new_local_world_runtime(center: ChunkPos, profile: RomPackWorld) -> Result<LocalWorldRuntime> {
     let mut store = ChunkStore::new();
-    seed_chunk_square(&mut store, center, STATIC_CHUNK_RADIUS)?;
+    seed_chunk_square(&mut store, center, STATIC_CHUNK_RADIUS, profile)?;
     Ok(DeterministicRuntime::new(
         store,
         non_zero_usize(LOCAL_WORLD_QUEUE_CAPACITY),
@@ -459,7 +488,12 @@ fn non_zero_usize(value: usize) -> NonZeroUsize {
     NonZeroUsize::new(value).expect("local world runtime constants must be non-zero")
 }
 
-fn seed_chunk_square(store: &mut ChunkStore, center: ChunkPos, radius: i32) -> Result<()> {
+fn seed_chunk_square(
+    store: &mut ChunkStore,
+    center: ChunkPos,
+    radius: i32,
+    profile: RomPackWorld,
+) -> Result<()> {
     for z in center
         .z
         .checked_sub(radius)
@@ -478,16 +512,20 @@ fn seed_chunk_square(store: &mut ChunkStore, center: ChunkPos, radius: i32) -> R
                 .checked_add(radius)
                 .context("visible chunk x maximum overflow")?
         {
-            store.insert(flat_chunk(ChunkPos { x, z })?);
+            store.insert(flat_chunk(ChunkPos { x, z }, profile)?);
         }
     }
     Ok(())
 }
 
-fn ensure_chunks_loaded(store: &mut ChunkStore, positions: &[ChunkPos]) -> Result<()> {
+fn ensure_chunks_loaded(
+    store: &mut ChunkStore,
+    positions: &[ChunkPos],
+    profile: RomPackWorld,
+) -> Result<()> {
     for pos in positions {
         if store.chunk(*pos).is_none() {
-            store.insert(flat_chunk(*pos)?);
+            store.insert(flat_chunk(*pos, profile)?);
         }
     }
     Ok(())
@@ -690,7 +728,7 @@ fn is_placement_target_air(shared_world: &SharedWorld, event: WorldEvent) -> Res
     let WorldEvent::BlockMutation(mutation) = event;
     Ok(matches!(
         shared_world.interaction_block_state(mutation.position)?,
-        Some(state) if state == BlockStateId::new(version_26_1_2::AIR_BLOCK_STATE_ID)
+        Some(state) if state == BlockStateId::new(shared_world.world_profile().block_states.air)
     ))
 }
 
@@ -699,8 +737,8 @@ fn is_break_target_mutable(shared_world: &SharedWorld, event: WorldEvent) -> Res
     Ok(matches!(
         shared_world.interaction_block_state(mutation.position)?,
         Some(state)
-            if state != BlockStateId::new(version_26_1_2::AIR_BLOCK_STATE_ID)
-                && state != BlockStateId::new(version_26_1_2::BEDROCK_BLOCK_STATE_ID)
+            if state != BlockStateId::new(shared_world.world_profile().block_states.air)
+                && state != BlockStateId::new(shared_world.world_profile().block_states.bedrock)
     ))
 }
 
@@ -758,19 +796,19 @@ fn send_chunk_view_delta<W: Write>(
     Ok(())
 }
 
-fn flat_chunk(pos: ChunkPos) -> Result<StaticChunk> {
+fn flat_chunk(pos: ChunkPos, profile: RomPackWorld) -> Result<StaticChunk> {
     Ok(StaticChunk::flat_overworld(
         pos,
-        version_26_1_2::OVERWORLD_MIN_SECTION_Y,
-        version_26_1_2::OVERWORLD_SECTION_COUNT,
+        profile.overworld_min_section_y,
+        profile.overworld_section_count,
         FlatWorldSpec {
             floor_y: STATIC_FLOOR_Y,
-            air: BlockStateId::new(version_26_1_2::AIR_BLOCK_STATE_ID),
-            bedrock: BlockStateId::new(version_26_1_2::BEDROCK_BLOCK_STATE_ID),
-            stone: BlockStateId::new(version_26_1_2::STONE_BLOCK_STATE_ID),
-            dirt: BlockStateId::new(version_26_1_2::DIRT_BLOCK_STATE_ID),
-            grass: BlockStateId::new(version_26_1_2::GRASS_BLOCK_STATE_ID),
-            biome: BiomeId::new(version_26_1_2::PLAINS_BIOME_ID),
+            air: BlockStateId::new(profile.block_states.air),
+            bedrock: BlockStateId::new(profile.block_states.bedrock),
+            stone: BlockStateId::new(profile.block_states.stone),
+            dirt: BlockStateId::new(profile.block_states.dirt),
+            grass: BlockStateId::new(profile.block_states.grass),
+            biome: BiomeId::new(profile.biomes.plains),
         },
     )?)
 }
@@ -794,8 +832,25 @@ mod tests {
     }
 
     #[test]
+    fn generated_world_profile_drives_chunk_layout_and_block_states() {
+        let mut profile = builtin_world_profile();
+        profile.overworld_min_section_y = -2;
+        profile.overworld_section_count = 8;
+        profile.block_states.stone = 123;
+        let world = SharedWorld::new(ChunkPos { x: 0, z: 0 }, profile).unwrap();
+        let chunk = world.chunk_snapshot(ChunkPos { x: 0, z: 0 }).unwrap();
+        assert_eq!(chunk.min_section_y(), -2);
+        assert_eq!(chunk.sections().len(), 8);
+        assert_eq!(
+            world.world_block(BlockPos { x: 0, y: 61, z: 0 }).unwrap(),
+            BlockStateId::new(123)
+        );
+    }
+
+    #[test]
     fn local_world_runtime_applies_block_events_through_authoritative_ticks() {
-        let mut runtime = new_local_world_runtime(ChunkPos { x: 0, z: 0 }).unwrap();
+        let mut runtime =
+            new_local_world_runtime(ChunkPos { x: 0, z: 0 }, builtin_world_profile()).unwrap();
         let position = BlockPos { x: 0, y: 65, z: 0 };
         let state = BlockStateId::new(version_26_1_2::STONE_BLOCK_STATE_ID);
 
@@ -816,7 +871,8 @@ mod tests {
         let mut packets = PacketTable::new();
         packets.insert(PacketKind::BlockUpdate, 0x22).unwrap();
         let profile = ProtocolProfile::new("Test", 1, packets).unwrap();
-        let mut runtime = new_local_world_runtime(ChunkPos { x: 0, z: 0 }).unwrap();
+        let mut runtime =
+            new_local_world_runtime(ChunkPos { x: 0, z: 0 }, builtin_world_profile()).unwrap();
         let position = BlockPos { x: 1, y: 65, z: -2 };
         let state = BlockStateId::new(1);
         let applied = apply_local_world_event(

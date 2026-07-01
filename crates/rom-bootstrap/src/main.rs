@@ -151,8 +151,11 @@ fn main() -> Result<()> {
                 println!("Game JAR: {}", report.game_jar_path);
                 println!("Game JAR SHA-256: {}", report.game_jar_sha256);
                 println!(
-                    "Packets: {} / registries: {} / entries: {} / source resources: {}",
+                    "Packets: {} / data version: {} / sections: {}+{} / registries: {} / entries: {} / source resources: {}",
                     report.packet_count,
+                    report.world_data_version,
+                    report.overworld_min_section_y,
+                    report.overworld_section_count,
                     report.registry_count,
                     report.registry_entry_count,
                     report.resource_count

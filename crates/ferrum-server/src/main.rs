@@ -21,7 +21,7 @@ use ferrum_play::{
     encode_system_chat,
 };
 use ferrum_protocol::{HandshakeIntent, PacketKind, PacketTable, ProtocolProfile, ProtocolSession};
-use ferrum_rompack::{RomPack, RomPackPacket, read_rompack};
+use ferrum_rompack::{RomPack, RomPackPacket, RomPackWorld, read_rompack};
 use ferrum_runtime::ConnectionId;
 use ferrum_version_26_1_2 as version_26_1_2;
 use ferrum_world::ChunkPos;
@@ -143,11 +143,25 @@ struct ServerState {
 
 impl ServerState {
     fn new(initial_online_players: i32) -> Self {
-        Self {
+        Self::with_world(
+            initial_online_players,
+            play_runtime::builtin_world_profile(),
+        )
+        .expect("built-in world profile must initialize")
+    }
+
+    fn with_world(initial_online_players: i32, world: RomPackWorld) -> Result<Self> {
+        Ok(Self {
             online_players: AtomicI32::new(initial_online_players),
             next_connection_id: AtomicU64::new(1),
-            world: play_runtime::SharedWorld::static_flat(),
-        }
+            world: play_runtime::SharedWorld::new(
+                ChunkPos {
+                    x: STATIC_CHUNK_X,
+                    z: STATIC_CHUNK_Z,
+                },
+                world,
+            )?,
+        })
     }
 
     fn online_players(&self) -> i32 {
@@ -217,15 +231,22 @@ fn run(cli: Cli) -> Result<()> {
         .with_context(|| format!("cannot resolve {}", cli.config.display()))?;
     let mut config = ServerConfig::from_file(&config_path)
         .with_context(|| format!("cannot load {}", config_path.display()))?;
-    let runtime_profile = if let Some(version_pack) = &cli.version_pack {
-        load_version_pack_profile(version_pack, &config)?
+    let (runtime_profile, world_profile) = if let Some(version_pack) = &cli.version_pack {
+        let loaded = load_version_pack(version_pack, &config)?;
+        (loaded.profile, loaded.world)
     } else {
-        config
-            .protocol_profile()
-            .context("cannot build configured protocol profile")?
+        (
+            config
+                .protocol_profile()
+                .context("cannot build configured protocol profile")?,
+            play_runtime::builtin_world_profile(),
+        )
     };
     config.runtime_profile = Some(runtime_profile);
-    let state = Arc::new(ServerState::new(config.online_players));
+    let state = Arc::new(ServerState::with_world(
+        config.online_players,
+        world_profile,
+    )?);
     let listener = TcpListener::bind(&config.bind)
         .with_context(|| format!("cannot bind Minecraft status listener on {}", config.bind))?;
     println!(
@@ -252,7 +273,12 @@ fn run(cli: Cli) -> Result<()> {
     Ok(())
 }
 
-fn load_version_pack_profile(path: &Path, config: &ServerConfig) -> Result<ProtocolProfile> {
+struct LoadedVersionPack {
+    profile: ProtocolProfile,
+    world: RomPackWorld,
+}
+
+fn load_version_pack(path: &Path, config: &ServerConfig) -> Result<LoadedVersionPack> {
     if !path.is_file() {
         bail!(
             "version pack {} does not exist or is not a file",
@@ -271,17 +297,44 @@ fn load_version_pack_profile(path: &Path, config: &ServerConfig) -> Result<Proto
     {
         bail!("server configuration does not match the generated 26.1.2 version pack");
     }
+    validate_world_profile(&pack.world)?;
     let profile =
         protocol_profile_from_packets(&config.version_name, pack.metadata.protocol, &pack.packets)?;
     println!(
-        "loaded RoM version pack {} (SHA-256 {}, {} packets, {} registries / {} entries)",
+        "loaded RoM version pack {} (SHA-256 {}, {} packets, data version {}, {} sections, {} registries / {} entries)",
         canonical.display(),
         summary.sha256,
         summary.packet_count,
+        pack.world.data_version,
+        pack.world.overworld_section_count,
         summary.registry_count,
         summary.registry_entry_count
     );
-    Ok(profile)
+    Ok(LoadedVersionPack {
+        profile,
+        world: pack.world,
+    })
+}
+
+fn validate_world_profile(world: &RomPackWorld) -> Result<()> {
+    let section_count = i32::try_from(world.overworld_section_count)
+        .context("overworld section count exceeds i32")?;
+    let min_block_y = world
+        .overworld_min_section_y
+        .checked_mul(16)
+        .context("overworld minimum block y overflow")?;
+    let max_block_y = world
+        .overworld_min_section_y
+        .checked_add(section_count)
+        .and_then(|section| section.checked_mul(16))
+        .and_then(|block| block.checked_sub(1))
+        .context("overworld maximum block y overflow")?;
+    if !(min_block_y..=max_block_y).contains(&STATIC_FLOOR_Y) {
+        bail!(
+            "generated world height {min_block_y}..={max_block_y} does not contain the static floor at {STATIC_FLOOR_Y}"
+        );
+    }
+    Ok(())
 }
 
 fn protocol_profile_from_packets(
