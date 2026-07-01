@@ -5,7 +5,6 @@ on:
     branches:
       - master
     types:
-      - opened
       - synchronize
       - reopened
 
@@ -28,10 +27,11 @@ jobs:
           components: rustfmt, clippy
       - name: Apply release integration
         run: python3 tools/apply_bootstrap_release_bundles.py
-      - name: Remove temporary patch machinery
+      - name: Remove temporary files
         run: |
-          rm tools/apply_bootstrap_release_bundles.py
-          rm .github/workflows/apply-bootstrap-release-bundles.yml
+          rm -f tools/apply_bootstrap_release_bundles.py
+          rm -f .github/workflows/apply-bootstrap-release-bundles.yml
+          rm -f docs/.release-bundle-stage noop x y
       - name: Validate release workflow structure
         run: |
           python3 - <<'PY'
