@@ -187,7 +187,7 @@ cargo build --locked --release -p ferrum-server
 ```text
 rom-instance/
 ├── bin/
-│   └── rom-server
+│   └── ferrum-server
 ├── cache/
 │   └── official/
 │       └── 26.1.2/
@@ -206,7 +206,7 @@ The cache and generated instance data are local artifacts. Do not commit or redi
 
 ## Native releases
 
-`ferrum-server` is released as a platform-native server executable for:
+`ferrum-server` and `rom-bootstrap` are released as platform-native executables for:
 
 - Windows x86_64
 - Linux x86_64
@@ -214,9 +214,18 @@ The cache and generated instance data are local artifacts. Do not commit or redi
 - macOS x86_64
 - macOS ARM64
 
-Release archives must contain RoM binaries, configuration, documentation, license, notice, and version information only. They must not contain the official Minecraft server JAR or generated data copied from it.
+Each release archive contains both binaries, `server.toml`, the Bootstrap guide, README, NOTICE, LICENSE, and VERSION. Standalone binaries are also published separately. Official Minecraft files and locally generated `.rompack` files are never bundled.
 
-Expected server usage:
+Preferred first-run usage from an extracted release archive:
+
+```bash
+./rom-bootstrap prepare --instance ./rom-instance --version 26.1.2 --accept-minecraft-eula
+./rom-bootstrap generate --instance ./rom-instance
+./rom-bootstrap install-local --instance ./rom-instance --server-binary ./ferrum-server
+./rom-bootstrap run --instance ./rom-instance
+```
+
+Expected direct server usage:
 
 ```bash
 ferrum-server.exe --config server.toml

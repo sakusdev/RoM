@@ -283,8 +283,8 @@ pub fn status_instance(instance: impl AsRef<Path>) -> Result<StatusReport> {
         extract::VersionPackStatus::default()
     };
 
-    let native_binary = instance.join("bin").join(native_server_file_name());
-    let installed = native_binary.is_file();
+    let native_binary = installed_native_server(&instance);
+    let installed = native_binary.is_some();
 
     Ok(StatusReport {
         instance,
@@ -297,7 +297,7 @@ pub fn status_instance(instance: impl AsRef<Path>) -> Result<StatusReport> {
         version_pack_path: pack_status.path,
         version_pack_sha256: pack_status.sha256,
         version_pack_verified: pack_status.verified,
-        native_server_binary: installed.then_some(native_binary),
+        native_server_binary: native_binary,
         native_server_installed: installed,
     })
 }
@@ -665,7 +665,24 @@ fn copy_executable(source: &Path, destination: &Path) -> Result<()> {
     Ok(())
 }
 
+fn installed_native_server(instance: &Path) -> Option<PathBuf> {
+    let current = instance.join("bin").join(native_server_file_name());
+    if current.is_file() {
+        return Some(current);
+    }
+    let legacy = instance.join("bin").join(legacy_native_server_file_name());
+    legacy.is_file().then_some(legacy)
+}
+
 fn native_server_file_name() -> &'static str {
+    if cfg!(windows) {
+        "ferrum-server.exe"
+    } else {
+        "ferrum-server"
+    }
+}
+
+fn legacy_native_server_file_name() -> &'static str {
     if cfg!(windows) {
         "rom-server.exe"
     } else {
@@ -739,6 +756,17 @@ mod tests {
         assert!(!status.version_pack_verified);
         assert!(status.version_pack_path.is_none());
         assert!(!status.native_server_installed);
+    }
+
+    #[test]
+    fn native_server_uses_release_name_and_detects_legacy_instances() {
+        let directory = tempdir().unwrap();
+        let instance = directory.path();
+        fs::create_dir_all(instance.join("bin")).unwrap();
+        let legacy = instance.join("bin").join(legacy_native_server_file_name());
+        fs::write(&legacy, b"legacy").unwrap();
+        assert_eq!(installed_native_server(instance), Some(legacy));
+        assert!(native_server_file_name().starts_with("ferrum-server"));
     }
 
     #[test]
