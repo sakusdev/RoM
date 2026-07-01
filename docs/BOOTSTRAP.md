@@ -103,7 +103,7 @@ Arguments after `--` are forwarded to `ferrum-server`:
 ```text
 rom-instance/
 ├── bin/
-│   └── rom-server
+│   └── ferrum-server
 ├── cache/
 │   └── official/
 │       └── 26.1.2/
@@ -120,13 +120,25 @@ rom-instance/
 
 The file under `cache/official` is a user-local official artifact. Do not add instance directories, cached JARs, or generated proprietary data to RoM releases or source-control commits.
 
+## Native release archives
+
+Platform release archives contain both `rom-bootstrap` and `ferrum-server`. After extracting an archive, prepare and generate the local instance, then install the adjacent server binary:
+
+```bash
+./rom-bootstrap prepare --instance ./rom-instance --version 26.1.2 --accept-minecraft-eula
+./rom-bootstrap generate --instance ./rom-instance
+./rom-bootstrap install-local --instance ./rom-instance --server-binary ./ferrum-server
+./rom-bootstrap run --instance ./rom-instance
+```
+
+Existing development instances containing `bin/rom-server` remain readable, but new installations use `bin/ferrum-server`.
+
 ## Public server warning
 
 RoM currently defaults to a loopback bind and offline-mode development login. That is suitable for local protocol testing, but it is not a substitute for Microsoft account authentication. Do not expose an offline-mode development instance to the public internet.
 
 ## Planned next stages
 
-1. Package `rom-bootstrap` alongside `rom-server` in native release archives.
-2. Move packet tables and additional version-specific runtime metadata into generated packs.
-3. Add more independently testable extractors only when the server consumes their output.
-4. Preserve bounded decoding, deterministic ordering, source hashes, and local-only artifact boundaries for every new section.
+1. Move packet tables and additional version-specific runtime metadata into generated packs.
+2. Add more independently testable extractors only when the server consumes their output.
+3. Preserve bounded decoding, deterministic ordering, source hashes, and local-only artifact boundaries for every new section.

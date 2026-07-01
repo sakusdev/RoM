@@ -1,4 +1,4 @@
-name: Release RoM server binaries
+name: Release RoM native binaries
 
 on:
   workflow_dispatch:
@@ -72,6 +72,8 @@ jobs:
             source_binary: ferrum-server.exe
             package_binary: ferrum-server.exe
             raw_asset: ferrum-server-windows-x86_64.exe
+            bootstrap_binary: rom-bootstrap.exe
+            bootstrap_raw_asset: rom-bootstrap-windows-x86_64.exe
             archive: zip
             native: true
           - platform: linux-x86_64
@@ -80,6 +82,8 @@ jobs:
             source_binary: ferrum-server
             package_binary: ferrum-server
             raw_asset: ferrum-server-linux-x86_64
+            bootstrap_binary: rom-bootstrap
+            bootstrap_raw_asset: rom-bootstrap-linux-x86_64
             archive: tar.gz
             native: true
           - platform: linux-aarch64
@@ -88,6 +92,8 @@ jobs:
             source_binary: ferrum-server
             package_binary: ferrum-server
             raw_asset: ferrum-server-linux-aarch64
+            bootstrap_binary: rom-bootstrap
+            bootstrap_raw_asset: rom-bootstrap-linux-aarch64
             archive: tar.gz
             native: false
           - platform: macos-x86_64
@@ -96,6 +102,8 @@ jobs:
             source_binary: ferrum-server
             package_binary: ferrum-server
             raw_asset: ferrum-server-macos-x86_64
+            bootstrap_binary: rom-bootstrap
+            bootstrap_raw_asset: rom-bootstrap-macos-x86_64
             archive: tar.gz
             native: true
           - platform: macos-aarch64
@@ -104,6 +112,8 @@ jobs:
             source_binary: ferrum-server
             package_binary: ferrum-server
             raw_asset: ferrum-server-macos-aarch64
+            bootstrap_binary: rom-bootstrap
+            bootstrap_raw_asset: rom-bootstrap-macos-aarch64
             archive: tar.gz
             native: true
 
@@ -122,22 +132,24 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross
 
-      - name: Build native server
+      - name: Build native server and Bootstrap
         if: matrix.target != 'aarch64-unknown-linux-gnu'
-        run: cargo build --locked --release -p ferrum-server --target ${{ matrix.target }}
+        run: cargo build --locked --release -p ferrum-server -p rom-bootstrap --target ${{ matrix.target }}
 
-      - name: Build Linux ARM64 server
+      - name: Build Linux ARM64 server and Bootstrap
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         shell: bash
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-        run: cargo build --locked --release -p ferrum-server --target ${{ matrix.target }}
+        run: cargo build --locked --release -p ferrum-server -p rom-bootstrap --target ${{ matrix.target }}
 
       - name: Smoke-test Windows executable
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           & "target/${{ matrix.target }}/release/${{ matrix.source_binary }}" --help | Out-Null
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & "target/${{ matrix.target }}/release/${{ matrix.bootstrap_binary }}" --help | Out-Null
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Smoke-test Unix executable
@@ -146,6 +158,7 @@ jobs:
         run: |
           set -euo pipefail
           "target/${{ matrix.target }}/release/${{ matrix.source_binary }}" --help >/dev/null
+          "target/${{ matrix.target }}/release/${{ matrix.bootstrap_binary }}" --help >/dev/null
 
       - name: Package Windows release
         if: matrix.archive == 'zip'
@@ -159,9 +172,14 @@ jobs:
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
           Copy-Item "target/${{ matrix.target }}/release/${{ matrix.source_binary }}" "$stage/${{ matrix.package_binary }}"
           Copy-Item "target/${{ matrix.target }}/release/${{ matrix.source_binary }}" "dist/${{ matrix.raw_asset }}"
+          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.bootstrap_binary }}" "$stage/${{ matrix.bootstrap_binary }}"
+          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.bootstrap_binary }}" "dist/${{ matrix.bootstrap_raw_asset }}"
           Copy-Item "examples/server-26.1.2.toml" "$stage/server.toml"
           Copy-Item README.md "$stage/README.md"
+          Copy-Item NOTICE.md "$stage/NOTICE.md"
           Copy-Item LICENSE "$stage/LICENSE"
+          New-Item -ItemType Directory -Force -Path "$stage/docs" | Out-Null
+          Copy-Item "docs/BOOTSTRAP.md" "$stage/docs/BOOTSTRAP.md"
           Set-Content -Path "$stage/VERSION" -Value $env:TAG -NoNewline
           Compress-Archive -Path "$stage/*" -DestinationPath "dist/$package.zip" -Force
 
@@ -177,9 +195,14 @@ jobs:
           mkdir -p "$stage"
           install -m 0755 "target/${{ matrix.target }}/release/${{ matrix.source_binary }}" "$stage/${{ matrix.package_binary }}"
           install -m 0755 "target/${{ matrix.target }}/release/${{ matrix.source_binary }}" "dist/${{ matrix.raw_asset }}"
+          install -m 0755 "target/${{ matrix.target }}/release/${{ matrix.bootstrap_binary }}" "$stage/${{ matrix.bootstrap_binary }}"
+          install -m 0755 "target/${{ matrix.target }}/release/${{ matrix.bootstrap_binary }}" "dist/${{ matrix.bootstrap_raw_asset }}"
           cp examples/server-26.1.2.toml "$stage/server.toml"
           cp README.md "$stage/README.md"
+          cp NOTICE.md "$stage/NOTICE.md"
           cp LICENSE "$stage/LICENSE"
+          mkdir -p "$stage/docs"
+          cp docs/BOOTSTRAP.md "$stage/docs/BOOTSTRAP.md"
           printf '%s' "$TAG" > "$stage/VERSION"
           tar -C dist -czf "dist/${package}.tar.gz" "$package"
 
@@ -189,7 +212,7 @@ jobs:
         run: |
           set -euo pipefail
           cd dist
-          for asset in "${{ matrix.raw_asset }}" *.tar.gz; do
+          for asset in "${{ matrix.raw_asset }}" "${{ matrix.bootstrap_raw_asset }}" *.tar.gz; do
             [[ -f "$asset" ]] && shasum -a 256 "$asset" > "$asset.sha256"
           done
 
@@ -209,6 +232,7 @@ jobs:
             dist/*.zip
             dist/*.tar.gz
             dist/ferrum-server-*
+            dist/rom-bootstrap-*
             dist/*.sha256
           if-no-files-found: error
           retention-days: 14
@@ -238,7 +262,7 @@ jobs:
             -printf '%f\0' |
             sort -z |
             xargs -0 -r sha256sum > SHA256SUMS
-          test "$(wc -l < SHA256SUMS)" -eq 10
+          test "$(wc -l < SHA256SUMS)" -eq 15
 
       - name: Write release notes
         shell: bash
@@ -256,7 +280,7 @@ jobs:
 
           This experimental release includes login, Configuration, all synchronized registries, Join Game, one deterministic flat chunk with light, player-position synchronization, system chat, and Keep Alive.
 
-          Each platform provides a standalone ferrum-server executable and an archive containing the executable, server.toml, README.md, LICENSE, and VERSION. Verify downloads with SHA256SUMS.
+          Each platform provides standalone ferrum-server and rom-bootstrap executables. The archive contains both binaries, server.toml, README.md, NOTICE.md, LICENSE, Bootstrap documentation, and VERSION. Verify downloads with SHA256SUMS.
 
           Entities, persistence, full inventory semantics, and online-mode authentication are not implemented yet.
           EOF
@@ -295,7 +319,7 @@ jobs:
           PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
         run: |
           set -euo pipefail
-          test "$(gh release view "$TAG" --json assets --jq '.assets | length')" -ge 21
+          test "$(gh release view "$TAG" --json assets --jq '.assets | length')" -ge 31
           actual_prerelease="$(gh release view "$TAG" --json isPrerelease --jq '.isPrerelease')"
           test "$actual_prerelease" = "$PRERELEASE"
           gh release view "$TAG" --json url,isPrerelease,assets \
