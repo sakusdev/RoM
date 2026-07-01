@@ -1,15 +1,15 @@
-name: Apply generated packet table
+name: Capture generated packet-table diagnostics
 
 on:
   pull_request:
     branches: [master]
-    types: [opened, synchronize, reopened]
+    types: [synchronize, reopened]
 
 permissions:
   contents: write
 
 jobs:
-  apply:
+  capture:
     if: >-
       github.actor != 'github-actions[bot]' &&
       github.head_ref == 'feature/rompack-packet-table'
@@ -19,29 +19,16 @@ jobs:
         with:
           ref: feature/rompack-packet-table
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - name: Apply packet-table integration
-        run: python3 tools/apply_rompack_packet_table.py
-      - name: Remove patch script and update lockfile
+      - name: Capture patch failure
         run: |
-          rm tools/apply_rompack_packet_table.py
-          cargo generate-lockfile
-          cargo fmt --all
-      - name: Validate workspace
-        run: |
-          cargo clippy --workspace --all-targets -- -D warnings
-          cargo test --workspace
-      - name: Commit source implementation
+          set +e
+          python3 tools/apply_rompack_packet_table.py > packet-table-patch-diagnostics.txt 2>&1
+          printf '\nstatus=%s\n' "$?" >> packet-table-patch-diagnostics.txt
+          git checkout -- . ':!packet-table-patch-diagnostics.txt' ':!.github/workflows/apply-rompack-packet-table.yml' || true
+      - name: Commit diagnostics
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Cargo.lock README.md docs/BOOTSTRAP.md \
-            crates/ferrum-protocol/Cargo.toml crates/ferrum-protocol/src/lib.rs \
-            crates/ferrum-rompack/Cargo.toml crates/ferrum-rompack/src/lib.rs \
-            crates/rom-bootstrap/src/extract.rs crates/rom-bootstrap/src/main.rs \
-            crates/ferrum-server/src/main.rs tools/apply_rompack_packet_table.py
-          git diff --cached --check
-          git commit -m "Load protocol packet IDs from generated version packs"
+          git add packet-table-patch-diagnostics.txt
+          git commit -m "Capture packet-table patch diagnostics"
           git push origin HEAD:feature/rompack-packet-table
