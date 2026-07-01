@@ -36,7 +36,7 @@ The native server currently supports:
 - Offline-mode login with Java-compatible offline UUIDs
 - Login Acknowledged and Configuration-state transitions
 - Vanilla `minecraft/core/26.1.2` Known Packs negotiation
-- Packet IDs, world height, flat-world block-state IDs, biome ID, and Configuration registry payloads loaded from the generated schema-v3 `.rompack` during Bootstrap startup
+- Packet IDs, world height, dimension/bootstrap metadata, flat-world block-state IDs, biome ID, and Configuration registry payloads loaded from the generated schema-v4 `.rompack` during Bootstrap startup
 - All 28 synchronized 26.1.2 registries with 382 vanilla entries
 - Feature Flags, Tags, and Finish Configuration
 - Join Game for a deterministic flat overworld
@@ -106,7 +106,7 @@ Not implemented yet:
 - World persistence and Anvil region saving
 - Multi-version gameplay compatibility
 - Fabric, Bukkit, Spigot, or Paper plugin compatibility
-- Runtime replacement of remaining gameplay constants with generated pack data
+- Runtime replacement of remaining server-policy and gameplay constants with explicit runtime configuration
 
 > [!CAUTION]
 > The default configuration binds to loopback and uses development-only offline login. Do not expose that configuration to the public internet. It does not prove that a connecting user owns Minecraft.
@@ -141,7 +141,7 @@ This downloads the official server JAR directly from an official endpoint, valid
   --instance ./rom-instance
 ```
 
-The extractor opens the verified local JAR, resolves the bundled game JAR when present, validates all selected JSON resources, derives the synchronized-registry identifiers, adds the exact semantic packet table, compares both with the built-in 26.1.2 profile, and writes an integrity-protected schema-v3 `.rompack`. Existing schema-v1/v2 packs must be regenerated with `generate --force`.
+The extractor opens the verified local JAR, resolves the bundled game JAR when present, validates all selected JSON resources, derives the synchronized-registry identifiers, adds the exact semantic packet table, compares both with the built-in 26.1.2 profile, and writes an integrity-protected schema-v4 `.rompack`. Existing schema-v1/v2/v3 packs must be regenerated with `generate --force`.
 
 ### 4. Install the native server
 
@@ -268,7 +268,7 @@ Design rules:
 
 The next server and bootstrap milestones are:
 
-1. Move remaining gameplay constants into generated packs
+1. Move remaining server-policy constants into explicit runtime configuration
 2. Wire dedicated network workers into the authoritative 20 TPS runtime
 3. Add full block interaction and inventory validation
 4. Add entities and entity tracking
