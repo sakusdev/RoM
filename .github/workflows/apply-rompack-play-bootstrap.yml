@@ -22,16 +22,19 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - name: Remove the obsolete main-module import
+      - name: Keep ChunkPos available only to tests
         run: |
           python3 - <<'PY'
           from pathlib import Path
           path = Path('crates/ferrum-server/src/main.rs')
           text = path.read_text(encoding='utf-8')
           old = 'use ferrum_world::ChunkPos;\n'
-          if text.count(old) != 1:
-              raise SystemExit(f'expected one obsolete ChunkPos import, found {text.count(old)}')
-          path.write_text(text.replace(old, '', 1), encoding='utf-8')
+          new = '#[cfg(test)]\nuse ferrum_world::ChunkPos;\n'
+          if new not in text:
+              if text.count(old) != 1:
+                  raise SystemExit(f'expected one ChunkPos import, found {text.count(old)}')
+              text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
           PY
           rm -f play-bootstrap-validation.txt
           rm -f play-bootstrap-final-validation.txt
