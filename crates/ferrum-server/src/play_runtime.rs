@@ -129,6 +129,7 @@ pub(super) fn builtin_world_profile() -> RomPackWorld {
 }
 
 impl SharedWorld {
+    #[cfg(test)]
     pub(super) fn new(center: ChunkPos, profile: RomPackWorld) -> Result<Self> {
         Self::new_with_policy(center, profile, PlayPolicy::default())
     }
@@ -492,6 +493,7 @@ fn keep_alive_tick_interval(play_policy: &PlayPolicy) -> Result<usize> {
         .context("keep alive tick interval overflow")
 }
 
+#[cfg(test)]
 fn new_local_world_runtime(center: ChunkPos, profile: &RomPackWorld) -> Result<LocalWorldRuntime> {
     new_local_world_runtime_with_radius(center, profile, PlayPolicy::default().chunk_radius)
 }
