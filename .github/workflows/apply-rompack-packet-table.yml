@@ -1,0 +1,47 @@
+name: Apply generated packet table
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      github.head_ref == 'feature/rompack-packet-table'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/rompack-packet-table
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Apply packet-table integration
+        run: python3 tools/apply_rompack_packet_table.py
+      - name: Remove patch script and update lockfile
+        run: |
+          rm tools/apply_rompack_packet_table.py
+          cargo generate-lockfile
+          cargo fmt --all
+      - name: Validate workspace
+        run: |
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+      - name: Commit source implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.lock README.md docs/BOOTSTRAP.md \
+            crates/ferrum-protocol/Cargo.toml crates/ferrum-protocol/src/lib.rs \
+            crates/ferrum-rompack/Cargo.toml crates/ferrum-rompack/src/lib.rs \
+            crates/rom-bootstrap/src/extract.rs crates/rom-bootstrap/src/main.rs \
+            crates/ferrum-server/src/main.rs tools/apply_rompack_packet_table.py
+          git diff --cached --check
+          git commit -m "Load protocol packet IDs from generated version packs"
+          git push origin HEAD:feature/rompack-packet-table
