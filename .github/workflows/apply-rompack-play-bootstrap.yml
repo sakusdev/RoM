@@ -1,0 +1,94 @@
+name: Apply generated Play bootstrap metadata
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      github.head_ref == 'feature/rompack-play-bootstrap'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/rompack-play-bootstrap
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Allow ordered replacement of repeated source shapes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('tools/apply_rompack_play_bootstrap.py')
+          text = path.read_text(encoding='utf-8')
+          condition = '    if count != 1:\n'
+          message = 'expected one match, found {count}'
+          if text.count(condition) != 1 or text.count(message) != 1:
+              raise SystemExit('unexpected replacement helper')
+          text = text.replace(condition, '    if count < 1:\n', 1)
+          text = text.replace(message, 'expected at least one match, found {count}', 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+      - id: patch
+        name: Apply source patch
+        continue-on-error: true
+        run: |
+          rm -f play-bootstrap-patch-diagnostics.txt
+          python3 tools/apply_rompack_play_bootstrap.py > play-bootstrap-patch-diagnostics.txt 2>&1
+      - name: Preserve patch diagnostics
+        if: steps.patch.outcome == 'failure'
+        run: |
+          git checkout -- . ':!play-bootstrap-patch-diagnostics.txt' ':!.github/workflows/apply-rompack-play-bootstrap.yml' || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add play-bootstrap-patch-diagnostics.txt
+          git commit -m "Capture Play bootstrap patch diagnostics"
+          git push origin HEAD:feature/rompack-play-bootstrap
+          exit 1
+      - name: Remove patch machinery and format
+        if: steps.patch.outcome == 'success'
+        run: |
+          rm -f play-bootstrap-patch-diagnostics.txt
+          rm tools/apply_rompack_play_bootstrap.py
+          cargo fmt --all
+      - id: validate
+        name: Validate workspace
+        if: steps.patch.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set +e
+          cargo fmt --all --check > play-bootstrap-validation.txt 2>&1
+          fmt_status=$?
+          cargo clippy --workspace --all-targets -- -D warnings >> play-bootstrap-validation.txt 2>&1
+          clippy_status=$?
+          cargo test --workspace >> play-bootstrap-validation.txt 2>&1
+          test_status=$?
+          printf '\nfmt_status=%s\nclippy_status=%s\ntest_status=%s\n' "$fmt_status" "$clippy_status" "$test_status" >> play-bootstrap-validation.txt
+          test "$fmt_status" -eq 0 -a "$clippy_status" -eq 0 -a "$test_status" -eq 0
+      - name: Preserve validation diagnostics
+        if: steps.validate.outcome == 'failure'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Capture Play bootstrap validation diagnostics"
+          git push origin HEAD:feature/rompack-play-bootstrap
+          exit 1
+      - name: Commit implementation
+        if: steps.validate.outcome == 'success'
+        run: |
+          rm -f play-bootstrap-validation.txt
+          rm .github/workflows/apply-rompack-play-bootstrap.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Load Play bootstrap metadata from version packs"
+          git push origin HEAD:feature/rompack-play-bootstrap
