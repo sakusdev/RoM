@@ -1,0 +1,80 @@
+name: Apply bounded worker hub
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      github.head_ref == 'feature/worker-hub'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/worker-hub
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - id: patch
+        name: Apply exports and documentation
+        continue-on-error: true
+        run: |
+          rm -f worker-hub-patch-diagnostics.txt
+          python3 tools/apply_worker_hub_docs.py > worker-hub-patch-diagnostics.txt 2>&1
+      - name: Preserve patch diagnostics
+        if: steps.patch.outcome == 'failure'
+        run: |
+          git checkout -- . ':!worker-hub-patch-diagnostics.txt' ':!.github/workflows/apply-worker-hub.yml' || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add worker-hub-patch-diagnostics.txt
+          git commit -m "Capture worker hub patch diagnostics"
+          git push origin HEAD:feature/worker-hub
+          exit 1
+      - name: Remove patch machinery and format
+        if: steps.patch.outcome == 'success'
+        run: |
+          rm -f worker-hub-patch-diagnostics.txt
+          rm tools/apply_worker_hub_docs.py
+          cargo fmt --all
+      - id: validate
+        name: Validate workspace
+        if: steps.patch.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set +e
+          cargo fmt --all --check > worker-hub-validation.txt 2>&1
+          fmt_status=$?
+          cargo clippy --workspace --all-targets -- -D warnings >> worker-hub-validation.txt 2>&1
+          clippy_status=$?
+          cargo test --workspace >> worker-hub-validation.txt 2>&1
+          test_status=$?
+          printf '\nfmt_status=%s\nclippy_status=%s\ntest_status=%s\n' "$fmt_status" "$clippy_status" "$test_status" >> worker-hub-validation.txt
+          test "$fmt_status" -eq 0 -a "$clippy_status" -eq 0 -a "$test_status" -eq 0
+      - name: Preserve validation diagnostics
+        if: steps.validate.outcome == 'failure'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Capture worker hub validation diagnostics"
+          git push origin HEAD:feature/worker-hub
+          exit 1
+      - name: Commit implementation
+        if: steps.validate.outcome == 'success'
+        run: |
+          rm -f worker-hub-validation.txt
+          rm .github/workflows/apply-worker-hub.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Add bounded network worker hub"
+          git push origin HEAD:feature/worker-hub
