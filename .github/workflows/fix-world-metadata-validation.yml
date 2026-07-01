@@ -1,0 +1,105 @@
+name: Fix generated world metadata validation
+
+on:
+  pull_request:
+    branches: [master]
+    types: [synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      github.head_ref == 'feature/rompack-world-metadata'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/rompack-world-metadata
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Fix generated source
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              file = Path(path)
+              text = file.read_text(encoding='utf-8')
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one match, found {count}: {old!r}')
+              file.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          replace_once(
+              'crates/rom-bootstrap/src/extract.rs',
+              '''        packet_count: summary.packet_count,
+                  world_data_version: pack.world.data_version,
+                  overworld_min_section_y: pack.world.overworld_min_section_y,
+                  overworld_section_count: pack.world.overworld_section_count,
+                  registry_count: summary.registry_count,
+          ''',
+              '''        packet_count: summary.packet_count,
+                  registry_count: summary.registry_count,
+          ''',
+          )
+          replace_once(
+              'crates/rom-bootstrap/src/extract.rs',
+              '''        packet_count: summary.packet_count,
+                  registry_count: summary.registry_count,
+                  registry_entry_count: summary.registry_entry_count,
+                  resource_count: summary.resource_count,
+                  reused_existing_pack: true,
+          ''',
+              '''        packet_count: summary.packet_count,
+                  world_data_version: pack.world.data_version,
+                  overworld_min_section_y: pack.world.overworld_min_section_y,
+                  overworld_section_count: pack.world.overworld_section_count,
+                  registry_count: summary.registry_count,
+                  registry_entry_count: summary.registry_entry_count,
+                  resource_count: summary.resource_count,
+                  reused_existing_pack: true,
+          ''',
+          )
+
+          main = Path('crates/ferrum-server/src/main.rs')
+          text = main.read_text(encoding='utf-8')
+          old = '''    fn new(initial_online_players: i32) -> Self {
+                  Self::with_world(initial_online_players, play_runtime::builtin_world_profile())
+                      .expect("built-in world profile must initialize")
+              }
+
+          '''
+          if text.count(old) != 1:
+              raise SystemExit(f'main.rs: expected one unused ServerState::new block, found {text.count(old)}')
+          main.write_text(text.replace(old, '', 1), encoding='utf-8')
+
+          replace_once(
+              'crates/ferrum-server/src/play_runtime.rs',
+              '''    pub(super) fn static_flat() -> Self {
+          ''',
+              '''    #[cfg(test)]
+              pub(super) fn static_flat() -> Self {
+          ''',
+          )
+          PY
+          rm -f world-metadata-validation.txt
+          rm -f .github/workflows/apply-rompack-world-metadata.yml
+          rm .github/workflows/fix-world-metadata-validation.yml
+      - name: Validate finalized workspace
+        run: |
+          cargo fmt --all
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+      - name: Commit finalized implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Finalize generated world metadata runtime"
+          git push origin HEAD:feature/rompack-world-metadata
