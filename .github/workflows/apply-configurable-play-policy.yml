@@ -1,15 +1,15 @@
-name: Apply configurable Play runtime policy
+name: Finalize configurable Play runtime policy
 
 on:
   pull_request:
     branches: [master]
-    types: [opened, synchronize, reopened]
+    types: [synchronize]
 
 permissions:
   contents: write
 
 jobs:
-  apply:
+  finalize:
     if: >-
       github.actor != 'github-actions[bot]' &&
       github.head_ref == 'feature/configurable-play-policy'
@@ -22,59 +22,42 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - id: patch
-        name: Apply source patch
-        continue-on-error: true
+      - name: Mark compatibility constructors as test-only
         run: |
-          rm -f play-policy-patch-diagnostics.txt
-          python3 tools/apply_configurable_play_policy.py > play-policy-patch-diagnostics.txt 2>&1
-      - name: Preserve patch diagnostics
-        if: steps.patch.outcome == 'failure'
-        run: |
-          git checkout -- . ':!play-policy-patch-diagnostics.txt' ':!.github/workflows/apply-configurable-play-policy.yml' || true
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add play-policy-patch-diagnostics.txt
-          git commit -m "Capture Play policy patch diagnostics"
-          git push origin HEAD:feature/configurable-play-policy
-          exit 1
-      - name: Remove patch machinery and format
-        if: steps.patch.outcome == 'success'
-        run: |
-          rm -f play-policy-patch-diagnostics.txt
-          rm tools/apply_configurable_play_policy.py
-          cargo fmt --all
-      - id: validate
-        name: Validate workspace
-        if: steps.patch.outcome == 'success'
-        continue-on-error: true
-        run: |
-          set +e
-          cargo fmt --all --check > play-policy-validation.txt 2>&1
-          fmt_status=$?
-          cargo clippy --workspace --all-targets -- -D warnings >> play-policy-validation.txt 2>&1
-          clippy_status=$?
-          cargo test --workspace >> play-policy-validation.txt 2>&1
-          test_status=$?
-          printf '\nfmt_status=%s\nclippy_status=%s\ntest_status=%s\n' "$fmt_status" "$clippy_status" "$test_status" >> play-policy-validation.txt
-          test "$fmt_status" -eq 0 -a "$clippy_status" -eq 0 -a "$test_status" -eq 0
-      - name: Preserve validation diagnostics
-        if: steps.validate.outcome == 'failure'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "Capture Play policy validation diagnostics"
-          git push origin HEAD:feature/configurable-play-policy
-          exit 1
-      - name: Commit implementation
-        if: steps.validate.outcome == 'success'
-        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('crates/ferrum-server/src/play_runtime.rs')
+          text = path.read_text(encoding='utf-8')
+          replacements = [
+              (
+                  'impl SharedWorld {\n    pub(super) fn new(center: ChunkPos, profile: RomPackWorld) -> Result<Self> {',
+                  'impl SharedWorld {\n    #[cfg(test)]\n    pub(super) fn new(center: ChunkPos, profile: RomPackWorld) -> Result<Self> {',
+              ),
+              (
+                  'fn new_local_world_runtime(center: ChunkPos, profile: &RomPackWorld) -> Result<LocalWorldRuntime> {',
+                  '#[cfg(test)]\nfn new_local_world_runtime(center: ChunkPos, profile: &RomPackWorld) -> Result<LocalWorldRuntime> {',
+              ),
+          ]
+          for old, new in replacements:
+              if new not in text:
+                  if text.count(old) != 1:
+                      raise SystemExit(f'expected one compatibility helper: {old}')
+                  text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+          PY
           rm -f play-policy-validation.txt
+          cargo fmt --all
+      - name: Validate finalized workspace
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+      - name: Commit finalized implementation
+        run: |
           rm .github/workflows/apply-configurable-play-policy.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git diff --cached --check
-          git commit -m "Configure Play runtime policy from server.toml"
+          git commit -m "Finalize configurable Play runtime policy"
           git push origin HEAD:feature/configurable-play-policy
