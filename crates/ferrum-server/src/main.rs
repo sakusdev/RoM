@@ -145,21 +145,19 @@ struct ServerState {
 
 impl ServerState {
     #[cfg(test)]
-    fn new(initial_online_players: i32) -> Self {
-        Self::with_world(
-            initial_online_players,
+    fn new(config: &ServerConfig) -> Self {
+        let registry_payloads =
+            if config.profile_name.as_deref() == Some(version_26_1_2::PROFILE_NAME) {
+                builtin_26_1_2_registry_payloads().expect("built-in registry payloads must encode")
+            } else {
+                Vec::new()
+            };
+        Self::with_runtime(
+            config.online_players,
             play_runtime::builtin_world_profile(),
+            registry_payloads,
         )
         .expect("built-in world profile must initialize")
-    }
-
-    #[cfg(test)]
-    fn with_world(initial_online_players: i32, world: RomPackWorld) -> Result<Self> {
-        Self::with_runtime(
-            initial_online_players,
-            world,
-            builtin_26_1_2_registry_payloads()?,
-        )
     }
 
     fn with_runtime(
@@ -1004,7 +1002,7 @@ fn handle_connection_protocol<R: Read, W: Write>(
     writer: W,
     config: &ServerConfig,
 ) -> Result<()> {
-    let state = ServerState::new(config.online_players);
+    let state = ServerState::new(config);
     handle_connection_protocol_with_play_round_limit(reader, writer, config, &state, Some(1))
 }
 
@@ -1893,7 +1891,7 @@ mod tests {
             max_players: 10,
             ..ServerConfig::default()
         };
-        let state = ServerState::new(config.online_players);
+        let state = ServerState::new(config);
 
         {
             let _first_player = state.enter_play();
