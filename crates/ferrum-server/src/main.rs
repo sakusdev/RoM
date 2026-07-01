@@ -25,6 +25,7 @@ use ferrum_protocol::{HandshakeIntent, PacketKind, PacketTable, ProtocolProfile,
 use ferrum_rompack::{RomPack, RomPackPacket, RomPackRegistry, RomPackWorld, read_rompack};
 use ferrum_runtime::ConnectionId;
 use ferrum_version_26_1_2 as version_26_1_2;
+#[cfg(test)]
 use ferrum_world::ChunkPos;
 use identity::offline_player_identity;
 use serde_json::{Map, Value, json};
