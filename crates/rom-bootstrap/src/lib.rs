@@ -51,6 +51,12 @@ hide_online_players = false
 enforces_secure_chat = false
 previews_chat = false
 
+[play]
+chunk_radius = 1
+simulation_distance = 2
+welcome_message = "Ferrum native Rust world loaded"
+keep_alive_interval_seconds = 15
+
 [configuration]
 enabled = true
 features = "minecraft:vanilla"

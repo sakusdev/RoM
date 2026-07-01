@@ -49,13 +49,16 @@ const DEFAULT_PROTOCOL: i32 = 0;
 const DEFAULT_MOTD: &str = "Ferrum native Rust server";
 const STATIC_PLAYER_ID: i32 = 1;
 const STATIC_TELEPORT_ID: i32 = 1;
-const STATIC_CHUNK_RADIUS: i32 = 1;
-const STATIC_SIMULATION_DISTANCE: i32 = 2;
-const STATIC_CHUNK_BATCH_SIZE: i32 = 1;
-const STATIC_WELCOME_MESSAGE: &str = "Ferrum native Rust world loaded";
+const DEFAULT_CHUNK_RADIUS: i32 = 1;
+const DEFAULT_SIMULATION_DISTANCE: i32 = 2;
+const DEFAULT_WELCOME_MESSAGE: &str = "Ferrum native Rust world loaded";
+const DEFAULT_KEEP_ALIVE_INTERVAL_SECONDS: u64 = 15;
+const MAX_CONFIGURED_CHUNK_RADIUS: i32 = 8;
+const MAX_CONFIGURED_SIMULATION_DISTANCE: i32 = 32;
+const MAX_KEEP_ALIVE_INTERVAL_SECONDS: u64 = 300;
+const MAX_WELCOME_MESSAGE_BYTES: usize = 256;
 const MAX_CONFIGURATION_AUXILIARY_PACKETS: usize = 16;
 const MAX_IGNORED_PLAY_PACKETS: usize = 1_024;
-const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Parser)]
 #[command(
@@ -92,8 +95,28 @@ struct ServerConfig {
     previews_chat: bool,
     server_icon: Option<String>,
     sample_players: Vec<SamplePlayer>,
+    play_policy: PlayPolicy,
     packets: PacketIds,
     runtime_profile: Option<ProtocolProfile>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PlayPolicy {
+    chunk_radius: i32,
+    simulation_distance: i32,
+    welcome_message: String,
+    keep_alive_interval_seconds: u64,
+}
+
+impl Default for PlayPolicy {
+    fn default() -> Self {
+        Self {
+            chunk_radius: DEFAULT_CHUNK_RADIUS,
+            simulation_distance: DEFAULT_SIMULATION_DISTANCE,
+            welcome_message: DEFAULT_WELCOME_MESSAGE.to_owned(),
+            keep_alive_interval_seconds: DEFAULT_KEEP_ALIVE_INTERVAL_SECONDS,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -152,6 +175,7 @@ impl ServerState {
             config.online_players,
             play_runtime::builtin_world_profile(),
             registry_payloads,
+            config.play_policy.clone(),
         )
         .expect("built-in world profile must initialize")
     }
@@ -160,13 +184,14 @@ impl ServerState {
         initial_online_players: i32,
         world: RomPackWorld,
         registry_payloads: Vec<Vec<u8>>,
+        play_policy: PlayPolicy,
     ) -> Result<Self> {
         Ok(Self {
             online_players: AtomicI32::new(initial_online_players),
             next_connection_id: AtomicU64::new(1),
             world: {
                 let center = play_runtime::spawn_chunk(&world);
-                play_runtime::SharedWorld::new(center, world)?
+                play_runtime::SharedWorld::new_with_policy(center, world, play_policy)?
             },
             registry_payloads,
         })
@@ -267,6 +292,7 @@ fn run(cli: Cli) -> Result<()> {
         config.online_players,
         world_profile,
         registry_payloads,
+        config.play_policy.clone(),
     )?);
     let listener = TcpListener::bind(&config.bind)
         .with_context(|| format!("cannot bind Minecraft status listener on {}", config.bind))?;
@@ -484,6 +510,7 @@ impl Default for ServerConfig {
             previews_chat: false,
             server_icon: None,
             sample_players: Vec::new(),
+            play_policy: PlayPolicy::default(),
             packets: PacketIds::default(),
             runtime_profile: None,
         }
@@ -565,6 +592,19 @@ impl ServerConfig {
                 }
                 ("server", "allow_offline_login") => {
                     config.allow_offline_login = parse_bool(value, line_index + 1)?
+                }
+                ("play", "chunk_radius") => {
+                    config.play_policy.chunk_radius = parse_i32(value, line_index + 1)?
+                }
+                ("play", "simulation_distance") => {
+                    config.play_policy.simulation_distance = parse_i32(value, line_index + 1)?
+                }
+                ("play", "welcome_message") => {
+                    config.play_policy.welcome_message = parse_string(value)
+                }
+                ("play", "keep_alive_interval_seconds") => {
+                    config.play_policy.keep_alive_interval_seconds =
+                        parse_u64(value, line_index + 1)?
                 }
                 ("configuration", "enabled") => {
                     config.configuration_enabled = parse_bool(value, line_index + 1)?
@@ -665,6 +705,34 @@ impl ServerConfig {
         }
         if config.online_players > config.max_players {
             bail!("online_players cannot exceed max_players");
+        }
+        if !(0..=MAX_CONFIGURED_CHUNK_RADIUS).contains(&config.play_policy.chunk_radius) {
+            bail!("play.chunk_radius must be between 0 and {MAX_CONFIGURED_CHUNK_RADIUS}");
+        }
+        if !(0..=MAX_CONFIGURED_SIMULATION_DISTANCE)
+            .contains(&config.play_policy.simulation_distance)
+        {
+            bail!(
+                "play.simulation_distance must be between 0 and {MAX_CONFIGURED_SIMULATION_DISTANCE}"
+            );
+        }
+        if !(1..=MAX_KEEP_ALIVE_INTERVAL_SECONDS)
+            .contains(&config.play_policy.keep_alive_interval_seconds)
+        {
+            bail!(
+                "play.keep_alive_interval_seconds must be between 1 and {MAX_KEEP_ALIVE_INTERVAL_SECONDS}"
+            );
+        }
+        if config.play_policy.welcome_message.len() > MAX_WELCOME_MESSAGE_BYTES
+            || config
+                .play_policy
+                .welcome_message
+                .chars()
+                .any(char::is_control)
+        {
+            bail!(
+                "play.welcome_message must contain at most {MAX_WELCOME_MESSAGE_BYTES} bytes and no control characters"
+            );
         }
         if config.configuration_enabled && config.profile_name.is_none() {
             for (name, packet_id) in [
@@ -910,6 +978,12 @@ fn parse_i32(value: &str, line: usize) -> Result<i32> {
     value
         .parse()
         .with_context(|| format!("line {line} is not a valid i32: {value}"))
+}
+
+fn parse_u64(value: &str, line: usize) -> Result<u64> {
+    value
+        .parse()
+        .with_context(|| format!("line {line} is not a valid u64: {value}"))
 }
 
 fn parse_bool(value: &str, line: usize) -> Result<bool> {
@@ -1363,14 +1437,16 @@ fn run_static_play_session<R: Read, W: Write>(
         writer,
         profile,
         PacketKind::ChunkBatchFinished,
-        &encode_chunk_batch_finished(STATIC_CHUNK_BATCH_SIZE)?,
+        &encode_chunk_batch_finished(1)?,
     )?;
-    write_play_payload(
-        writer,
-        profile,
-        PacketKind::SystemChat,
-        &encode_system_chat(STATIC_WELCOME_MESSAGE, false)?,
-    )?;
+    if !config.play_policy.welcome_message.is_empty() {
+        write_play_payload(
+            writer,
+            profile,
+            PacketKind::SystemChat,
+            &encode_system_chat(&config.play_policy.welcome_message, false)?,
+        )?;
+    }
     write_play_payload(
         writer,
         profile,
@@ -1389,8 +1465,8 @@ fn static_join_game(config: &ServerConfig, world: &RomPackWorld) -> JoinGame {
         hardcore: false,
         levels: vec![world.dimension.clone()],
         max_players: config.max_players,
-        chunk_radius: STATIC_CHUNK_RADIUS,
-        simulation_distance: STATIC_SIMULATION_DISTANCE,
+        chunk_radius: config.play_policy.chunk_radius,
+        simulation_distance: config.play_policy.simulation_distance,
         reduced_debug_info: false,
         show_death_screen: true,
         limited_crafting: false,
@@ -1737,6 +1813,47 @@ mod tests {
             [32.5, 81.0, -16.5]
         );
         assert_eq!(play_runtime::spawn_chunk(&world), ChunkPos { x: 2, z: -2 });
+    }
+
+    #[test]
+    fn configured_play_policy_drives_join_game_fields() {
+        let mut config = ServerConfig::for_profile(Some("26.1.2")).unwrap();
+        config.play_policy.chunk_radius = 4;
+        config.play_policy.simulation_distance = 6;
+        let world = play_runtime::builtin_world_profile();
+        let join = static_join_game(&config, &world);
+        assert_eq!(join.chunk_radius, 4);
+        assert_eq!(join.simulation_distance, 6);
+    }
+
+    #[test]
+    fn parses_and_validates_play_policy_configuration() {
+        let config = ServerConfig::from_toml_like_with_base(
+            r#"
+            [server]
+            profile = "26.1.2"
+
+            [play]
+            chunk_radius = 3
+            simulation_distance = 7
+            welcome_message = "Welcome to RoM"
+            keep_alive_interval_seconds = 30
+            "#,
+            None,
+        )
+        .unwrap();
+        assert_eq!(config.play_policy.chunk_radius, 3);
+        assert_eq!(config.play_policy.simulation_distance, 7);
+        assert_eq!(config.play_policy.welcome_message, "Welcome to RoM");
+        assert_eq!(config.play_policy.keep_alive_interval_seconds, 30);
+
+        for invalid in [
+            "[play]\nchunk_radius = 9",
+            "[play]\nsimulation_distance = 33",
+            "[play]\nkeep_alive_interval_seconds = 0",
+        ] {
+            assert!(ServerConfig::from_toml_like_with_base(invalid, None).is_err());
+        }
     }
 
     #[test]
@@ -2437,7 +2554,7 @@ mod tests {
         assert_eq!(system_chat_reader.read_varint().unwrap(), 0x79);
         assert_eq!(
             system_chat_reader.take_remaining(),
-            encode_system_chat(STATIC_WELCOME_MESSAGE, false).unwrap()
+            encode_system_chat(DEFAULT_WELCOME_MESSAGE, false).unwrap()
         );
 
         let player_position = read_packet(&mut cursor).unwrap();

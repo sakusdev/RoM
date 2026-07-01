@@ -37,7 +37,8 @@ The current server milestone provides:
 - Clientbound block-update payload encoding and optional local mutation writeback for profiles that expose that packet ID
 - Bounded peer block-update queues drained after inbound Play packets and transient read timeouts
 - Per-connection player position, rotation, movement flags, and current-chunk state
-- Deterministic 3×3 chunk views with cache-center updates, new chunk batches, and unloads
+- Bounded configurable chunk views with cache-center updates, new chunk batches, and unloads
+- Explicit `[play]` runtime policy for chunk radius, simulation distance, welcome chat, and Keep Alive cadence
 - Version-neutral 20 TPS tick scheduling with capped catch-up
 - Globally bounded, per-connection sequenced input queues
 - Deterministic fair per-tick input draining and mutation budgets
@@ -45,7 +46,7 @@ The current server milestone provides:
 - Live online-player count in server-list status responses
 - Version-neutral in-memory world coordinates, sections, block states, biome IDs, and chunk views
 
-The socket runtime now uses `ProtocolProfile` and `ProtocolSession` from Handshake through Play. The 26.1.2 profile validates the handshake protocol, negotiates the vanilla core known pack, sends the full synchronized registry set, completes Configuration, sends the flat-overworld Play bootstrap, validates teleport and chunk-batch acknowledgements, and enters a movement-aware Play loop. The server tracks each player's authoritative position and rotation, updates the chunk-cache center only after crossing a chunk boundary, sends newly visible chunks, unloads chunks that leave the 3×3 view, keeps the server-list online-player count synchronized with Play connections, and continues Keep Alive validation while processing movement. The standalone `ferrum-runtime` crate now provides deterministic scheduling and bounded input-ordering primitives, and the Play loop can route decoded block mutation events through shared in-memory world state. If the active profile exposes a clientbound Block Update packet ID, accepted mutations are written back to the acting client and queued for peers; the synchronous Play loop drains those peer queues after inbound packets and transient read timeouts. Entities, dedicated network-worker queues, broader multi-client entity tracking, and persistence are not implemented yet.
+The socket runtime now uses `ProtocolProfile` and `ProtocolSession` from Handshake through Play. The 26.1.2 profile validates the handshake protocol, negotiates the vanilla core known pack, sends the full synchronized registry set, completes Configuration, sends the flat-overworld Play bootstrap, validates teleport and chunk-batch acknowledgements, and enters a movement-aware Play loop. The server tracks each player's authoritative position and rotation, updates the chunk-cache center only after crossing a chunk boundary, sends newly visible chunks, unloads chunks that leave the configured bounded view, keeps the server-list online-player count synchronized with Play connections, and continues Keep Alive validation while processing movement at the configured cadence. The standalone `ferrum-runtime` crate now provides deterministic scheduling and bounded input-ordering primitives, and the Play loop can route decoded block mutation events through shared in-memory world state. If the active profile exposes a clientbound Block Update packet ID, accepted mutations are written back to the acting client and queued for peers; the synchronous Play loop drains those peer queues after inbound packets and transient read timeouts. Entities, dedicated network-worker queues, broader multi-client entity tracking, and persistence are not implemented yet.
 
 ## M9 — Binary NBT foundation
 
@@ -120,7 +121,7 @@ Completed:
 - Send the initial chunk cache center and deterministic flat in-memory chunk.
 - Encode block-state and biome palette containers in vanilla section order.
 - Send full skylight data and negotiate Chunk Batch Start/Finished/Received.
-- Send a welcome system message and a graceful Play disconnect on bootstrap failure.
+- Send an optional configured welcome system message and a graceful Play disconnect on bootstrap failure.
 
 Remaining cross-client validation:
 
@@ -146,7 +147,7 @@ Completed:
 - Store authoritative per-connection position, yaw, pitch, on-ground state, and horizontal-collision state.
 - Convert player coordinates to chunk coordinates correctly across negative boundaries.
 - Add deterministic `ChunkView` reconciliation backed by ordered sets.
-- Keep a 3×3 visible chunk set centered on the player's current chunk.
+- Keep a bounded `(2r+1)×(2r+1)` visible chunk set centered on the player's current chunk, with `r` selected by runtime policy and defaulting to 1.
 - Update the client chunk-cache center only when the player crosses a chunk boundary.
 - Batch only newly visible flat chunks and send Forget Level Chunk for chunks leaving the view.
 - Continue accepting movement and chunk acknowledgements while Keep Alive is pending.
@@ -157,6 +158,16 @@ Remaining movement work:
 
 - Add full collision, full movement-speed, and fall-state validation.
 - Broadcast player state to other connected clients.
+
+## Cross-cutting Play runtime policy
+
+Status: complete for the current static-world runtime.
+
+- Parse a dedicated `[play]` section from `server.toml`.
+- Configure chunk radius, Join Game simulation distance, optional welcome chat, and Keep Alive interval.
+- Use the same chunk-radius policy for initial world seeding and per-player chunk views.
+- Bound chunk radius to `0..=8`, simulation distance to `0..=32`, Keep Alive interval to `1..=300` seconds, and welcome text to 256 bytes without control characters.
+- Preserve the previous behavior as explicit defaults in Bootstrap and example configurations.
 
 ## M14 — Authoritative tick/runtime foundation
 

@@ -161,9 +161,18 @@ The extractor opens the verified local JAR, resolves the bundled game JAR when p
 The instance defaults to:
 
 ```toml
+[server]
 bind = "127.0.0.1:25565"
 online_mode = false
+
+[play]
+chunk_radius = 1
+simulation_distance = 2
+welcome_message = "Ferrum native Rust world loaded"
+keep_alive_interval_seconds = 15
 ```
+
+`chunk_radius` is bounded to `0..=8`, `simulation_distance` to `0..=32`, and the Keep Alive interval to `1..=300` seconds. An empty welcome message disables the initial system-chat message.
 
 Connect a matching Minecraft Java Edition 26.1.2 client to `127.0.0.1:25565` for local development testing.
 
@@ -268,13 +277,12 @@ Design rules:
 
 The next server and bootstrap milestones are:
 
-1. Move remaining server-policy constants into explicit runtime configuration
-2. Wire dedicated network workers into the authoritative 20 TPS runtime
-3. Add full block interaction and inventory validation
-4. Add entities and entity tracking
-5. Add persistent Anvil region loading and saving
-6. Add Microsoft account authentication and encrypted online mode
-7. Add additional Minecraft version profiles
+1. Wire dedicated network workers into the authoritative 20 TPS runtime
+2. Add full block interaction and inventory validation
+3. Add entities and entity tracking
+4. Add persistent Anvil region loading and saving
+5. Add Microsoft account authentication and encrypted online mode
+6. Add additional Minecraft version profiles
 
 See [`docs/SERVER_ROADMAP.md`](docs/SERVER_ROADMAP.md) for the detailed server plan.
 

@@ -136,12 +136,25 @@ Platform release archives contain both `rom-bootstrap` and `ferrum-server`. Afte
 
 Existing development instances containing `bin/rom-server` remain readable, but new installations use `bin/ferrum-server`.
 
+## Runtime Play policy
+
+Bootstrap writes an explicit bounded Play policy into new `server.toml` files:
+
+```toml
+[play]
+chunk_radius = 1
+simulation_distance = 2
+welcome_message = "Ferrum native Rust world loaded"
+keep_alive_interval_seconds = 15
+```
+
+The chunk radius controls both initial in-memory chunk seeding and each player's visible chunk view. Existing instance configurations remain valid because the native server supplies the same defaults when `[play]` is absent.
+
 ## Public server warning
 
 RoM currently defaults to a loopback bind and offline-mode development login. That is suitable for local protocol testing, but it is not a substitute for Microsoft account authentication. Do not expose an offline-mode development instance to the public internet.
 
 ## Planned next stages
 
-1. Move remaining server-policy constants into explicit runtime configuration.
-2. Add more independently testable extractors only when the server consumes their output.
-3. Preserve bounded decoding, deterministic ordering, source hashes, and local-only artifact boundaries for every new section.
+1. Add more independently testable extractors only when the server consumes their output.
+2. Preserve bounded decoding, deterministic ordering, source hashes, and local-only artifact boundaries for every new section.

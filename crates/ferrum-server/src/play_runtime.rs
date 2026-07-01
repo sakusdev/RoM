@@ -1,6 +1,6 @@
 use super::{
-    KEEP_ALIVE_INTERVAL, MAX_IGNORED_PLAY_PACKETS, STATIC_CHUNK_RADIUS, is_connection_eof,
-    is_transient_read_timeout, version_26_1_2, write_play_payload,
+    MAX_IGNORED_PLAY_PACKETS, PlayPolicy, is_connection_eof, is_transient_read_timeout,
+    version_26_1_2, write_play_payload,
 };
 use crate::codec::{PacketReader, read_packet};
 use anyhow::{Context, Result, bail};
@@ -47,6 +47,7 @@ type LocalWorldRuntime = DeterministicRuntime<ChunkStore, WorldEvent>;
 #[derive(Debug)]
 pub(super) struct SharedWorld {
     profile: RomPackWorld,
+    play_policy: PlayPolicy,
     inner: Mutex<SharedWorldInner>,
 }
 
@@ -128,10 +129,21 @@ pub(super) fn builtin_world_profile() -> RomPackWorld {
 }
 
 impl SharedWorld {
+    #[cfg(test)]
     pub(super) fn new(center: ChunkPos, profile: RomPackWorld) -> Result<Self> {
-        let runtime = new_local_world_runtime(center, &profile)?;
+        Self::new_with_policy(center, profile, PlayPolicy::default())
+    }
+
+    pub(super) fn new_with_policy(
+        center: ChunkPos,
+        profile: RomPackWorld,
+        play_policy: PlayPolicy,
+    ) -> Result<Self> {
+        let runtime =
+            new_local_world_runtime_with_radius(center, &profile, play_policy.chunk_radius)?;
         Ok(Self {
             profile,
+            play_policy,
             inner: Mutex::new(SharedWorldInner {
                 runtime,
                 tick: Tick::ZERO,
@@ -206,6 +218,10 @@ impl SharedWorld {
     #[must_use]
     pub(super) fn world_profile(&self) -> &RomPackWorld {
         &self.profile
+    }
+
+    pub(super) fn play_policy(&self) -> &PlayPolicy {
+        &self.play_policy
     }
 
     pub(super) fn chunk_snapshot(&self, pos: ChunkPos) -> Result<StaticChunk> {
@@ -312,9 +328,10 @@ pub(super) fn run_play_loop<R: Read, W: Write>(
     }
 
     let world_profile = shared_world.world_profile();
+    let play_policy = shared_world.play_policy();
     let mut player =
         PlayerState::new(player_spawn_position(world_profile), 0.0, 0.0, false, false)?;
-    let mut view = ChunkView::new(spawn_chunk(world_profile), STATIC_CHUNK_RADIUS)?;
+    let mut view = ChunkView::new(spawn_chunk(world_profile), play_policy.chunk_radius)?;
     view.mark_loaded(player.chunk_pos());
     if play_round_limit.is_none() {
         let initial_delta = view.synchronize()?;
@@ -322,10 +339,7 @@ pub(super) fn run_play_loop<R: Read, W: Write>(
         send_chunk_view_delta(writer, profile, shared_world, view.center(), &initial_delta)?;
     }
 
-    let tick_interval = usize::try_from(KEEP_ALIVE_INTERVAL.as_secs())
-        .context("keep alive interval exceeds usize")?
-        .checked_mul(CLIENT_TICKS_PER_SECOND)
-        .context("keep alive tick interval overflow")?;
+    let tick_interval = keep_alive_tick_interval(play_policy)?;
     let mut keep_alive_id = 1_i64;
     let mut completed_rounds = 0_usize;
     let mut ignored_packets = 0_usize;
@@ -472,9 +486,25 @@ pub(super) fn run_play_loop<R: Read, W: Write>(
     }
 }
 
+fn keep_alive_tick_interval(play_policy: &PlayPolicy) -> Result<usize> {
+    usize::try_from(play_policy.keep_alive_interval_seconds)
+        .context("keep alive interval exceeds usize")?
+        .checked_mul(CLIENT_TICKS_PER_SECOND)
+        .context("keep alive tick interval overflow")
+}
+
+#[cfg(test)]
 fn new_local_world_runtime(center: ChunkPos, profile: &RomPackWorld) -> Result<LocalWorldRuntime> {
+    new_local_world_runtime_with_radius(center, profile, PlayPolicy::default().chunk_radius)
+}
+
+fn new_local_world_runtime_with_radius(
+    center: ChunkPos,
+    profile: &RomPackWorld,
+    chunk_radius: i32,
+) -> Result<LocalWorldRuntime> {
     let mut store = ChunkStore::new();
-    seed_chunk_square(&mut store, center, STATIC_CHUNK_RADIUS, profile)?;
+    seed_chunk_square(&mut store, center, chunk_radius, profile)?;
     Ok(DeterministicRuntime::new(
         store,
         non_zero_usize(LOCAL_WORLD_QUEUE_CAPACITY),
@@ -843,6 +873,22 @@ mod tests {
         assert!(is_movement_packet_id(&profile, 0x20));
         assert!(is_movement_packet_id(&profile, 0x21));
         assert!(!is_movement_packet_id(&profile, 0x48));
+    }
+
+    #[test]
+    fn configured_play_policy_controls_loaded_radius_and_keep_alive_cadence() {
+        let policy = PlayPolicy {
+            chunk_radius: 2,
+            keep_alive_interval_seconds: 3,
+            ..PlayPolicy::default()
+        };
+        let profile = builtin_world_profile();
+        let world =
+            SharedWorld::new_with_policy(ChunkPos { x: 0, z: 0 }, profile, policy.clone()).unwrap();
+        assert!(world.chunk_snapshot(ChunkPos { x: 2, z: 2 }).is_ok());
+        assert!(world.chunk_snapshot(ChunkPos { x: 3, z: 0 }).is_err());
+        assert_eq!(world.play_policy(), &policy);
+        assert_eq!(keep_alive_tick_interval(&policy).unwrap(), 60);
     }
 
     #[test]
