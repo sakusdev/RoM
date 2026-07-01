@@ -25,8 +25,9 @@ The implementation supports `official_source_verified` and `version_pack_generat
 8. Add the exact 26.1.2 semantic packet table and compare it with the built-in generation profile.
 9. Compare the resulting 28 registries and 382 identifiers with the built-in 26.1.2 manifest.
 10. Add the world data version, overworld section range, required flat-world block-state IDs, and plains biome ID.
-11. Write a deterministic schema-v3 `.rompack` with a container SHA-256 trailer and provenance metadata.
-12. Revalidate the pack before `rom-bootstrap run`; the native server then builds its `ProtocolProfile`, Configuration registry payloads, and initial shared world from pack metadata.
+11. Add the dimension ID, dimension-type ID, sea level, flat floor, and deterministic spawn coordinates consumed by Play bootstrap.
+12. Write a deterministic schema-v4 `.rompack` with a container SHA-256 trailer and provenance metadata.
+13. Revalidate the pack before `rom-bootstrap run`; the native server then builds its `ProtocolProfile`, Configuration registry payloads, Join Game metadata, spawn packets, movement floor, and initial shared world from pack metadata.
 
 The extractor does **not** decompile, translate, execute, or bytecode-patch the official server JAR. The generated pack is local-only provenance and derived runtime metadata.
 
@@ -56,7 +57,7 @@ The command refuses unsupported Minecraft versions and download URLs outside off
   --instance ./rom-instance
 ```
 
-Use `--force` to regenerate an already valid pack. Generation is deterministic for the same verified source JAR and extractor version. Schema-v1 and schema-v2 packs are intentionally rejected after the packet-table and world-metadata migrations and must be regenerated.
+Use `--force` to regenerate an already valid pack. Generation is deterministic for the same verified source JAR and extractor version. Schema-v1, schema-v2, and schema-v3 packs are intentionally rejected after the packet-table, world-metadata, and Play-bootstrap migrations and must be regenerated.
 
 ## Install the local native server
 
@@ -141,6 +142,6 @@ RoM currently defaults to a loopback bind and offline-mode development login. Th
 
 ## Planned next stages
 
-1. Move remaining gameplay constants into generated packs.
+1. Move remaining server-policy constants into explicit runtime configuration.
 2. Add more independently testable extractors only when the server consumes their output.
 3. Preserve bounded decoding, deterministic ordering, source hashes, and local-only artifact boundaries for every new section.

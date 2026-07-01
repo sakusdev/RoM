@@ -161,6 +161,15 @@ fn main() -> Result<()> {
                     report.resource_count
                 );
                 println!(
+                    "Play world: {} / dimension type {} / sea {} / floor {} / spawn {},{}",
+                    report.world_dimension,
+                    report.dimension_type_id,
+                    report.sea_level,
+                    report.floor_y,
+                    report.spawn_x,
+                    report.spawn_z
+                );
+                println!(
                     "Cache: {}",
                     if report.reused_existing_pack {
                         "reused"

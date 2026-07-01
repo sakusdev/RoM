@@ -27,6 +27,12 @@ pub const GRASS_BLOCK_STATE_ID: u32 = 9;
 pub const DIRT_BLOCK_STATE_ID: u32 = 10;
 pub const BEDROCK_BLOCK_STATE_ID: u32 = 85;
 pub const PLAINS_BIOME_ID: u32 = 40;
+pub const OVERWORLD_DIMENSION: &str = "minecraft:overworld";
+pub const OVERWORLD_DIMENSION_TYPE_ID: i32 = 0;
+pub const OVERWORLD_SEA_LEVEL: i32 = 63;
+pub const FLAT_WORLD_FLOOR_Y: i32 = 63;
+pub const FLAT_WORLD_SPAWN_X: i32 = 0;
+pub const FLAT_WORLD_SPAWN_Z: i32 = 0;
 
 /// Construct the exact packet table used by Minecraft Java Edition 26.1.2.
 pub fn protocol_profile() -> Result<ProtocolProfile, ProfileError> {

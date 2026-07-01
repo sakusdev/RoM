@@ -1,7 +1,6 @@
 use super::{
-    KEEP_ALIVE_INTERVAL, MAX_IGNORED_PLAY_PACKETS, STATIC_CHUNK_RADIUS, STATIC_CHUNK_X,
-    STATIC_CHUNK_Z, STATIC_FLOOR_Y, is_connection_eof, is_transient_read_timeout, version_26_1_2,
-    write_play_payload,
+    KEEP_ALIVE_INTERVAL, MAX_IGNORED_PLAY_PACKETS, STATIC_CHUNK_RADIUS, is_connection_eof,
+    is_transient_read_timeout, version_26_1_2, write_play_payload,
 };
 use crate::codec::{PacketReader, read_packet};
 use anyhow::{Context, Result, bail};
@@ -38,7 +37,6 @@ const MAX_PENDING_WORLD_UPDATES_PER_CONNECTION: usize = 256;
 const MAX_WORLD_UPDATES_PER_DRAIN: usize = 64;
 const MAX_PLAYER_MOVE_DELTA: f64 = 100.0;
 const MAX_PLAYER_MOVE_DELTA_SQUARED: f64 = MAX_PLAYER_MOVE_DELTA * MAX_PLAYER_MOVE_DELTA;
-const MIN_PLAYER_FEET_Y: f64 = STATIC_FLOOR_Y as f64 + 1.0;
 const PLAYER_EYE_HEIGHT: f64 = 1.62;
 const MAX_BLOCK_INTERACTION_REACH: f64 = 6.0;
 const MAX_BLOCK_INTERACTION_REACH_SQUARED: f64 =
@@ -110,6 +108,12 @@ pub(super) fn builtin_world_profile() -> RomPackWorld {
         data_version: version_26_1_2::WORLD_VERSION,
         overworld_min_section_y: version_26_1_2::OVERWORLD_MIN_SECTION_Y,
         overworld_section_count: version_26_1_2::OVERWORLD_SECTION_COUNT,
+        dimension: version_26_1_2::OVERWORLD_DIMENSION.to_owned(),
+        dimension_type_id: version_26_1_2::OVERWORLD_DIMENSION_TYPE_ID,
+        sea_level: version_26_1_2::OVERWORLD_SEA_LEVEL,
+        floor_y: version_26_1_2::FLAT_WORLD_FLOOR_Y,
+        spawn_x: version_26_1_2::FLAT_WORLD_SPAWN_X,
+        spawn_z: version_26_1_2::FLAT_WORLD_SPAWN_Z,
         block_states: RomPackBlockStates {
             air: version_26_1_2::AIR_BLOCK_STATE_ID,
             stone: version_26_1_2::STONE_BLOCK_STATE_ID,
@@ -125,10 +129,11 @@ pub(super) fn builtin_world_profile() -> RomPackWorld {
 
 impl SharedWorld {
     pub(super) fn new(center: ChunkPos, profile: RomPackWorld) -> Result<Self> {
+        let runtime = new_local_world_runtime(center, &profile)?;
         Ok(Self {
             profile,
             inner: Mutex::new(SharedWorldInner {
-                runtime: new_local_world_runtime(center, profile)?,
+                runtime,
                 tick: Tick::ZERO,
                 subscribers: BTreeMap::new(),
             }),
@@ -137,14 +142,10 @@ impl SharedWorld {
 
     #[cfg(test)]
     pub(super) fn static_flat() -> Self {
-        Self::new(
-            ChunkPos {
-                x: STATIC_CHUNK_X,
-                z: STATIC_CHUNK_Z,
-            },
-            builtin_world_profile(),
-        )
-        .expect("static flat world constants must build a valid chunk store")
+        let profile = builtin_world_profile();
+        let center = spawn_chunk(&profile);
+        Self::new(center, profile)
+            .expect("static flat world constants must build a valid chunk store")
     }
 
     fn ensure_chunks_loaded(&self, positions: &[ChunkPos]) -> Result<()> {
@@ -152,7 +153,7 @@ impl SharedWorld {
             .inner
             .lock()
             .map_err(|_| anyhow::anyhow!("shared world lock poisoned"))?;
-        ensure_chunks_loaded(inner.runtime.state_mut(), positions, self.profile)
+        ensure_chunks_loaded(inner.runtime.state_mut(), positions, &self.profile)
     }
 
     pub(super) fn subscribe(
@@ -203,8 +204,8 @@ impl SharedWorld {
     }
 
     #[must_use]
-    pub(super) const fn world_profile(&self) -> RomPackWorld {
-        self.profile
+    pub(super) fn world_profile(&self) -> &RomPackWorld {
+        &self.profile
     }
 
     pub(super) fn chunk_snapshot(&self, pos: ChunkPos) -> Result<StaticChunk> {
@@ -310,14 +311,10 @@ pub(super) fn run_play_loop<R: Read, W: Write>(
         return Ok(());
     }
 
-    let mut player = PlayerState::new([0.5, 65.0, 0.5], 0.0, 0.0, false, false)?;
-    let mut view = ChunkView::new(
-        ChunkPos {
-            x: STATIC_CHUNK_X,
-            z: STATIC_CHUNK_Z,
-        },
-        STATIC_CHUNK_RADIUS,
-    )?;
+    let world_profile = shared_world.world_profile();
+    let mut player =
+        PlayerState::new(player_spawn_position(world_profile), 0.0, 0.0, false, false)?;
+    let mut view = ChunkView::new(spawn_chunk(world_profile), STATIC_CHUNK_RADIUS)?;
     view.mark_loaded(player.chunk_pos());
     if play_round_limit.is_none() {
         let initial_delta = view.synchronize()?;
@@ -406,7 +403,7 @@ pub(super) fn run_play_loop<R: Read, W: Write>(
                 ) => {
                     let movement = decode_movement(kind, packet_reader.take_remaining())?;
                     validate_movement_delta(&player, movement)?;
-                    validate_movement_floor(movement)?;
+                    validate_movement_floor(movement, world_profile.floor_y)?;
                     let previous_chunk = player.chunk_pos();
                     player.apply(movement);
                     let current_chunk = player.chunk_pos();
@@ -475,7 +472,7 @@ pub(super) fn run_play_loop<R: Read, W: Write>(
     }
 }
 
-fn new_local_world_runtime(center: ChunkPos, profile: RomPackWorld) -> Result<LocalWorldRuntime> {
+fn new_local_world_runtime(center: ChunkPos, profile: &RomPackWorld) -> Result<LocalWorldRuntime> {
     let mut store = ChunkStore::new();
     seed_chunk_square(&mut store, center, STATIC_CHUNK_RADIUS, profile)?;
     Ok(DeterministicRuntime::new(
@@ -493,7 +490,7 @@ fn seed_chunk_square(
     store: &mut ChunkStore,
     center: ChunkPos,
     radius: i32,
-    profile: RomPackWorld,
+    profile: &RomPackWorld,
 ) -> Result<()> {
     for z in center
         .z
@@ -522,7 +519,7 @@ fn seed_chunk_square(
 fn ensure_chunks_loaded(
     store: &mut ChunkStore,
     positions: &[ChunkPos],
-    profile: RomPackWorld,
+    profile: &RomPackWorld,
 ) -> Result<()> {
     for pos in positions {
         if store.chunk(*pos).is_none() {
@@ -681,15 +678,16 @@ fn validate_movement_delta(player: &PlayerState, movement: PlayerMovement) -> Re
     Ok(())
 }
 
-fn validate_movement_floor(movement: PlayerMovement) -> Result<()> {
+fn validate_movement_floor(movement: PlayerMovement, floor_y: i32) -> Result<()> {
     let Some(next_position) = movement_position(movement) else {
         return Ok(());
     };
-    if next_position[1] < MIN_PLAYER_FEET_Y {
+    let minimum_feet_y = f64::from(floor_y) + 1.0;
+    if next_position[1] < minimum_feet_y {
         bail!(
             "player movement feet y {} is below flat-world floor {}",
             next_position[1],
-            MIN_PLAYER_FEET_Y
+            minimum_feet_y
         );
     }
     Ok(())
@@ -797,13 +795,13 @@ fn send_chunk_view_delta<W: Write>(
     Ok(())
 }
 
-fn flat_chunk(pos: ChunkPos, profile: RomPackWorld) -> Result<StaticChunk> {
+fn flat_chunk(pos: ChunkPos, profile: &RomPackWorld) -> Result<StaticChunk> {
     Ok(StaticChunk::flat_overworld(
         pos,
         profile.overworld_min_section_y,
         profile.overworld_section_count,
         FlatWorldSpec {
-            floor_y: STATIC_FLOOR_Y,
+            floor_y: profile.floor_y,
             air: BlockStateId::new(profile.block_states.air),
             bedrock: BlockStateId::new(profile.block_states.bedrock),
             stone: BlockStateId::new(profile.block_states.stone),
@@ -812,6 +810,21 @@ fn flat_chunk(pos: ChunkPos, profile: RomPackWorld) -> Result<StaticChunk> {
             biome: BiomeId::new(profile.biomes.plains),
         },
     )?)
+}
+
+pub(super) fn spawn_chunk(profile: &RomPackWorld) -> ChunkPos {
+    ChunkPos {
+        x: profile.spawn_x.div_euclid(16),
+        z: profile.spawn_z.div_euclid(16),
+    }
+}
+
+pub(super) fn player_spawn_position(profile: &RomPackWorld) -> [f64; 3] {
+    [
+        f64::from(profile.spawn_x) + 0.5,
+        f64::from(profile.floor_y) + 2.0,
+        f64::from(profile.spawn_z) + 0.5,
+    ]
 }
 
 #[cfg(test)]
@@ -851,7 +864,7 @@ mod tests {
     #[test]
     fn local_world_runtime_applies_block_events_through_authoritative_ticks() {
         let mut runtime =
-            new_local_world_runtime(ChunkPos { x: 0, z: 0 }, builtin_world_profile()).unwrap();
+            new_local_world_runtime(ChunkPos { x: 0, z: 0 }, &builtin_world_profile()).unwrap();
         let position = BlockPos { x: 0, y: 65, z: 0 };
         let state = BlockStateId::new(version_26_1_2::STONE_BLOCK_STATE_ID);
 
@@ -873,7 +886,7 @@ mod tests {
         packets.insert(PacketKind::BlockUpdate, 0x22).unwrap();
         let profile = ProtocolProfile::new("Test", 1, packets).unwrap();
         let mut runtime =
-            new_local_world_runtime(ChunkPos { x: 0, z: 0 }, builtin_world_profile()).unwrap();
+            new_local_world_runtime(ChunkPos { x: 0, z: 0 }, &builtin_world_profile()).unwrap();
         let position = BlockPos { x: 1, y: 65, z: -2 };
         let state = BlockStateId::new(1);
         let applied = apply_local_world_event(
@@ -968,29 +981,40 @@ mod tests {
 
     #[test]
     fn movement_floor_validation_rejects_flat_floor_penetration() {
-        validate_movement_floor(PlayerMovement::Position {
-            position: [0.5, MIN_PLAYER_FEET_Y, 0.5],
-            flags: ferrum_play::MovementFlags {
-                on_ground: true,
-                horizontal_collision: false,
+        let floor_y = builtin_world_profile().floor_y;
+        let minimum_feet_y = f64::from(floor_y) + 1.0;
+        validate_movement_floor(
+            PlayerMovement::Position {
+                position: [0.5, minimum_feet_y, 0.5],
+                flags: ferrum_play::MovementFlags {
+                    on_ground: true,
+                    horizontal_collision: false,
+                },
             },
-        })
+            floor_y,
+        )
         .unwrap();
-        validate_movement_floor(PlayerMovement::StatusOnly {
-            flags: ferrum_play::MovementFlags {
-                on_ground: true,
-                horizontal_collision: false,
+        validate_movement_floor(
+            PlayerMovement::StatusOnly {
+                flags: ferrum_play::MovementFlags {
+                    on_ground: true,
+                    horizontal_collision: false,
+                },
             },
-        })
+            floor_y,
+        )
         .unwrap();
 
-        let error = validate_movement_floor(PlayerMovement::Position {
-            position: [0.5, MIN_PLAYER_FEET_Y - 0.01, 0.5],
-            flags: ferrum_play::MovementFlags {
-                on_ground: true,
-                horizontal_collision: false,
+        let error = validate_movement_floor(
+            PlayerMovement::Position {
+                position: [0.5, minimum_feet_y - 0.01, 0.5],
+                flags: ferrum_play::MovementFlags {
+                    on_ground: true,
+                    horizontal_collision: false,
+                },
             },
-        })
+            floor_y,
+        )
         .unwrap_err();
         assert!(error.to_string().contains("below flat-world floor"));
     }
@@ -1225,7 +1249,11 @@ mod tests {
         write_packet(
             &mut input,
             &build_packet(0x1e, |body| {
-                for value in [0.5_f64, MIN_PLAYER_FEET_Y - 0.01, 0.5] {
+                for value in [
+                    0.5_f64,
+                    f64::from(world.world_profile().floor_y) + 1.0 - 0.01,
+                    0.5,
+                ] {
                     body.extend_from_slice(&value.to_be_bytes());
                 }
                 body.push(1);
@@ -1476,7 +1504,7 @@ mod tests {
         write_packet(
             &mut input,
             &build_packet(0x1e, |body| {
-                for value in [0.5_f64, MIN_PLAYER_FEET_Y, 0.5] {
+                for value in [0.5_f64, f64::from(world.world_profile().floor_y) + 1.0, 0.5] {
                     body.extend_from_slice(&value.to_be_bytes());
                 }
                 body.push(1);

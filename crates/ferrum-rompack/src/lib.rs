@@ -9,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub const ROMPACK_SCHEMA_VERSION: u32 = 3;
+pub const ROMPACK_SCHEMA_VERSION: u32 = 4;
 const ROMPACK_MAGIC: &[u8; 8] = b"ROMPACK\0";
 const HEADER_BYTES: usize = ROMPACK_MAGIC.len() + 4 + 8;
 const TRAILER_BYTES: usize = 32;
@@ -72,11 +72,17 @@ pub struct RomPackSource {
     pub game_jar_sha256: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RomPackWorld {
     pub data_version: i32,
     pub overworld_min_section_y: i32,
     pub overworld_section_count: usize,
+    pub dimension: String,
+    pub dimension_type_id: i32,
+    pub sea_level: i32,
+    pub floor_y: i32,
+    pub spawn_x: i32,
+    pub spawn_z: i32,
     pub block_states: RomPackBlockStates,
     pub biomes: RomPackBiomes,
 }
@@ -290,12 +296,20 @@ pub fn validate_rompack(pack: &RomPack, limits: RomPackLimits) -> Result<()> {
     )?;
     validate_hex("game JAR SHA-256", &metadata.source.game_jar_sha256, 64)?;
 
-    let world = pack.world;
+    let world = &pack.world;
     if world.data_version < 0 {
         bail!("world data version cannot be negative");
     }
     if world.overworld_section_count == 0 || world.overworld_section_count > limits.max_sections {
         bail!("overworld section count is outside the configured range");
+    }
+    validate_resource_location(
+        "world dimension",
+        &world.dimension,
+        limits.max_identifier_bytes,
+    )?;
+    if world.dimension_type_id < 0 {
+        bail!("dimension type ID cannot be negative");
     }
     let section_count = i32::try_from(world.overworld_section_count)
         .context("overworld section count exceeds i32")?;
@@ -303,13 +317,31 @@ pub fn validate_rompack(pack: &RomPack, limits: RomPackLimits) -> Result<()> {
         .overworld_min_section_y
         .checked_add(section_count)
         .context("overworld section range overflow")?;
-    world
+    let min_block_y = world
         .overworld_min_section_y
         .checked_mul(16)
         .context("overworld minimum block y overflow")?;
-    section_end
+    let max_block_y = section_end
         .checked_mul(16)
+        .and_then(|value| value.checked_sub(1))
         .context("overworld maximum block y overflow")?;
+    let floor_bottom = world
+        .floor_y
+        .checked_sub(3)
+        .context("flat-world floor range overflow")?;
+    let player_spawn_y = world
+        .floor_y
+        .checked_add(2)
+        .context("flat-world player spawn overflow")?;
+    for (label, value) in [
+        ("sea level", world.sea_level),
+        ("flat-world floor bottom", floor_bottom),
+        ("flat-world player spawn", player_spawn_y),
+    ] {
+        if !(min_block_y..=max_block_y).contains(&value) {
+            bail!("{label} {value} is outside world height {min_block_y}..={max_block_y}");
+        }
+    }
     let block_states = [
         world.block_states.air,
         world.block_states.stone,
@@ -363,6 +395,21 @@ pub fn validate_rompack(pack: &RomPack, limits: RomPackLimits) -> Result<()> {
             }
             previous_entry = Some(entry);
         }
+    }
+
+    let dimension_registry = pack
+        .registries
+        .iter()
+        .find(|registry| registry.id == "minecraft:dimension_type")
+        .context("version pack is missing minecraft:dimension_type")?;
+    let dimension_type_id =
+        usize::try_from(world.dimension_type_id).context("dimension type ID exceeds usize")?;
+    if dimension_type_id >= dimension_registry.entries.len() {
+        bail!(
+            "dimension type ID {} exceeds registry size {}",
+            world.dimension_type_id,
+            dimension_registry.entries.len()
+        );
     }
 
     if pack.resources.len() > limits.max_resources {
@@ -487,6 +534,12 @@ mod tests {
                 data_version: 4_790,
                 overworld_min_section_y: -4,
                 overworld_section_count: 24,
+                dimension: "minecraft:overworld".to_owned(),
+                dimension_type_id: 0,
+                sea_level: 63,
+                floor_y: 63,
+                spawn_x: 0,
+                spawn_z: 0,
                 block_states: RomPackBlockStates {
                     air: 0,
                     stone: 1,
@@ -510,10 +563,19 @@ mod tests {
                     id: 0,
                 },
             ],
-            registries: vec![RomPackRegistry {
-                id: "minecraft:worldgen/biome".to_owned(),
-                entries: vec!["minecraft:forest".to_owned(), "minecraft:plains".to_owned()],
-            }],
+            registries: vec![
+                RomPackRegistry {
+                    id: "minecraft:dimension_type".to_owned(),
+                    entries: vec![
+                        "minecraft:overworld".to_owned(),
+                        "minecraft:the_nether".to_owned(),
+                    ],
+                },
+                RomPackRegistry {
+                    id: "minecraft:worldgen/biome".to_owned(),
+                    entries: vec!["minecraft:forest".to_owned(), "minecraft:plains".to_owned()],
+                },
+            ],
             resources: vec![RomPackResource {
                 path: "data/minecraft/worldgen/biome/plains.json".to_owned(),
                 size: 10,
@@ -544,8 +606,8 @@ mod tests {
         assert_eq!(decoded, pack);
         assert_eq!(written.sha256, read.sha256);
         assert_eq!(written.packet_count, 3);
-        assert_eq!(written.registry_count, 1);
-        assert_eq!(written.registry_entry_count, 2);
+        assert_eq!(written.registry_count, 2);
+        assert_eq!(written.registry_entry_count, 4);
         assert_eq!(written.resource_count, 1);
     }
 
@@ -565,6 +627,18 @@ mod tests {
 
         let mut pack = sample_pack();
         pack.world.block_states.stone = pack.world.block_states.air;
+        assert!(validate_rompack(&pack, RomPackLimits::default()).is_err());
+
+        let mut pack = sample_pack();
+        pack.world.dimension.clear();
+        assert!(validate_rompack(&pack, RomPackLimits::default()).is_err());
+
+        let mut pack = sample_pack();
+        pack.world.dimension_type_id = 9;
+        assert!(validate_rompack(&pack, RomPackLimits::default()).is_err());
+
+        let mut pack = sample_pack();
+        pack.world.floor_y = 400;
         assert!(validate_rompack(&pack, RomPackLimits::default()).is_err());
 
         let mut pack = sample_pack();

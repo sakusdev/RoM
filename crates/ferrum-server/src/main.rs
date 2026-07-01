@@ -25,6 +25,7 @@ use ferrum_protocol::{HandshakeIntent, PacketKind, PacketTable, ProtocolProfile,
 use ferrum_rompack::{RomPack, RomPackPacket, RomPackRegistry, RomPackWorld, read_rompack};
 use ferrum_runtime::ConnectionId;
 use ferrum_version_26_1_2 as version_26_1_2;
+#[cfg(test)]
 use ferrum_world::ChunkPos;
 use identity::offline_player_identity;
 use serde_json::{Map, Value, json};
@@ -46,15 +47,10 @@ const DEFAULT_BIND: &str = "127.0.0.1:25565";
 const DEFAULT_VERSION_NAME: &str = "Minecraft Java Edition 26.*.*";
 const DEFAULT_PROTOCOL: i32 = 0;
 const DEFAULT_MOTD: &str = "Ferrum native Rust server";
-const STATIC_LEVEL: &str = "minecraft:overworld";
 const STATIC_PLAYER_ID: i32 = 1;
 const STATIC_TELEPORT_ID: i32 = 1;
 const STATIC_CHUNK_RADIUS: i32 = 1;
 const STATIC_SIMULATION_DISTANCE: i32 = 2;
-const STATIC_SEA_LEVEL: i32 = 63;
-const STATIC_FLOOR_Y: i32 = 63;
-const STATIC_CHUNK_X: i32 = 0;
-const STATIC_CHUNK_Z: i32 = 0;
 const STATIC_CHUNK_BATCH_SIZE: i32 = 1;
 const STATIC_WELCOME_MESSAGE: &str = "Ferrum native Rust world loaded";
 const MAX_CONFIGURATION_AUXILIARY_PACKETS: usize = 16;
@@ -168,13 +164,10 @@ impl ServerState {
         Ok(Self {
             online_players: AtomicI32::new(initial_online_players),
             next_connection_id: AtomicU64::new(1),
-            world: play_runtime::SharedWorld::new(
-                ChunkPos {
-                    x: STATIC_CHUNK_X,
-                    z: STATIC_CHUNK_Z,
-                },
-                world,
-            )?,
+            world: {
+                let center = play_runtime::spawn_chunk(&world);
+                play_runtime::SharedWorld::new(center, world)?
+            },
             registry_payloads,
         })
     }
@@ -393,9 +386,13 @@ fn validate_world_profile(world: &RomPackWorld) -> Result<()> {
         .and_then(|section| section.checked_mul(16))
         .and_then(|block| block.checked_sub(1))
         .context("overworld maximum block y overflow")?;
-    if !(min_block_y..=max_block_y).contains(&STATIC_FLOOR_Y) {
+    let player_spawn_y = world
+        .floor_y
+        .checked_add(2)
+        .context("generated player spawn overflow")?;
+    if !(min_block_y..=max_block_y).contains(&player_spawn_y) {
         bail!(
-            "generated world height {min_block_y}..={max_block_y} does not contain the static floor at {STATIC_FLOOR_Y}"
+            "generated world height {min_block_y}..={max_block_y} does not contain player spawn y {player_spawn_y}"
         );
     }
     Ok(())
@@ -1328,28 +1325,27 @@ fn run_static_play_session<R: Read, W: Write>(
     play_round_limit: Option<usize>,
 ) -> Result<()> {
     let _world_subscription = world.shared_world.subscribe(world.connection)?;
-    let chunk = world.shared_world.chunk_snapshot(ChunkPos {
-        x: STATIC_CHUNK_X,
-        z: STATIC_CHUNK_Z,
-    })?;
+    let world_profile = world.shared_world.world_profile();
+    let center = play_runtime::spawn_chunk(world_profile);
+    let chunk = world.shared_world.chunk_snapshot(center)?;
 
     write_play_payload(
         writer,
         profile,
         PacketKind::PlayLogin,
-        &encode_join_game(&static_join_game(config))?,
+        &encode_join_game(&static_join_game(config, world_profile))?,
     )?;
     write_play_payload(
         writer,
         profile,
         PacketKind::DefaultSpawnPosition,
-        &encode_default_spawn_position(&static_default_spawn_position())?,
+        &encode_default_spawn_position(&static_default_spawn_position(world_profile)?)?,
     )?;
     write_play_payload(
         writer,
         profile,
         PacketKind::SetChunkCacheCenter,
-        &encode_set_chunk_cache_center(STATIC_CHUNK_X, STATIC_CHUNK_Z),
+        &encode_set_chunk_cache_center(center.x, center.z),
     )?;
     write_play_payload(
         writer,
@@ -1379,7 +1375,7 @@ fn run_static_play_session<R: Read, W: Write>(
         writer,
         profile,
         PacketKind::PlayerPosition,
-        &encode_player_position(&static_player_position())?,
+        &encode_player_position(&static_player_position(world_profile))?,
     )?;
     writer.flush()?;
 
@@ -1387,11 +1383,11 @@ fn run_static_play_session<R: Read, W: Write>(
     run_keep_alive_loop(reader, writer, profile, session, world, play_round_limit)
 }
 
-fn static_join_game(config: &ServerConfig) -> JoinGame {
+fn static_join_game(config: &ServerConfig, world: &RomPackWorld) -> JoinGame {
     JoinGame {
         player_id: STATIC_PLAYER_ID,
         hardcore: false,
-        levels: vec![STATIC_LEVEL.to_owned()],
+        levels: vec![world.dimension.clone()],
         max_players: config.max_players,
         chunk_radius: STATIC_CHUNK_RADIUS,
         simulation_distance: STATIC_SIMULATION_DISTANCE,
@@ -1399,8 +1395,8 @@ fn static_join_game(config: &ServerConfig) -> JoinGame {
         show_death_screen: true,
         limited_crafting: false,
         spawn_info: CommonPlayerSpawnInfo {
-            dimension_type_id: 0,
-            dimension: STATIC_LEVEL.to_owned(),
+            dimension_type_id: world.dimension_type_id,
+            dimension: world.dimension.clone(),
             seed: 0,
             game_mode: 0,
             previous_game_mode: -1,
@@ -1408,28 +1404,35 @@ fn static_join_game(config: &ServerConfig) -> JoinGame {
             is_flat: true,
             last_death_location: None,
             portal_cooldown: 0,
-            sea_level: STATIC_SEA_LEVEL,
+            sea_level: world.sea_level,
         },
         enforces_secure_chat: config.enforces_secure_chat,
     }
 }
 
-fn static_default_spawn_position() -> DefaultSpawnPosition {
-    DefaultSpawnPosition {
+fn static_default_spawn_position(world: &RomPackWorld) -> Result<DefaultSpawnPosition> {
+    Ok(DefaultSpawnPosition {
         position: GlobalPosition {
-            dimension: STATIC_LEVEL.to_owned(),
-            position: BlockPosition { x: 0, y: 64, z: 0 },
+            dimension: world.dimension.clone(),
+            position: BlockPosition {
+                x: world.spawn_x,
+                y: world
+                    .floor_y
+                    .checked_add(1)
+                    .context("default spawn y overflow")?,
+                z: world.spawn_z,
+            },
         },
         yaw: 0.0,
         pitch: 0.0,
-    }
+    })
 }
 
-fn static_player_position() -> PlayerPosition {
+fn static_player_position(world: &RomPackWorld) -> PlayerPosition {
     PlayerPosition {
         teleport_id: STATIC_TELEPORT_ID,
         change: PositionMoveRotation {
-            position: [0.5, 65.0, 0.5],
+            position: play_runtime::player_spawn_position(world),
             delta_movement: [0.0; 3],
             yaw: 0.0,
             pitch: 0.0,
@@ -1703,6 +1706,38 @@ fn parse_handshake_packet(packet: &[u8], packets: &PacketTable) -> Result<Handsh
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn generated_play_metadata_drives_join_and_spawn_payloads() {
+        let config = ServerConfig::for_profile(Some("26.1.2")).unwrap();
+        let mut world = play_runtime::builtin_world_profile();
+        world.dimension = "minecraft:test_world".to_owned();
+        world.dimension_type_id = 3;
+        world.sea_level = 70;
+        world.floor_y = 79;
+        world.spawn_x = 32;
+        world.spawn_z = -17;
+        let join = static_join_game(&config, &world);
+        assert_eq!(join.levels, ["minecraft:test_world"]);
+        assert_eq!(join.spawn_info.dimension_type_id, 3);
+        assert_eq!(join.spawn_info.dimension, "minecraft:test_world");
+        assert_eq!(join.spawn_info.sea_level, 70);
+        let spawn = static_default_spawn_position(&world).unwrap();
+        assert_eq!(spawn.position.dimension, "minecraft:test_world");
+        assert_eq!(
+            spawn.position.position,
+            BlockPosition {
+                x: 32,
+                y: 80,
+                z: -17
+            }
+        );
+        assert_eq!(
+            static_player_position(&world).change.position,
+            [32.5, 81.0, -16.5]
+        );
+        assert_eq!(play_runtime::spawn_chunk(&world), ChunkPos { x: 2, z: -2 });
+    }
 
     #[test]
     fn generated_registry_manifest_drives_configuration_payloads() {
@@ -2350,12 +2385,13 @@ mod tests {
         let finish = read_packet(&mut cursor).unwrap();
         assert_eq!(PacketReader::new(&finish).read_varint().unwrap(), 0x03);
 
+        let world_profile = play_runtime::builtin_world_profile();
         let join_game = read_packet(&mut cursor).unwrap();
         let mut join_game_reader = PacketReader::new(&join_game);
         assert_eq!(join_game_reader.read_varint().unwrap(), 0x31);
         assert_eq!(
             join_game_reader.take_remaining(),
-            encode_join_game(&static_join_game(&config)).unwrap()
+            encode_join_game(&static_join_game(&config, &world_profile)).unwrap()
         );
 
         let default_spawn = read_packet(&mut cursor).unwrap();
@@ -2363,7 +2399,8 @@ mod tests {
         assert_eq!(default_spawn_reader.read_varint().unwrap(), 0x61);
         assert_eq!(
             default_spawn_reader.take_remaining(),
-            encode_default_spawn_position(&static_default_spawn_position()).unwrap()
+            encode_default_spawn_position(&static_default_spawn_position(&world_profile).unwrap(),)
+                .unwrap()
         );
 
         let chunk_center = read_packet(&mut cursor).unwrap();
@@ -2408,7 +2445,7 @@ mod tests {
         assert_eq!(player_position_reader.read_varint().unwrap(), 0x48);
         assert_eq!(
             player_position_reader.take_remaining(),
-            encode_player_position(&static_player_position()).unwrap()
+            encode_player_position(&static_player_position(&world_profile)).unwrap()
         );
 
         let keep_alive = read_packet(&mut cursor).unwrap();
