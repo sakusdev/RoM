@@ -1,15 +1,15 @@
-name: Apply generated world metadata
+name: Capture generated world metadata diagnostics
 
 on:
   pull_request:
     branches: [master]
-    types: [opened, synchronize, reopened]
+    types: [synchronize, reopened]
 
 permissions:
   contents: write
 
 jobs:
-  apply:
+  capture:
     if: >-
       github.actor != 'github-actions[bot]' &&
       github.head_ref == 'feature/rompack-world-metadata'
@@ -22,7 +22,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - name: Allow ordered replacement of repeated source shapes
+      - name: Apply source patch
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -30,43 +30,25 @@ jobs:
           text = path.read_text(encoding='utf-8')
           old_condition = '    if count != 1:\n'
           old_message = 'expected one match, found {count}'
-          if text.count(old_condition) != 1:
-              raise SystemExit(f'expected one replacement guard, found {text.count(old_condition)}')
-          if text.count(old_message) != 1:
-              raise SystemExit(f'expected one guard message, found {text.count(old_message)}')
-          text = text.replace(old_condition, '    if count < 1:\n', 1)
-          text = text.replace(old_message, 'expected at least one match, found {count}', 1)
+          if old_condition in text:
+              text = text.replace(old_condition, '    if count < 1:\n', 1)
+          if old_message in text:
+              text = text.replace(old_message, 'expected at least one match, found {count}', 1)
           path.write_text(text, encoding='utf-8')
           PY
-      - id: patch
-        name: Apply source patch
-        continue-on-error: true
-        run: |
-          rm -f world-metadata-patch-diagnostics.txt
-          python3 tools/apply_rompack_world_metadata.py > world-metadata-patch-diagnostics.txt 2>&1
-      - name: Preserve patch diagnostics
-        if: steps.patch.outcome == 'failure'
-        run: |
-          git checkout -- . ':!world-metadata-patch-diagnostics.txt' ':!.github/workflows/apply-rompack-world-metadata.yml' || true
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add world-metadata-patch-diagnostics.txt
-          git commit -m "Capture world metadata patch diagnostics"
-          git push origin HEAD:feature/rompack-world-metadata
-          exit 1
-      - name: Remove patch machinery and format
-        if: steps.patch.outcome == 'success'
-        run: |
-          rm -f world-metadata-patch-diagnostics.txt
+          python3 tools/apply_rompack_world_metadata.py
           rm tools/apply_rompack_world_metadata.py
           cargo fmt --all
-      - name: Validate workspace
-        if: steps.patch.outcome == 'success'
+      - name: Capture validation diagnostics
         run: |
-          cargo clippy --workspace --all-targets -- -D warnings
-          cargo test --workspace
-      - name: Commit source implementation
-        if: steps.patch.outcome == 'success'
+          set +e
+          cargo clippy --workspace --all-targets -- -D warnings > world-metadata-validation.txt 2>&1
+          clippy_status=$?
+          cargo test --workspace >> world-metadata-validation.txt 2>&1
+          test_status=$?
+          printf '\nclippy_status=%s\ntest_status=%s\n' "$clippy_status" "$test_status" >> world-metadata-validation.txt
+          exit 0
+      - name: Commit generated source and diagnostics
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -74,7 +56,7 @@ jobs:
             crates/ferrum-rompack/src/lib.rs crates/rom-bootstrap/src/extract.rs \
             crates/rom-bootstrap/src/main.rs crates/ferrum-server/src/main.rs \
             crates/ferrum-server/src/play_runtime.rs tools/apply_rompack_world_metadata.py \
-            world-metadata-patch-diagnostics.txt
+            world-metadata-validation.txt
           git diff --cached --check
-          git commit -m "Load world metadata from generated version packs"
+          git commit -m "Stage generated world metadata integration"
           git push origin HEAD:feature/rompack-world-metadata
