@@ -21,7 +21,7 @@ RoM follows a Fabric-installer-style bootstrap model while preserving its native
 5. The JAR remains in a local cache and is not bundled into RoM releases.
 6. RoM scans only synchronized-registry JSON resources from the locally obtained game JAR.
 7. A deterministic, integrity-protected `.rompack` records registry IDs, source-resource hashes, source hashes, and patch-set identity.
-8. The native `rom-server` validates that pack against its built-in 26.1.2 profile before starting.
+8. The native `ferrum-server` validates that pack against its built-in 26.1.2 generation profile before starting.
 
 The current bootstrap implementation supports the **version pack generated** stage. It does not decompile, translate, execute, bytecode-patch, or redistribute the official server JAR. The generated pack contains derived registry identifiers and source-resource hashes, not copied JSON payloads.
 
@@ -36,7 +36,7 @@ The native server currently supports:
 - Offline-mode login with Java-compatible offline UUIDs
 - Login Acknowledged and Configuration-state transitions
 - Vanilla `minecraft/core/26.1.2` Known Packs negotiation
-- Packet IDs, world height, flat-world block-state IDs, and biome ID loaded from the generated schema-v3 `.rompack` during Bootstrap startup
+- Packet IDs, world height, flat-world block-state IDs, biome ID, and Configuration registry payloads loaded from the generated schema-v3 `.rompack` during Bootstrap startup
 - All 28 synchronized 26.1.2 registries with 382 vanilla entries
 - Feature Flags, Tags, and Finish Configuration
 - Join Game for a deterministic flat overworld
@@ -106,7 +106,7 @@ Not implemented yet:
 - World persistence and Anvil region saving
 - Multi-version gameplay compatibility
 - Fabric, Bukkit, Spigot, or Paper plugin compatibility
-- Runtime replacement of remaining dimension registry payloads and other gameplay constants with generated pack data
+- Runtime replacement of remaining gameplay constants with generated pack data
 
 > [!CAUTION]
 > The default configuration binds to loopback and uses development-only offline login. Do not expose that configuration to the public internet. It does not prove that a connecting user owns Minecraft.
@@ -268,7 +268,7 @@ Design rules:
 
 The next server and bootstrap milestones are:
 
-1. Move remaining dimension registry payloads and gameplay constants into generated packs
+1. Move remaining gameplay constants into generated packs
 2. Wire dedicated network workers into the authoritative 20 TPS runtime
 3. Add full block interaction and inventory validation
 4. Add entities and entity tracking
