@@ -28,13 +28,13 @@ jobs:
           from pathlib import Path
           path = Path('tools/apply_rompack_packet_table.py')
           text = path.read_text(encoding='utf-8')
-          old = '''replace_once(
+          old = r'''replace_once(
               "crates/rom-bootstrap/src/extract.rs",
               "    pub registry_count: usize,\n",
               "    pub packet_count: usize,\n    pub registry_count: usize,\n",
           )
           '''
-          new = '''replace_once(
+          new = r'''replace_once(
               "crates/rom-bootstrap/src/extract.rs",
               "    pub game_jar_sha256: String,\n    pub registry_count: usize,\n",
               "    pub game_jar_sha256: String,\n    pub packet_count: usize,\n    pub registry_count: usize,\n",
