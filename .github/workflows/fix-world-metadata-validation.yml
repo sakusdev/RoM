@@ -27,76 +27,86 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
-          def replace_once(path, old, new):
-              file = Path(path)
-              text = file.read_text(encoding='utf-8')
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f'{path}: expected one match, found {count}: {old!r}')
-              file.write_text(text.replace(old, new, 1), encoding='utf-8')
+          extract = Path('crates/rom-bootstrap/src/extract.rs')
+          lines = extract.read_text(encoding='utf-8').splitlines()
 
-          replace_once(
-              'crates/rom-bootstrap/src/extract.rs',
-              '''        packet_count: summary.packet_count,
-                  world_data_version: pack.world.data_version,
-                  overworld_min_section_y: pack.world.overworld_min_section_y,
-                  overworld_section_count: pack.world.overworld_section_count,
-                  registry_count: summary.registry_count,
-          ''',
-              '''        packet_count: summary.packet_count,
-                  registry_count: summary.registry_count,
-          ''',
-          )
-          replace_once(
-              'crates/rom-bootstrap/src/extract.rs',
-              '''        packet_count: summary.packet_count,
-                  registry_count: summary.registry_count,
-                  registry_entry_count: summary.registry_entry_count,
-                  resource_count: summary.resource_count,
-                  reused_existing_pack: true,
-          ''',
-              '''        packet_count: summary.packet_count,
-                  world_data_version: pack.world.data_version,
-                  overworld_min_section_y: pack.world.overworld_min_section_y,
-                  overworld_section_count: pack.world.overworld_section_count,
-                  registry_count: summary.registry_count,
-                  registry_entry_count: summary.registry_entry_count,
-                  resource_count: summary.resource_count,
-                  reused_existing_pack: true,
-          ''',
-          )
+          record_start = next(i for i, line in enumerate(lines) if line.strip() == 'let record = PackRecord {')
+          record_end = next(i for i in range(record_start + 1, len(lines)) if lines[i].strip() == '};')
+          forbidden = {
+              'world_data_version: pack.world.data_version,',
+              'overworld_min_section_y: pack.world.overworld_min_section_y,',
+              'overworld_section_count: pack.world.overworld_section_count,',
+          }
+          lines = [
+              line for i, line in enumerate(lines)
+              if not (record_start < i < record_end and line.strip() in forbidden)
+          ]
+
+          function_start = next(i for i, line in enumerate(lines) if line.startswith('fn report_from_existing('))
+          report_start = next(i for i in range(function_start, len(lines)) if lines[i].strip() == 'GenerateReport {')
+          report_end = next(i for i in range(report_start + 1, len(lines)) if lines[i].strip() == '}')
+          existing = {line.strip() for line in lines[report_start:report_end]}
+          insertion = [
+              '        world_data_version: pack.world.data_version,',
+              '        overworld_min_section_y: pack.world.overworld_min_section_y,',
+              '        overworld_section_count: pack.world.overworld_section_count,',
+          ]
+          if not all(line.strip() in existing for line in insertion):
+              packet_line = next(
+                  i for i in range(report_start, report_end)
+                  if lines[i].strip() == 'packet_count: summary.packet_count,'
+              )
+              lines[packet_line + 1:packet_line + 1] = insertion
+          extract.write_text('\n'.join(lines) + '\n', encoding='utf-8')
 
           main = Path('crates/ferrum-server/src/main.rs')
           text = main.read_text(encoding='utf-8')
-          old = '''    fn new(initial_online_players: i32) -> Self {
-                  Self::with_world(initial_online_players, play_runtime::builtin_world_profile())
-                      .expect("built-in world profile must initialize")
-              }
+          start_marker = '    fn new(initial_online_players: i32) -> Self {'
+          end_marker = '    fn with_world(initial_online_players: i32, world: RomPackWorld) -> Result<Self> {'
+          if start_marker in text:
+              start = text.index(start_marker)
+              end = text.index(end_marker, start)
+              text = text[:start] + text[end:]
+          main.write_text(text, encoding='utf-8')
 
-          '''
-          if text.count(old) != 1:
-              raise SystemExit(f'main.rs: expected one unused ServerState::new block, found {text.count(old)}')
-          main.write_text(text.replace(old, '', 1), encoding='utf-8')
-
-          replace_once(
-              'crates/ferrum-server/src/play_runtime.rs',
-              '''    pub(super) fn static_flat() -> Self {
-          ''',
-              '''    #[cfg(test)]
-              pub(super) fn static_flat() -> Self {
-          ''',
-          )
+          play = Path('crates/ferrum-server/src/play_runtime.rs')
+          text = play.read_text(encoding='utf-8')
+          marker = '    pub(super) fn static_flat() -> Self {'
+          replacement = '    #[cfg(test)]\n' + marker
+          if replacement not in text:
+              if marker not in text:
+                  raise SystemExit('SharedWorld::static_flat marker was not found')
+              text = text.replace(marker, replacement, 1)
+          play.write_text(text, encoding='utf-8')
           PY
           rm -f world-metadata-validation.txt
           rm -f .github/workflows/apply-rompack-world-metadata.yml
-          rm .github/workflows/fix-world-metadata-validation.yml
-      - name: Validate finalized workspace
-        run: |
           cargo fmt --all
-          cargo clippy --workspace --all-targets -- -D warnings
-          cargo test --workspace
-      - name: Commit finalized implementation
+      - id: validate
+        name: Validate finalized workspace
+        continue-on-error: true
         run: |
+          set +e
+          cargo clippy --workspace --all-targets -- -D warnings > world-metadata-final-validation.txt 2>&1
+          clippy_status=$?
+          cargo test --workspace >> world-metadata-final-validation.txt 2>&1
+          test_status=$?
+          printf '\nclippy_status=%s\ntest_status=%s\n' "$clippy_status" "$test_status" >> world-metadata-final-validation.txt
+          test "$clippy_status" -eq 0 -a "$test_status" -eq 0
+      - name: Commit diagnostics on failure
+        if: steps.validate.outcome == 'failure'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Capture final world metadata diagnostics"
+          git push origin HEAD:feature/rompack-world-metadata
+          exit 1
+      - name: Commit finalized implementation
+        if: steps.validate.outcome == 'success'
+        run: |
+          rm -f world-metadata-final-validation.txt
+          rm .github/workflows/fix-world-metadata-validation.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
