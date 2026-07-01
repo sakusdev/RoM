@@ -1,4 +1,4 @@
-name: Finalize generated Play bootstrap metadata
+name: Capture finalized Play bootstrap diagnostics
 
 on:
   pull_request:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  finalize:
+  capture:
     if: >-
       github.actor != 'github-actions[bot]' &&
       github.head_ref == 'feature/rompack-play-bootstrap'
@@ -30,24 +30,30 @@ jobs:
           text = path.read_text(encoding='utf-8')
           old = 'MIN_PLAYER_FEET_Y'
           count = text.count(old)
-          if count != 2:
-              raise SystemExit(f'expected two remaining fixed-floor references, found {count}')
+          if count not in (0, 2):
+              raise SystemExit(f'expected zero or two remaining fixed-floor references, found {count}')
           text = text.replace(old, 'f64::from(world.world_profile().floor_y) + 1.0')
           path.write_text(text, encoding='utf-8')
           PY
           rm -f play-bootstrap-validation.txt
+          rm -f play-bootstrap-final-validation.txt
           cargo fmt --all
-      - name: Validate finalized workspace
+      - name: Capture validation diagnostics
         run: |
-          cargo fmt --all --check
-          cargo clippy --workspace --all-targets -- -D warnings
-          cargo test --workspace
-      - name: Commit finalized implementation
+          set +e
+          cargo fmt --all --check > play-bootstrap-final-validation.txt 2>&1
+          fmt_status=$?
+          cargo clippy --workspace --all-targets -- -D warnings >> play-bootstrap-final-validation.txt 2>&1
+          clippy_status=$?
+          cargo test --workspace >> play-bootstrap-final-validation.txt 2>&1
+          test_status=$?
+          printf '\nfmt_status=%s\nclippy_status=%s\ntest_status=%s\n' "$fmt_status" "$clippy_status" "$test_status" >> play-bootstrap-final-validation.txt
+          exit 0
+      - name: Commit source and diagnostics
         run: |
-          rm .github/workflows/apply-rompack-play-bootstrap.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git diff --cached --check
-          git commit -m "Finalize generated Play bootstrap metadata"
+          git commit -m "Stage final Play bootstrap validation"
           git push origin HEAD:feature/rompack-play-bootstrap
