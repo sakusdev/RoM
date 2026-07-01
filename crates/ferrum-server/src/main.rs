@@ -9,8 +9,9 @@ use codec::{
     PacketReader, build_packet, read_packet, write_packet, write_string, write_varint_vec,
 };
 use ferrum_configuration::{
-    KnownPack, KnownPackDecodeLimits, decode_client_information, decode_known_packs,
-    encode_feature_flags, encode_known_packs, encode_registry_data, encode_tags,
+    KnownPack, KnownPackDecodeLimits, RegistryData, RegistryEntry, decode_client_information,
+    decode_known_packs, encode_feature_flags, encode_known_packs, encode_registry_data,
+    encode_tags,
 };
 use ferrum_nbt::{Tag, encode_anonymous};
 use ferrum_play::{
@@ -21,7 +22,7 @@ use ferrum_play::{
     encode_system_chat,
 };
 use ferrum_protocol::{HandshakeIntent, PacketKind, PacketTable, ProtocolProfile, ProtocolSession};
-use ferrum_rompack::{RomPack, RomPackPacket, RomPackWorld, read_rompack};
+use ferrum_rompack::{RomPack, RomPackPacket, RomPackRegistry, RomPackWorld, read_rompack};
 use ferrum_runtime::ConnectionId;
 use ferrum_version_26_1_2 as version_26_1_2;
 use ferrum_world::ChunkPos;
@@ -139,6 +140,7 @@ struct ServerState {
     online_players: AtomicI32,
     next_connection_id: AtomicU64,
     world: play_runtime::SharedWorld,
+    registry_payloads: Vec<Vec<u8>>,
 }
 
 impl ServerState {
@@ -151,7 +153,20 @@ impl ServerState {
         .expect("built-in world profile must initialize")
     }
 
+    #[cfg(test)]
     fn with_world(initial_online_players: i32, world: RomPackWorld) -> Result<Self> {
+        Self::with_runtime(
+            initial_online_players,
+            world,
+            builtin_26_1_2_registry_payloads()?,
+        )
+    }
+
+    fn with_runtime(
+        initial_online_players: i32,
+        world: RomPackWorld,
+        registry_payloads: Vec<Vec<u8>>,
+    ) -> Result<Self> {
         Ok(Self {
             online_players: AtomicI32::new(initial_online_players),
             next_connection_id: AtomicU64::new(1),
@@ -162,6 +177,7 @@ impl ServerState {
                 },
                 world,
             )?,
+            registry_payloads,
         })
     }
 
@@ -180,6 +196,10 @@ impl ServerState {
 
     fn world(&self) -> &play_runtime::SharedWorld {
         &self.world
+    }
+
+    fn registry_payloads(&self) -> &[Vec<u8>] {
+        &self.registry_payloads
     }
 }
 
@@ -232,21 +252,30 @@ fn run(cli: Cli) -> Result<()> {
         .with_context(|| format!("cannot resolve {}", cli.config.display()))?;
     let mut config = ServerConfig::from_file(&config_path)
         .with_context(|| format!("cannot load {}", config_path.display()))?;
-    let (runtime_profile, world_profile) = if let Some(version_pack) = &cli.version_pack {
-        let loaded = load_version_pack(version_pack, &config)?;
-        (loaded.profile, loaded.world)
-    } else {
-        (
-            config
-                .protocol_profile()
-                .context("cannot build configured protocol profile")?,
-            play_runtime::builtin_world_profile(),
-        )
-    };
+    let (runtime_profile, world_profile, registry_payloads) =
+        if let Some(version_pack) = &cli.version_pack {
+            let loaded = load_version_pack(version_pack, &config)?;
+            (loaded.profile, loaded.world, loaded.registry_payloads)
+        } else {
+            let registry_payloads =
+                if config.profile_name.as_deref() == Some(version_26_1_2::PROFILE_NAME) {
+                    builtin_26_1_2_registry_payloads()?
+                } else {
+                    Vec::new()
+                };
+            (
+                config
+                    .protocol_profile()
+                    .context("cannot build configured protocol profile")?,
+                play_runtime::builtin_world_profile(),
+                registry_payloads,
+            )
+        };
     config.runtime_profile = Some(runtime_profile);
-    let state = Arc::new(ServerState::with_world(
+    let state = Arc::new(ServerState::with_runtime(
         config.online_players,
         world_profile,
+        registry_payloads,
     )?);
     let listener = TcpListener::bind(&config.bind)
         .with_context(|| format!("cannot bind Minecraft status listener on {}", config.bind))?;
@@ -277,6 +306,7 @@ fn run(cli: Cli) -> Result<()> {
 struct LoadedVersionPack {
     profile: ProtocolProfile,
     world: RomPackWorld,
+    registry_payloads: Vec<Vec<u8>>,
 }
 
 fn load_version_pack(path: &Path, config: &ServerConfig) -> Result<LoadedVersionPack> {
@@ -301,6 +331,7 @@ fn load_version_pack(path: &Path, config: &ServerConfig) -> Result<LoadedVersion
     validate_world_profile(&pack.world)?;
     let profile =
         protocol_profile_from_packets(&config.version_name, pack.metadata.protocol, &pack.packets)?;
+    let registry_payloads = registry_payloads_from_pack(&pack.registries)?;
     println!(
         "loaded RoM version pack {} (SHA-256 {}, {} packets, data version {}, {} sections, {} registries / {} entries)",
         canonical.display(),
@@ -314,7 +345,41 @@ fn load_version_pack(path: &Path, config: &ServerConfig) -> Result<LoadedVersion
     Ok(LoadedVersionPack {
         profile,
         world: pack.world,
+        registry_payloads,
     })
+}
+
+fn registry_payloads_from_pack(registries: &[RomPackRegistry]) -> Result<Vec<Vec<u8>>> {
+    let runtime_registries = registries
+        .iter()
+        .map(|registry| {
+            RegistryData::new(
+                registry.id.clone(),
+                registry
+                    .entries
+                    .iter()
+                    .cloned()
+                    .map(|entry| RegistryEntry::new(entry, None))
+                    .collect(),
+            )
+        })
+        .collect();
+    encode_registry_payloads(runtime_registries)
+}
+
+fn builtin_26_1_2_registry_payloads() -> Result<Vec<Vec<u8>>> {
+    encode_registry_payloads(version_26_1_2::configuration_registries())
+}
+
+fn encode_registry_payloads(registries: Vec<RegistryData>) -> Result<Vec<Vec<u8>>> {
+    registries
+        .into_iter()
+        .map(|registry| {
+            let id = registry.id.clone();
+            encode_registry_data(&registry)
+                .with_context(|| format!("cannot encode generated registry {id}"))
+        })
+        .collect()
 }
 
 fn validate_world_profile(world: &RomPackWorld) -> Result<()> {
@@ -1177,7 +1242,7 @@ fn handle_configuration_protocol<R: Read, W: Write>(
             })?,
         )?;
     }
-    send_registry_data(writer, config, profile)?;
+    send_registry_data(writer, context.state.registry_payloads(), profile)?;
 
     if let Some(packet_id) = profile.packets().id(PacketKind::UpdateTags) {
         let body = encode_tags(&[])?;
@@ -1508,20 +1573,19 @@ fn is_transient_read_timeout(error: &anyhow::Error) -> bool {
 
 fn send_registry_data<W: Write>(
     writer: &mut W,
-    config: &ServerConfig,
+    registry_payloads: &[Vec<u8>],
     profile: &ProtocolProfile,
 ) -> Result<()> {
-    if config.profile_name.as_deref() != Some(version_26_1_2::PROFILE_NAME) {
+    if registry_payloads.is_empty() {
         return Ok(());
     }
 
     let packet_id = profile.packets().require(PacketKind::RegistryData)?;
-    for registry in version_26_1_2::configuration_registries() {
-        let body = encode_registry_data(&registry)?;
+    for body in registry_payloads {
         write_packet(
             writer,
             &build_packet(packet_id, |output| {
-                output.extend_from_slice(&body);
+                output.extend_from_slice(body);
                 Ok(())
             })?,
         )?;
@@ -1641,6 +1705,24 @@ fn parse_handshake_packet(packet: &[u8], packets: &PacketTable) -> Result<Handsh
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn generated_registry_manifest_drives_configuration_payloads() {
+        let registries = vec![RomPackRegistry {
+            id: "minecraft:test_registry".to_owned(),
+            entries: vec!["minecraft:alpha".to_owned(), "minecraft:beta".to_owned()],
+        }];
+        let payloads = registry_payloads_from_pack(&registries).unwrap();
+        let expected = encode_registry_data(&RegistryData::new(
+            "minecraft:test_registry",
+            vec![
+                RegistryEntry::new("minecraft:alpha", None),
+                RegistryEntry::new("minecraft:beta", None),
+            ],
+        ))
+        .unwrap();
+        assert_eq!(payloads, vec![expected]);
+    }
 
     #[test]
     fn parses_expected_config_argument() {

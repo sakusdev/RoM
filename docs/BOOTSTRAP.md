@@ -26,7 +26,7 @@ The implementation supports `official_source_verified` and `version_pack_generat
 9. Compare the resulting 28 registries and 382 identifiers with the built-in 26.1.2 manifest.
 10. Add the world data version, overworld section range, required flat-world block-state IDs, and plains biome ID.
 11. Write a deterministic schema-v3 `.rompack` with a container SHA-256 trailer and provenance metadata.
-12. Revalidate the pack before `rom-bootstrap run`; the native server then builds its `ProtocolProfile` and initial shared world from pack metadata.
+12. Revalidate the pack before `rom-bootstrap run`; the native server then builds its `ProtocolProfile`, Configuration registry payloads, and initial shared world from pack metadata.
 
 The extractor does **not** decompile, translate, execute, or bytecode-patch the official server JAR. The generated pack is local-only provenance and derived runtime metadata.
 
@@ -141,6 +141,6 @@ RoM currently defaults to a loopback bind and offline-mode development login. Th
 
 ## Planned next stages
 
-1. Move remaining dimension registry payloads and gameplay constants into generated packs.
+1. Move remaining gameplay constants into generated packs.
 2. Add more independently testable extractors only when the server consumes their output.
 3. Preserve bounded decoding, deterministic ordering, source hashes, and local-only artifact boundaries for every new section.
