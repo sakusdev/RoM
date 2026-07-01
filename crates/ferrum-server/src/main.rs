@@ -142,14 +142,6 @@ struct ServerState {
 }
 
 impl ServerState {
-    fn new(initial_online_players: i32) -> Self {
-        Self::with_world(
-            initial_online_players,
-            play_runtime::builtin_world_profile(),
-        )
-        .expect("built-in world profile must initialize")
-    }
-
     fn with_world(initial_online_players: i32, world: RomPackWorld) -> Result<Self> {
         Ok(Self {
             online_players: AtomicI32::new(initial_online_players),

@@ -135,6 +135,7 @@ impl SharedWorld {
         })
     }
 
+    #[cfg(test)]
     pub(super) fn static_flat() -> Self {
         Self::new(
             ChunkPos {
