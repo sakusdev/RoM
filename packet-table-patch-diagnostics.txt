@@ -1,8 +1,0 @@
-Traceback (most recent call last):
-  File "/home/runner/work/RoM/RoM/tools/apply_rompack_packet_table.py", line 214, in <module>
-    replace_once(
-  File "/home/runner/work/RoM/RoM/tools/apply_rompack_packet_table.py", line 9, in replace_once
-    raise RuntimeError(f"{path}: expected one match, found {count}: {old[:180]!r}")
-RuntimeError: crates/rom-bootstrap/src/extract.rs: expected one match, found 2: '    pub registry_count: usize,\n'
-
-status=1

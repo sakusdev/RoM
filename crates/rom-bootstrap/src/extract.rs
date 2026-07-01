@@ -4,8 +4,8 @@ use super::{
 };
 use anyhow::{Context, Result, bail};
 use ferrum_rompack::{
-    ROMPACK_SCHEMA_VERSION, RomPack, RomPackMetadata, RomPackRegistry, RomPackResource,
-    RomPackSource, RomPackSummary, read_rompack, sha256_hex, write_rompack,
+    ROMPACK_SCHEMA_VERSION, RomPack, RomPackMetadata, RomPackPacket, RomPackRegistry,
+    RomPackResource, RomPackSource, RomPackSummary, read_rompack, sha256_hex, write_rompack,
 };
 use ferrum_version_26_1_2 as version_26_1_2;
 use serde::{Deserialize, Serialize};
@@ -75,6 +75,7 @@ pub struct GenerateReport {
     pub version_pack_size: u64,
     pub game_jar_path: String,
     pub game_jar_sha256: String,
+    pub packet_count: usize,
     pub registry_count: usize,
     pub registry_entry_count: usize,
     pub resource_count: usize,
@@ -86,6 +87,8 @@ pub(super) struct PackRecord {
     pub local_path: String,
     pub sha256: String,
     pub size: u64,
+    #[serde(default)]
+    pub packet_count: usize,
     pub registry_count: usize,
     pub registry_entry_count: usize,
     pub resource_count: usize,
@@ -141,10 +144,12 @@ pub fn generate_version_pack(options: &GenerateOptions) -> Result<GenerateReport
 
     let game_jar = resolve_game_jar(&official_jar)?;
     let (registries, resources) = extract_registry_inventory(&game_jar.bytes)?;
+    let packets = builtin_packet_inventory()?;
     validate_against_builtin_profile(
         &manifest.minecraft_version,
         manifest.protocol,
         &manifest.source.sha1,
+        &packets,
         &registries,
     )?;
 
@@ -162,6 +167,7 @@ pub fn generate_version_pack(options: &GenerateOptions) -> Result<GenerateReport
                 game_jar_sha256: game_jar.sha256.clone(),
             },
         },
+        packets,
         registries,
         resources,
     };
@@ -170,6 +176,7 @@ pub fn generate_version_pack(options: &GenerateOptions) -> Result<GenerateReport
         local_path: relative_pack,
         sha256: summary.sha256.clone(),
         size: summary.size,
+        packet_count: summary.packet_count,
         registry_count: summary.registry_count,
         registry_entry_count: summary.registry_entry_count,
         resource_count: summary.resource_count,
@@ -194,6 +201,7 @@ pub fn generate_version_pack(options: &GenerateOptions) -> Result<GenerateReport
         version_pack_size: summary.size,
         game_jar_path: game_jar.path,
         game_jar_sha256: game_jar.sha256,
+        packet_count: summary.packet_count,
         registry_count: summary.registry_count,
         registry_entry_count: summary.registry_entry_count,
         resource_count: summary.resource_count,
@@ -228,6 +236,7 @@ pub(super) fn verify_version_pack_record(
     };
     let valid = summary.sha256.eq_ignore_ascii_case(&record.sha256)
         && summary.size == record.size
+        && summary.packet_count == record.packet_count
         && summary.registry_count == record.registry_count
         && summary.registry_entry_count == record.registry_entry_count
         && summary.resource_count == record.resource_count
@@ -242,6 +251,7 @@ pub(super) fn verify_version_pack_record(
             &pack.metadata.minecraft_version,
             pack.metadata.protocol,
             &pack.metadata.source.official_server_sha1,
+            &pack.packets,
             &pack.registries,
         )
         .is_ok();
@@ -266,6 +276,7 @@ fn report_from_existing(
         version_pack_size: summary.size,
         game_jar_path: pack.metadata.source.game_jar_path,
         game_jar_sha256: pack.metadata.source.game_jar_sha256,
+        packet_count: summary.packet_count,
         registry_count: summary.registry_count,
         registry_entry_count: summary.registry_entry_count,
         resource_count: summary.resource_count,
@@ -516,10 +527,21 @@ fn registry_resource(path: &str) -> Result<Option<(&'static str, String)>> {
     Ok(None)
 }
 
+fn builtin_packet_inventory() -> Result<Vec<RomPackPacket>> {
+    let profile = version_26_1_2::protocol_profile()
+        .context("cannot build the built-in 26.1.2 packet table")?;
+    Ok(profile
+        .packets()
+        .iter()
+        .map(|(kind, id)| RomPackPacket { kind, id })
+        .collect())
+}
+
 fn validate_against_builtin_profile(
     version: &str,
     protocol: i32,
     official_sha1: &str,
+    packets: &[RomPackPacket],
     registries: &[RomPackRegistry],
 ) -> Result<()> {
     if version != version_26_1_2::PROFILE_NAME {
@@ -530,6 +552,15 @@ fn validate_against_builtin_profile(
     }
     if !official_sha1.eq_ignore_ascii_case(version_26_1_2::OFFICIAL_SERVER_SHA1) {
         bail!("official server SHA-1 does not match the built-in 26.1.2 provenance record");
+    }
+
+    let expected_packets = builtin_packet_inventory()?;
+    if packets != expected_packets {
+        bail!(
+            "generated packet table does not match the built-in 26.1.2 profile: expected {} records, got {}",
+            expected_packets.len(),
+            packets.len()
+        );
     }
 
     let expected: BTreeMap<_, _> = version_26_1_2::SYNCHRONIZED_REGISTRIES

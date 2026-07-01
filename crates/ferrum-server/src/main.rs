@@ -21,7 +21,7 @@ use ferrum_play::{
     encode_system_chat,
 };
 use ferrum_protocol::{HandshakeIntent, PacketKind, PacketTable, ProtocolProfile, ProtocolSession};
-use ferrum_rompack::{RomPack, read_rompack};
+use ferrum_rompack::{RomPack, RomPackPacket, read_rompack};
 use ferrum_runtime::ConnectionId;
 use ferrum_version_26_1_2 as version_26_1_2;
 use ferrum_world::ChunkPos;
@@ -96,6 +96,7 @@ struct ServerConfig {
     server_icon: Option<String>,
     sample_players: Vec<SamplePlayer>,
     packets: PacketIds,
+    runtime_profile: Option<ProtocolProfile>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -214,14 +215,16 @@ fn run(cli: Cli) -> Result<()> {
         .config
         .canonicalize()
         .with_context(|| format!("cannot resolve {}", cli.config.display()))?;
-    let config = ServerConfig::from_file(&config_path)
+    let mut config = ServerConfig::from_file(&config_path)
         .with_context(|| format!("cannot load {}", config_path.display()))?;
-    config
-        .protocol_profile()
-        .context("cannot build configured protocol profile")?;
-    if let Some(version_pack) = &cli.version_pack {
-        validate_version_pack(version_pack)?;
-    }
+    let runtime_profile = if let Some(version_pack) = &cli.version_pack {
+        load_version_pack_profile(version_pack, &config)?
+    } else {
+        config
+            .protocol_profile()
+            .context("cannot build configured protocol profile")?
+    };
+    config.runtime_profile = Some(runtime_profile);
     let state = Arc::new(ServerState::new(config.online_players));
     let listener = TcpListener::bind(&config.bind)
         .with_context(|| format!("cannot bind Minecraft status listener on {}", config.bind))?;
@@ -249,7 +252,7 @@ fn run(cli: Cli) -> Result<()> {
     Ok(())
 }
 
-fn validate_version_pack(path: &Path) -> Result<()> {
+fn load_version_pack_profile(path: &Path, config: &ServerConfig) -> Result<ProtocolProfile> {
     if !path.is_file() {
         bail!(
             "version pack {} does not exist or is not a file",
@@ -262,14 +265,46 @@ fn validate_version_pack(path: &Path) -> Result<()> {
     let (pack, summary) =
         read_rompack(&canonical).with_context(|| format!("cannot load {}", canonical.display()))?;
     validate_builtin_26_1_2_pack(&pack)?;
+    if config.profile_name.as_deref() != Some(version_26_1_2::PROFILE_NAME)
+        || config.protocol != pack.metadata.protocol
+        || config.version_name != version_26_1_2::VERSION_NAME
+    {
+        bail!("server configuration does not match the generated 26.1.2 version pack");
+    }
+    let profile =
+        protocol_profile_from_packets(&config.version_name, pack.metadata.protocol, &pack.packets)?;
     println!(
-        "loaded RoM version pack {} (SHA-256 {}, {} registries / {} entries)",
+        "loaded RoM version pack {} (SHA-256 {}, {} packets, {} registries / {} entries)",
         canonical.display(),
         summary.sha256,
+        summary.packet_count,
         summary.registry_count,
         summary.registry_entry_count
     );
-    Ok(())
+    Ok(profile)
+}
+
+fn protocol_profile_from_packets(
+    version_name: &str,
+    protocol: i32,
+    packets: &[RomPackPacket],
+) -> Result<ProtocolProfile> {
+    let expected: BTreeSet<_> = PacketKind::ALL.iter().copied().collect();
+    let actual: BTreeSet<_> = packets.iter().map(|packet| packet.kind).collect();
+    if actual != expected || packets.len() != expected.len() {
+        bail!(
+            "version pack packet kinds do not match the runtime: expected {}, got {}",
+            expected.len(),
+            packets.len()
+        );
+    }
+
+    let mut table = PacketTable::new();
+    for packet in packets {
+        table.insert(packet.kind, packet.id)?;
+    }
+    ProtocolProfile::new(version_name, protocol, table)
+        .context("cannot build protocol profile from the generated version pack")
 }
 
 fn validate_builtin_26_1_2_pack(pack: &RomPack) -> Result<()> {
@@ -285,6 +320,9 @@ fn validate_builtin_26_1_2_pack(pack: &RomPack) -> Result<()> {
         .eq_ignore_ascii_case(version_26_1_2::OFFICIAL_SERVER_SHA1)
     {
         bail!("version pack official-source SHA-1 does not match the built-in profile");
+    }
+    if pack.metadata.patch_set != "builtin:26.1.2" {
+        bail!("version pack patch-set identity does not match the built-in profile");
     }
 
     let expected: BTreeMap<_, _> = version_26_1_2::SYNCHRONIZED_REGISTRIES
@@ -333,6 +371,7 @@ impl Default for ServerConfig {
             server_icon: None,
             sample_players: Vec::new(),
             packets: PacketIds::default(),
+            runtime_profile: None,
         }
     }
 }
@@ -630,6 +669,9 @@ impl ServerConfig {
     }
 
     fn protocol_profile(&self) -> Result<ProtocolProfile> {
+        if let Some(profile) = &self.runtime_profile {
+            return Ok(profile.clone());
+        }
         if self.profile_name.as_deref() == Some(version_26_1_2::PROFILE_NAME) {
             return version_26_1_2::protocol_profile().context("invalid 26.1.2 protocol profile");
         }
@@ -2020,6 +2062,31 @@ mod tests {
 
         let finish = read_packet(&mut cursor).unwrap();
         assert_eq!(PacketReader::new(&finish).read_varint().unwrap(), 5);
+    }
+
+    #[test]
+    fn generated_packet_ids_drive_the_runtime_profile() {
+        let built_in = version_26_1_2::protocol_profile().unwrap();
+        let mut packets: Vec<_> = built_in
+            .packets()
+            .iter()
+            .map(|(kind, id)| RomPackPacket { kind, id })
+            .collect();
+        packets
+            .iter_mut()
+            .find(|packet| packet.kind == PacketKind::SystemChat)
+            .unwrap()
+            .id = 0x7a;
+        let profile = protocol_profile_from_packets(
+            version_26_1_2::VERSION_NAME,
+            version_26_1_2::PROTOCOL_VERSION,
+            &packets,
+        )
+        .unwrap();
+        assert_eq!(
+            profile.packets().require(PacketKind::SystemChat).unwrap(),
+            0x7a
+        );
     }
 
     #[test]

@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, bail};
+use ferrum_protocol::{PacketKind, PacketTable};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -7,7 +8,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub const ROMPACK_SCHEMA_VERSION: u32 = 1;
+pub const ROMPACK_SCHEMA_VERSION: u32 = 2;
 const ROMPACK_MAGIC: &[u8; 8] = b"ROMPACK\0";
 const HEADER_BYTES: usize = ROMPACK_MAGIC.len() + 4 + 8;
 const TRAILER_BYTES: usize = 32;
@@ -16,6 +17,7 @@ const TRAILER_BYTES: usize = 32;
 pub struct RomPackLimits {
     pub max_file_bytes: u64,
     pub max_json_bytes: u64,
+    pub max_packets: usize,
     pub max_registries: usize,
     pub max_entries_per_registry: usize,
     pub max_resources: usize,
@@ -29,6 +31,7 @@ impl Default for RomPackLimits {
         Self {
             max_file_bytes: 64 * 1024 * 1024,
             max_json_bytes: 32 * 1024 * 1024,
+            max_packets: 4_096,
             max_registries: 1_024,
             max_entries_per_registry: 1_000_000,
             max_resources: 1_000_000,
@@ -42,6 +45,7 @@ impl Default for RomPackLimits {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RomPack {
     pub metadata: RomPackMetadata,
+    pub packets: Vec<RomPackPacket>,
     pub registries: Vec<RomPackRegistry>,
     pub resources: Vec<RomPackResource>,
 }
@@ -64,6 +68,12 @@ pub struct RomPackSource {
     pub game_jar_sha256: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RomPackPacket {
+    pub kind: PacketKind,
+    pub id: i32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RomPackRegistry {
     pub id: String,
@@ -82,6 +92,7 @@ pub struct RomPackSummary {
     pub path: PathBuf,
     pub sha256: String,
     pub size: u64,
+    pub packet_count: usize,
     pub registry_count: usize,
     pub registry_entry_count: usize,
     pub resource_count: usize,
@@ -252,6 +263,24 @@ pub fn validate_rompack(pack: &RomPack, limits: RomPackLimits) -> Result<()> {
     )?;
     validate_hex("game JAR SHA-256", &metadata.source.game_jar_sha256, 64)?;
 
+    if pack.packets.is_empty() {
+        bail!("version pack does not contain a packet table");
+    }
+    if pack.packets.len() > limits.max_packets {
+        bail!("version pack contains too many packet records");
+    }
+    let mut previous_packet = None;
+    let mut packet_table = PacketTable::new();
+    for packet in &pack.packets {
+        if previous_packet.is_some_and(|previous| previous >= packet.kind) {
+            bail!("version-pack packets must be strictly sorted and unique");
+        }
+        previous_packet = Some(packet.kind);
+        packet_table
+            .insert(packet.kind, packet.id)
+            .with_context(|| format!("invalid packet record {:?}", packet.kind))?;
+    }
+
     if pack.registries.len() > limits.max_registries {
         bail!("version pack contains too many registries");
     }
@@ -304,6 +333,7 @@ fn summary(path: PathBuf, bytes: &[u8], pack: &RomPack) -> RomPackSummary {
         path,
         sha256: sha256_hex(bytes),
         size: bytes.len() as u64,
+        packet_count: pack.packets.len(),
         registry_count: pack.registries.len(),
         registry_entry_count: pack
             .registries
@@ -395,6 +425,20 @@ mod tests {
                     game_jar_sha256: "22".repeat(32),
                 },
             },
+            packets: vec![
+                RomPackPacket {
+                    kind: PacketKind::Handshake,
+                    id: 0,
+                },
+                RomPackPacket {
+                    kind: PacketKind::StatusRequest,
+                    id: 0,
+                },
+                RomPackPacket {
+                    kind: PacketKind::StatusResponse,
+                    id: 0,
+                },
+            ],
             registries: vec![RomPackRegistry {
                 id: "minecraft:worldgen/biome".to_owned(),
                 entries: vec!["minecraft:forest".to_owned(), "minecraft:plains".to_owned()],
@@ -428,6 +472,7 @@ mod tests {
         let (decoded, read) = read_rompack(&path).unwrap();
         assert_eq!(decoded, pack);
         assert_eq!(written.sha256, read.sha256);
+        assert_eq!(written.packet_count, 3);
         assert_eq!(written.registry_count, 1);
         assert_eq!(written.registry_entry_count, 2);
         assert_eq!(written.resource_count, 1);
@@ -443,6 +488,23 @@ mod tests {
 
     #[test]
     fn rejects_unsorted_or_unsafe_records() {
+        let mut pack = sample_pack();
+        pack.packets.reverse();
+        assert!(validate_rompack(&pack, RomPackLimits::default()).is_err());
+
+        let mut pack = sample_pack();
+        pack.packets = vec![
+            RomPackPacket {
+                kind: PacketKind::StatusRequest,
+                id: 0,
+            },
+            RomPackPacket {
+                kind: PacketKind::PingRequest,
+                id: 0,
+            },
+        ];
+        assert!(validate_rompack(&pack, RomPackLimits::default()).is_err());
+
         let mut pack = sample_pack();
         pack.registries[0].entries.reverse();
         assert!(validate_rompack(&pack, RomPackLimits::default()).is_err());
