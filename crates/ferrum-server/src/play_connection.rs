@@ -42,7 +42,8 @@ impl PlayReaderEndpoint {
         kind: PacketKind,
         payload: &[u8],
     ) -> Result<PlayPacketSubmission, PlayPacketSubmitError> {
-        let Some(input) = decode_play_input(kind, payload).map_err(PlayPacketSubmitError::Decode)?
+        let Some(input) =
+            decode_play_input(kind, payload).map_err(PlayPacketSubmitError::Decode)?
         else {
             return Ok(PlayPacketSubmission::Unsupported);
         };
@@ -121,7 +122,8 @@ mod tests {
     fn submits_decoded_packets_to_the_authoritative_input_queue() {
         let (connector, mut runtime) = worker_channel(non_zero(8));
         let connection = ConnectionId::new(17);
-        let (reader, writer) = register_play_connection(&connector, connection, non_zero(4)).unwrap();
+        let (reader, writer) =
+            register_play_connection(&connector, connection, non_zero(4)).unwrap();
         assert_eq!(reader.connection_id(), connection);
         assert_eq!(writer.connection_id(), connection);
 
@@ -155,7 +157,10 @@ mod tests {
                 .unwrap(),
             PlayPacketSubmission::Unsupported
         );
-        assert_eq!(runtime.ingest_available(&mut inputs, 1).unwrap().commands, 0);
+        assert_eq!(
+            runtime.ingest_available(&mut inputs, 1).unwrap().commands,
+            0
+        );
         assert!(inputs.is_empty());
     }
 
@@ -187,7 +192,8 @@ mod tests {
     fn disconnect_command_removes_the_worker_registration() {
         let (connector, mut runtime) = worker_channel(non_zero(4));
         let connection = ConnectionId::new(8);
-        let (reader, _writer) = register_play_connection(&connector, connection, non_zero(2)).unwrap();
+        let (reader, _writer) =
+            register_play_connection(&connector, connection, non_zero(2)).unwrap();
         let mut inputs = BoundedInputQueue::try_new(4).unwrap();
         runtime.ingest_available(&mut inputs, 1).unwrap();
         assert!(runtime.contains_connection(connection));
