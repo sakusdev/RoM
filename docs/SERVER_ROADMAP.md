@@ -42,6 +42,9 @@ The current server milestone provides:
 - Version-neutral 20 TPS tick scheduling with capped catch-up
 - Globally bounded, per-connection sequenced input queues
 - Deterministic fair per-tick input draining and mutation budgets
+- A generic bounded worker-command hub for future network reader workers
+- Independently bounded, non-blocking output queues for each connection writer
+- Explicit registration, replacement, disconnect cleanup, overload reporting, and slow-output isolation
 - Welcome system chat and graceful Play disconnects
 - Live online-player count in server-list status responses
 - Version-neutral in-memory world coordinates, sections, block states, biome IDs, and chunk views
@@ -185,14 +188,17 @@ Completed:
 - Enforce a configurable maximum number of mutations per tick.
 - Remove queued input and reset sequence state when a connection is removed.
 - Add a generic deterministic state runner for applying envelopes at an authoritative tick.
-- Cover timing, overload, fairness, queue limits, disconnect cleanup, and mutation order with tests.
+- Add a generic socket-independent worker hub that ingests registered connection inputs into the deterministic queue.
+- Add independently bounded non-blocking output queues so one full or disconnected writer cannot block another connection.
+- Remove pending authoritative input and output registration when a connection disconnects or is replaced.
+- Cover timing, overload, fairness, queue limits, disconnect cleanup, mutation order, and slow-output isolation with tests.
 
 Remaining integration work:
 
-- Move packet readers into independent network workers that publish bounded input envelopes.
+- Wire live packet readers into the bounded worker connector and classify decoded Play inputs.
 - Run one shared 20 TPS world loop instead of per-connection timing.
-- Route resulting chunk, movement, Keep Alive, and disconnect output back to connection writers.
-- Ensure a slow reader or writer cannot block unrelated players.
+- Route resulting chunk, movement, Keep Alive, and disconnect output through dedicated connection writers.
+- Apply explicit overload and slow-client disconnect policy at the live socket boundary.
 - Add integration tests for deterministic ordering across multiple simulated connections.
 
 ## M15 — Persistent world foundation

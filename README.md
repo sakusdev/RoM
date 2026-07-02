@@ -59,11 +59,12 @@ The native server currently supports:
 - Block Update and Block Changed Ack responses
 - Bounded per-connection peer update queues with same-position coalescing
 - Peer block-update draining after inbound Play packets and transient read timeouts
-- Deterministic 3×3 chunk views
+- Bounded configurable chunk views
 - Dynamic chunk loading and unloading
 - Live online-player count in status responses
-- System chat and Keep Alive validation
+- Configurable system chat and Keep Alive validation
 - Version-neutral 20 TPS scheduling and bounded deterministic input primitives
+- Generic bounded worker command channels and independently bounded non-blocking connection outputs
 
 The implemented connection flow is:
 
@@ -81,7 +82,7 @@ Handshake
 → Initial Chunk Batch
 → Player Position
 → Teleport Acknowledgement
-→ 3×3 Chunk View
+→ Configured Bounded Chunk View
 → Player Movement
 → Dynamic Chunk Load / Unload
 → Block Break / Simplified Placement
@@ -97,7 +98,7 @@ Not implemented yet:
 
 - Microsoft account authentication and encrypted online mode
 - Full collision, full movement-speed, and full reach enforcement
-- Dedicated network-worker to authoritative-world-runtime queues
+- Live TCP wiring into the bounded worker hub and authoritative 20 TPS owner
 - Full item, inventory, replaceability, reach, collision, and game-mode validation
 - Dedicated outbound writer workers
 - Entities and entity tracking
@@ -106,7 +107,6 @@ Not implemented yet:
 - World persistence and Anvil region saving
 - Multi-version gameplay compatibility
 - Fabric, Bukkit, Spigot, or Paper plugin compatibility
-- Runtime replacement of remaining server-policy and gameplay constants with explicit runtime configuration
 
 > [!CAUTION]
 > The default configuration binds to loopback and uses development-only offline login. Do not expose that configuration to the public internet. It does not prove that a connecting user owns Minecraft.
@@ -251,7 +251,7 @@ Core crates:
 - `rom-bootstrap` — official-source verification, bounded local extraction, and instance management
 - `ferrum-rompack` — deterministic packet/profile metadata encoding, integrity validation, and bounded decoding
 - `ferrum-server` — native TCP server and connection runtime
-- `ferrum-runtime` — fixed-rate ticks, bounded inputs, and deterministic mutation ordering
+- `ferrum-runtime` — fixed-rate ticks, bounded inputs, deterministic mutation ordering, and bounded worker channels
 - `ferrum-protocol` — packet tables, phases, and connection-state validation
 - `ferrum-configuration` — Configuration-state payload codecs
 - `ferrum-play` — bounded Play-state wire codecs and movement decoding
@@ -277,7 +277,7 @@ Design rules:
 
 The next server and bootstrap milestones are:
 
-1. Wire dedicated network workers into the authoritative 20 TPS runtime
+1. Wire the bounded worker hub into live TCP and the authoritative 20 TPS runtime
 2. Add full block interaction and inventory validation
 3. Add entities and entity tracking
 4. Add persistent Anvil region loading and saving
