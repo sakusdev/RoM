@@ -8,9 +8,9 @@
 mod worker;
 
 pub use worker::{
-    ConnectionWorker, WorkerBroadcastReport, WorkerConnector, WorkerControlError,
-    WorkerIngressReport, WorkerInputError, WorkerOutputError, WorkerReceiveError, WorkerRuntime,
-    worker_channel,
+    ConnectionInput, ConnectionOutput, ConnectionWorker, WorkerBroadcastReport, WorkerConnector,
+    WorkerControlError, WorkerIngressReport, WorkerInputError, WorkerOutputError,
+    WorkerReceiveError, WorkerRuntime, worker_channel,
 };
 
 use std::{
