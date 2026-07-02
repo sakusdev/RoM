@@ -1,0 +1,31 @@
+name: Apply live runtime formatting
+
+on:
+  pull_request:
+    branches: [master]
+    types: [synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: github.actor != 'github-actions[bot]' && github.head_ref == 'feature/live-authoritative-runtime'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/live-authoritative-runtime
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all
+      - run: rm .github/workflows/apply-live-runtime-format.yml
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Format authoritative Play runtime"
+          git push origin HEAD:feature/live-authoritative-runtime
