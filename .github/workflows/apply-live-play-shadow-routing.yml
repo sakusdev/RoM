@@ -1,0 +1,34 @@
+name: Apply live Play shadow routing
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]' && github.head_ref == 'feature/live-play-shadow-routing'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/live-play-shadow-routing
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Apply and validate routing
+        run: |
+          python3 tools/apply_live_play_shadow_routing.py
+          rm tools/apply_live_play_shadow_routing.py
+          cargo fmt --all
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: Route live Play inputs to shared runtime
+          branch: feature/live-play-shadow-routing
+          file_pattern: crates/ferrum-server/src/main.rs crates/ferrum-server/src/play_runtime.rs tools/apply_live_play_shadow_routing.py
