@@ -1,156 +1,156 @@
 [1m[92m    Updating[0m crates.io index
 [1m[92m Downloading[0m crates ...
-[1m[92m  Downloaded[0m anstyle v1.0.14
-[1m[92m  Downloaded[0m errno v0.3.14
+[1m[92m  Downloaded[0m generic-array v0.14.7
+[1m[92m  Downloaded[0m fastrand v2.4.1
+[1m[92m  Downloaded[0m icu_properties_data v2.2.0
+[1m[92m  Downloaded[0m http v1.4.2
+[1m[92m  Downloaded[0m tinyvec v1.11.0
+[1m[92m  Downloaded[0m thiserror v2.0.18
 [1m[92m  Downloaded[0m sha1 v0.10.6
-[1m[92m  Downloaded[0m shlex v2.0.1
-[1m[92m  Downloaded[0m crc32fast v1.5.0
-[1m[92m  Downloaded[0m try-lock v0.2.5
-[1m[92m  Downloaded[0m tower-layer v0.3.3
-[1m[92m  Downloaded[0m thiserror-impl v2.0.18
+[1m[92m  Downloaded[0m socket2 v0.6.4
+[1m[92m  Downloaded[0m sha2 v0.10.9
+[1m[92m  Downloaded[0m memchr v2.8.2
+[1m[92m  Downloaded[0m zmij v1.0.21
+[1m[92m  Downloaded[0m untrusted v0.9.0
+[1m[92m  Downloaded[0m utf8parse v0.2.2
+[1m[92m  Downloaded[0m zerovec-derive v0.11.3
+[1m[92m  Downloaded[0m webpki-roots v1.0.8
+[1m[92m  Downloaded[0m zerovec v0.11.6
 [1m[92m  Downloaded[0m writeable v0.6.3
+[1m[92m  Downloaded[0m try-lock v0.2.5
 [1m[92m  Downloaded[0m zerofrom-derive v0.1.7
+[1m[92m  Downloaded[0m icu_properties v2.2.0
 [1m[92m  Downloaded[0m zerofrom v0.1.8
 [1m[92m  Downloaded[0m version_check v0.9.5
-[1m[92m  Downloaded[0m utf8parse v0.2.2
-[1m[92m  Downloaded[0m utf8_iter v1.0.4
-[1m[92m  Downloaded[0m zmij v1.0.21
-[1m[92m  Downloaded[0m zerovec-derive v0.11.3
-[1m[92m  Downloaded[0m zerotrie v0.2.4
-[1m[92m  Downloaded[0m yoke v0.8.3
-[1m[92m  Downloaded[0m lru-slab v0.1.2
-[1m[92m  Downloaded[0m unicode-ident v1.0.24
-[1m[92m  Downloaded[0m percent-encoding v2.3.2
-[1m[92m  Downloaded[0m tinyvec v1.11.0
-[1m[92m  Downloaded[0m rand_core v0.9.5
+[1m[92m  Downloaded[0m once_cell v1.21.4
 [1m[92m  Downloaded[0m zopfli v0.8.3
-[1m[92m  Downloaded[0m typenum v1.20.1
-[1m[92m  Downloaded[0m url v2.5.8
-[1m[92m  Downloaded[0m zerovec v0.11.6
+[1m[92m  Downloaded[0m tracing-core v0.1.36
 [1m[92m  Downloaded[0m zip v8.6.0
-[1m[92m  Downloaded[0m serde_derive v1.0.228
-[1m[92m  Downloaded[0m getrandom v0.3.4
-[1m[92m  Downloaded[0m webpki-roots v1.0.8
-[1m[92m  Downloaded[0m serde v1.0.228
+[1m[92m  Downloaded[0m zerotrie v0.2.4
 [1m[92m  Downloaded[0m zlib-rs v0.6.4
+[1m[92m  Downloaded[0m typed-path v0.12.3
+[1m[92m  Downloaded[0m log v0.4.33
+[1m[92m  Downloaded[0m serde v1.0.228
 [1m[92m  Downloaded[0m zerocopy v0.8.52
-[1m[92m  Downloaded[0m indexmap v2.14.0
+[1m[92m  Downloaded[0m hyper-util v0.1.20
+[1m[92m  Downloaded[0m rand v0.9.4
+[1m[92m  Downloaded[0m tracing v0.1.44
 [1m[92m  Downloaded[0m serde_json v1.0.150
-[1m[92m  Downloaded[0m syn v2.0.118
-[1m[92m  Downloaded[0m reqwest v0.12.28
-[1m[92m  Downloaded[0m hyper v1.10.1
-[1m[92m  Downloaded[0m icu_properties_data v2.2.0
-[1m[92m  Downloaded[0m futures-util v0.3.32
+[1m[92m  Downloaded[0m hashbrown v0.17.1
 [1m[92m  Downloaded[0m ristretto_classfile v0.31.0
 [1m[92m  Downloaded[0m quinn-proto v0.11.15
-[1m[92m  Downloaded[0m hashbrown v0.17.1
-[1m[92m  Downloaded[0m idna v1.1.0
-[1m[92m  Downloaded[0m rustls v0.23.41
-[1m[92m  Downloaded[0m tracing v0.1.44
-[1m[92m  Downloaded[0m http v1.4.2
-[1m[92m  Downloaded[0m bumpalo v3.20.3
-[1m[92m  Downloaded[0m rand v0.9.4
-[1m[92m  Downloaded[0m mio v1.2.1
-[1m[92m  Downloaded[0m rustix v1.1.4
-[1m[92m  Downloaded[0m icu_collections v2.2.0
-[1m[92m  Downloaded[0m hyper-util v0.1.20
-[1m[92m  Downloaded[0m quinn v0.11.11
-[1m[92m  Downloaded[0m memchr v2.8.2
-[1m[92m  Downloaded[0m flate2 v1.1.9
-[1m[92m  Downloaded[0m rustls-webpki v0.103.13
-[1m[92m  Downloaded[0m icu_normalizer_data v2.2.0
-[1m[92m  Downloaded[0m icu_locale_core v2.2.0
-[1m[92m  Downloaded[0m icu_properties v2.2.0
-[1m[92m  Downloaded[0m icu_normalizer v2.2.0
-[1m[92m  Downloaded[0m clap_builder v4.6.0
-[1m[92m  Downloaded[0m base64 v0.22.1
-[1m[92m  Downloaded[0m bitflags v2.13.0
-[1m[92m  Downloaded[0m serde_core v1.0.228
-[1m[92m  Downloaded[0m ryu v1.0.23
-[1m[92m  Downloaded[0m proc-macro2 v1.0.106
-[1m[92m  Downloaded[0m icu_provider v2.2.0
-[1m[92m  Downloaded[0m getrandom v0.4.3
-[1m[92m  Downloaded[0m tokio v1.52.3
-[1m[92m  Downloaded[0m clap_derive v4.6.1
-[1m[92m  Downloaded[0m rustls-pki-types v1.15.0
-[1m[92m  Downloaded[0m libc v0.2.186
+[1m[92m  Downloaded[0m bytes v1.12.0
 [1m[92m  Downloaded[0m quinn-udp v0.5.14
-[1m[92m  Downloaded[0m once_cell v1.21.4
-[1m[92m  Downloaded[0m log v0.4.33
-[1m[92m  Downloaded[0m futures-channel v0.3.32
-[1m[92m  Downloaded[0m anyhow v1.0.103
-[1m[92m  Downloaded[0m httparse v1.10.1
-[1m[92m  Downloaded[0m getrandom v0.2.17
-[1m[92m  Downloaded[0m cc v1.2.65
-[1m[92m  Downloaded[0m typed-path v0.12.3
-[1m[92m  Downloaded[0m tower-http v0.6.11
+[1m[92m  Downloaded[0m rustls v0.23.41
 [1m[92m  Downloaded[0m tower v0.5.3
-[1m[92m  Downloaded[0m ppv-lite86 v0.2.21
-[1m[92m  Downloaded[0m rand_chacha v0.9.0
-[1m[92m  Downloaded[0m quote v1.0.46
-[1m[92m  Downloaded[0m litemap v0.8.2
+[1m[92m  Downloaded[0m rustls-pki-types v1.15.0
+[1m[92m  Downloaded[0m indexmap v2.14.0
+[1m[92m  Downloaded[0m icu_normalizer v2.2.0
+[1m[92m  Downloaded[0m base64 v0.22.1
+[1m[92m  Downloaded[0m typenum v1.20.1
+[1m[92m  Downloaded[0m mio v1.2.1
+[1m[92m  Downloaded[0m getrandom v0.3.4
+[1m[92m  Downloaded[0m serde_urlencoded v0.7.1
 [1m[92m  Downloaded[0m pin-project-lite v0.2.17
+[1m[92m  Downloaded[0m find-msvc-tools v0.1.9
+[1m[92m  Downloaded[0m tempfile v3.27.0
+[1m[92m  Downloaded[0m quote v1.0.46
+[1m[92m  Downloaded[0m simd-adler32 v0.3.9
+[1m[92m  Downloaded[0m potential_utf v0.1.5
+[1m[92m  Downloaded[0m litemap v0.8.2
+[1m[92m  Downloaded[0m itoa v1.0.18
+[1m[92m  Downloaded[0m httparse v1.10.1
+[1m[92m  Downloaded[0m http-body v1.0.1
+[1m[92m  Downloaded[0m tokio v1.52.3
+[1m[92m  Downloaded[0m getrandom v0.4.3
+[1m[92m  Downloaded[0m futures-sink v0.3.32
+[1m[92m  Downloaded[0m futures-io v0.3.32
+[1m[92m  Downloaded[0m icu_provider v2.2.0
+[1m[92m  Downloaded[0m libc v0.2.186
+[1m[92m  Downloaded[0m tinyvec_macros v0.1.1
+[1m[92m  Downloaded[0m stable_deref_trait v1.2.1
+[1m[92m  Downloaded[0m serde_derive v1.0.228
+[1m[92m  Downloaded[0m serde_core v1.0.228
+[1m[92m  Downloaded[0m rustc-hash v2.1.2
+[1m[92m  Downloaded[0m form_urlencoded v1.2.2
+[1m[92m  Downloaded[0m errno v0.3.14
+[1m[92m  Downloaded[0m cc v1.2.65
+[1m[92m  Downloaded[0m yoke v0.8.3
+[1m[92m  Downloaded[0m rand_chacha v0.9.0
+[1m[92m  Downloaded[0m ppv-lite86 v0.2.21
+[1m[92m  Downloaded[0m anstyle-parse v1.0.0
+[1m[92m  Downloaded[0m reqwest v0.12.28
+[1m[92m  Downloaded[0m lru-slab v0.1.2
+[1m[92m  Downloaded[0m futures-util v0.3.32
+[1m[92m  Downloaded[0m cfg-if v1.0.4
+[1m[92m  Downloaded[0m utf8_iter v1.0.4
+[1m[92m  Downloaded[0m tower-service v0.3.3
+[1m[92m  Downloaded[0m tower-layer v0.3.3
+[1m[92m  Downloaded[0m tower-http v0.6.11
+[1m[92m  Downloaded[0m tokio-rustls v0.26.4
+[1m[92m  Downloaded[0m quinn v0.11.11
+[1m[92m  Downloaded[0m ipnet v2.12.0
+[1m[92m  Downloaded[0m futures-core v0.3.32
+[1m[92m  Downloaded[0m equivalent v1.0.2
+[1m[92m  Downloaded[0m anstyle-query v1.1.5
+[1m[92m  Downloaded[0m unicode-ident v1.0.24
+[1m[92m  Downloaded[0m ryu v1.0.23
+[1m[92m  Downloaded[0m colorchoice v1.0.5
+[1m[92m  Downloaded[0m clap_lex v1.1.0
+[1m[92m  Downloaded[0m cfg_aliases v0.2.1
+[1m[92m  Downloaded[0m slab v0.4.12
+[1m[92m  Downloaded[0m rustls-webpki v0.103.13
+[1m[92m  Downloaded[0m yoke-derive v0.8.2
+[1m[92m  Downloaded[0m synstructure v0.13.2
+[1m[92m  Downloaded[0m sync_wrapper v1.0.2
+[1m[92m  Downloaded[0m icu_locale_core v2.2.0
+[1m[92m  Downloaded[0m url v2.5.8
+[1m[92m  Downloaded[0m ring v0.17.14
+[1m[92m  Downloaded[0m tinystr v0.8.3
+[1m[92m  Downloaded[0m proc-macro2 v1.0.106
+[1m[92m  Downloaded[0m idna v1.1.0
+[1m[92m  Downloaded[0m icu_normalizer_data v2.2.0
+[1m[92m  Downloaded[0m icu_collections v2.2.0
+[1m[92m  Downloaded[0m byteorder v1.5.0
+[1m[92m  Downloaded[0m percent-encoding v2.3.2
+[1m[92m  Downloaded[0m http-body-util v0.1.3
+[1m[92m  Downloaded[0m zeroize v1.9.0
+[1m[92m  Downloaded[0m want v0.3.1
+[1m[92m  Downloaded[0m thiserror-impl v2.0.18
+[1m[92m  Downloaded[0m syn v2.0.118
+[1m[92m  Downloaded[0m is_terminal_polyfill v1.70.2
+[1m[92m  Downloaded[0m hyper-rustls v0.27.9
+[1m[92m  Downloaded[0m heck v0.5.0
+[1m[92m  Downloaded[0m displaydoc v0.2.6
+[1m[92m  Downloaded[0m hyper v1.10.1
 [1m[92m  Downloaded[0m futures-task v0.3.32
 [1m[92m  Downloaded[0m foldhash v0.2.0
-[1m[92m  Downloaded[0m ipnet v2.12.0
-[1m[92m  Downloaded[0m http-body-util v0.1.3
-[1m[92m  Downloaded[0m displaydoc v0.2.6
-[1m[92m  Downloaded[0m socket2 v0.6.4
-[1m[92m  Downloaded[0m hyper-rustls v0.27.9
-[1m[92m  Downloaded[0m tracing-core v0.1.36
-[1m[92m  Downloaded[0m serde_urlencoded v0.7.1
-[1m[92m  Downloaded[0m potential_utf v0.1.5
-[1m[92m  Downloaded[0m http-body v1.0.1
-[1m[92m  Downloaded[0m block-buffer v0.10.4
-[1m[92m  Downloaded[0m anstyle-query v1.1.5
-[1m[92m  Downloaded[0m tinystr v0.8.3
-[1m[92m  Downloaded[0m rustc-hash v2.1.2
-[1m[92m  Downloaded[0m atomic-waker v1.1.2
-[1m[92m  Downloaded[0m zeroize v1.9.0
-[1m[92m  Downloaded[0m tokio-rustls v0.26.4
-[1m[92m  Downloaded[0m idna_adapter v1.2.2
-[1m[92m  Downloaded[0m ring v0.17.14
-[1m[92m  Downloaded[0m futures-sink v0.3.32
-[1m[92m  Downloaded[0m untrusted v0.9.0
-[1m[92m  Downloaded[0m sync_wrapper v1.0.2
-[1m[92m  Downloaded[0m strsim v0.11.1
-[1m[92m  Downloaded[0m itoa v1.0.18
-[1m[92m  Downloaded[0m heck v0.5.0
-[1m[92m  Downloaded[0m form_urlencoded v1.2.2
-[1m[92m  Downloaded[0m want v0.3.1
-[1m[92m  Downloaded[0m stable_deref_trait v1.2.1
-[1m[92m  Downloaded[0m is_terminal_polyfill v1.70.2
-[1m[92m  Downloaded[0m futures-core v0.3.32
-[1m[92m  Downloaded[0m yoke-derive v0.8.2
-[1m[92m  Downloaded[0m tinyvec_macros v0.1.1
-[1m[92m  Downloaded[0m subtle v2.6.1
-[1m[92m  Downloaded[0m generic-array v0.14.7
-[1m[92m  Downloaded[0m futures-io v0.3.32
-[1m[92m  Downloaded[0m cfg_aliases v0.2.1
-[1m[92m  Downloaded[0m tempfile v3.27.0
-[1m[92m  Downloaded[0m smallvec v1.15.2
-[1m[92m  Downloaded[0m thiserror v2.0.18
-[1m[92m  Downloaded[0m synstructure v0.13.2
-[1m[92m  Downloaded[0m fastrand v2.4.1
-[1m[92m  Downloaded[0m digest v0.10.7
-[1m[92m  Downloaded[0m bytes v1.12.0
-[1m[92m  Downloaded[0m slab v0.4.12
-[1m[92m  Downloaded[0m simd-adler32 v0.3.9
+[1m[92m  Downloaded[0m flate2 v1.1.9
 [1m[92m  Downloaded[0m crypto-common v0.1.7
+[1m[92m  Downloaded[0m clap_derive v4.6.1
 [1m[92m  Downloaded[0m clap v4.6.1
-[1m[92m  Downloaded[0m tower-service v0.3.3
-[1m[92m  Downloaded[0m sha2 v0.10.9
-[1m[92m  Downloaded[0m find-msvc-tools v0.1.9
-[1m[92m  Downloaded[0m byteorder v1.5.0
-[1m[92m  Downloaded[0m anstream v1.0.0
-[1m[92m  Downloaded[0m equivalent v1.0.2
-[1m[92m  Downloaded[0m colorchoice v1.0.5
-[1m[92m  Downloaded[0m cfg-if v1.0.4
-[1m[92m  Downloaded[0m anstyle-parse v1.0.0
+[1m[92m  Downloaded[0m rand_core v0.9.5
+[1m[92m  Downloaded[0m idna_adapter v1.2.2
+[1m[92m  Downloaded[0m digest v0.10.7
+[1m[92m  Downloaded[0m crc32fast v1.5.0
 [1m[92m  Downloaded[0m cpufeatures v0.2.17
-[1m[92m  Downloaded[0m clap_lex v1.1.0
-[1m[92m  Downloaded[0m allocator-api2 v0.2.21
+[1m[92m  Downloaded[0m bumpalo v3.20.3
+[1m[92m  Downloaded[0m block-buffer v0.10.4
 [1m[92m  Downloaded[0m ahash v0.8.12
+[1m[92m  Downloaded[0m getrandom v0.2.17
+[1m[92m  Downloaded[0m futures-channel v0.3.32
+[1m[92m  Downloaded[0m bitflags v2.13.0
+[1m[92m  Downloaded[0m allocator-api2 v0.2.21
+[1m[92m  Downloaded[0m smallvec v1.15.2
+[1m[92m  Downloaded[0m anyhow v1.0.103
+[1m[92m  Downloaded[0m anstyle v1.0.14
+[1m[92m  Downloaded[0m subtle v2.6.1
+[1m[92m  Downloaded[0m strsim v0.11.1
+[1m[92m  Downloaded[0m shlex v2.0.1
+[1m[92m  Downloaded[0m rustix v1.1.4
+[1m[92m  Downloaded[0m clap_builder v4.6.0
+[1m[92m  Downloaded[0m atomic-waker v1.1.2
+[1m[92m  Downloaded[0m anstream v1.0.0
 [1m[92m  Downloaded[0m linux-raw-sys v0.12.1
 [1m[92m   Compiling[0m proc-macro2 v1.0.106
 [1m[92m   Compiling[0m quote v1.0.46
@@ -158,8 +158,8 @@
 [1m[92m    Checking[0m cfg-if v1.0.4
 [1m[92m   Compiling[0m libc v0.2.186
 [1m[92m   Compiling[0m thiserror v2.0.18
-[1m[92m   Compiling[0m serde_core v1.0.228
 [1m[92m   Compiling[0m version_check v0.9.5
+[1m[92m   Compiling[0m serde_core v1.0.228
 [1m[92m   Compiling[0m serde v1.0.228
 [1m[92m   Compiling[0m syn v2.0.118
 [1m[92m    Checking[0m itoa v1.0.18
@@ -170,74 +170,74 @@
 [1m[92m    Checking[0m stable_deref_trait v1.2.1
 [1m[92m    Checking[0m bitflags v2.13.0
 [1m[92m   Compiling[0m generic-array v0.14.7
-[1m[92m    Checking[0m foldhash v0.2.0
 [1m[92m    Checking[0m allocator-api2 v0.2.21
-[1m[92m   Compiling[0m crc32fast v1.5.0
-[1m[92m    Checking[0m typenum v1.20.1
 [1m[92m    Checking[0m equivalent v1.0.2
+[1m[92m   Compiling[0m crc32fast v1.5.0
+[1m[92m    Checking[0m foldhash v0.2.0
+[1m[92m    Checking[0m typenum v1.20.1
 [1m[92m    Checking[0m hashbrown v0.17.1
 [1m[92m    Checking[0m bytes v1.12.0
 [1m[92m    Checking[0m pin-project-lite v0.2.17
 [1m[92m    Checking[0m log v0.4.33
 [1m[92m    Checking[0m indexmap v2.14.0
+[1m[92m   Compiling[0m shlex v2.0.1
 [1m[92m   Compiling[0m anyhow v1.0.103
-[1m[92m    Checking[0m utf8parse v0.2.2
+[1m[92m   Compiling[0m find-msvc-tools v0.1.9
 [1m[92m    Checking[0m futures-core v0.3.32
+[1m[92m    Checking[0m simd-adler32 v0.3.9
+[1m[92m    Checking[0m utf8parse v0.2.2
 [1m[92m    Checking[0m bumpalo v3.20.3
 [1m[92m    Checking[0m zlib-rs v0.6.4
-[1m[92m    Checking[0m simd-adler32 v0.3.9
-[1m[92m   Compiling[0m shlex v2.0.1
-[1m[92m   Compiling[0m find-msvc-tools v0.1.9
+[1m[92m    Checking[0m anstyle-parse v1.0.0
 [1m[92m    Checking[0m zopfli v0.8.3
 [1m[92m   Compiling[0m cc v1.2.65
-[1m[92m    Checking[0m anstyle-parse v1.0.0
+[1m[92m    Checking[0m block-buffer v0.10.4
 [1m[92m    Checking[0m crypto-common v0.1.7
+[1m[92m    Checking[0m is_terminal_polyfill v1.70.2
+[1m[92m    Checking[0m anstyle v1.0.14
 [1m[92m   Compiling[0m synstructure v0.13.2
 [1m[92m    Checking[0m flate2 v1.1.9
-[1m[92m    Checking[0m block-buffer v0.10.4
-[1m[92m    Checking[0m typed-path v0.12.3
-[1m[92m    Checking[0m anstyle-query v1.1.5
 [1m[92m    Checking[0m litemap v0.8.2
-[1m[92m    Checking[0m is_terminal_polyfill v1.70.2
-[1m[92m    Checking[0m colorchoice v1.0.5
-[1m[92m    Checking[0m anstyle v1.0.14
 [1m[92m    Checking[0m smallvec v1.15.2
 [1m[92m    Checking[0m writeable v0.6.3
-[1m[92m   Compiling[0m ring v0.17.14
+[1m[92m    Checking[0m anstyle-query v1.1.5
+[1m[92m    Checking[0m colorchoice v1.0.5
+[1m[92m    Checking[0m typed-path v0.12.3
 [1m[92m    Checking[0m anstream v1.0.0
+[1m[92m   Compiling[0m ring v0.17.14
 [1m[92m    Checking[0m digest v0.10.7
-[1m[92m    Checking[0m zip v8.6.0
 [1m[92m    Checking[0m socket2 v0.6.4
 [1m[92m    Checking[0m mio v1.2.1
-[1m[92m    Checking[0m cpufeatures v0.2.17
-[1m[92m   Compiling[0m heck v0.5.0
+[1m[92m   Compiling[0m getrandom v0.3.4
+[1m[92m   Compiling[0m icu_normalizer_data v2.2.0
+[1m[92m   Compiling[0m icu_properties_data v2.2.0
+[1m[92m    Checking[0m zip v8.6.0
+[1m[92m    Checking[0m strsim v0.11.1
 [1m[92m   Compiling[0m thiserror-impl v2.0.18
 [1m[92m   Compiling[0m serde_derive v1.0.228
 [1m[92m   Compiling[0m zerofrom-derive v0.1.7
 [1m[92m   Compiling[0m yoke-derive v0.8.2
+[1m[92m    Checking[0m zerofrom v0.1.8
 [1m[92m   Compiling[0m zerovec-derive v0.11.3
 [1m[92m   Compiling[0m displaydoc v0.2.6
-[1m[92m    Checking[0m zerofrom v0.1.8
 [1m[92m    Checking[0m yoke v0.8.3
 [1m[92m    Checking[0m ferrum-nbt v0.1.0 (/home/runner/work/RoM/RoM/crates/ferrum-nbt)
-[1m[92m   Compiling[0m icu_normalizer_data v2.2.0
-[1m[92m    Checking[0m utf8_iter v1.0.4
-[1m[92m    Checking[0m futures-sink v0.3.32
 [1m[92m    Checking[0m zerotrie v0.2.4
-[1m[92m   Compiling[0m icu_properties_data v2.2.0
-[1m[92m   Compiling[0m getrandom v0.3.4
+[1m[92m    Checking[0m futures-sink v0.3.32
+[1m[92m    Checking[0m utf8_iter v1.0.4
+[1m[92m   Compiling[0m heck v0.5.0
 [1m[92m   Compiling[0m zerocopy v0.8.52
 [1m[92m    Checking[0m clap_lex v1.1.0
-[1m[92m    Checking[0m strsim v0.11.1
 [1m[92m    Checking[0m zerovec v0.11.6
+[1m[92m    Checking[0m cpufeatures v0.2.17
 [1m[92m    Checking[0m clap_builder v4.6.0
 [1m[92m   Compiling[0m clap_derive v4.6.1
 [1m[92m    Checking[0m tinystr v0.8.3
 [1m[92m    Checking[0m icu_locale_core v2.2.0
 [1m[92m    Checking[0m potential_utf v0.1.5
 [1m[92m    Checking[0m icu_collections v2.2.0
-[1m[92m    Checking[0m icu_provider v2.2.0
 [1m[92m    Checking[0m ferrum-protocol v0.1.0 (/home/runner/work/RoM/RoM/crates/ferrum-protocol)
+[1m[92m    Checking[0m icu_provider v2.2.0
 [1m[92m    Checking[0m tokio v1.52.3
 [1m[92m    Checking[0m http v1.4.2
 [1m[92m   Compiling[0m ahash v0.8.12
@@ -246,56 +246,56 @@
 [1m[92m    Checking[0m rustls-pki-types v1.15.0
 [1m[92m    Checking[0m http-body v1.0.1
 [1m[92m    Checking[0m clap v4.6.1
-[1m[92m    Checking[0m ferrum-configuration v0.1.0 (/home/runner/work/RoM/RoM/crates/ferrum-configuration)
 [1m[92m    Checking[0m sha2 v0.10.9
+[1m[92m    Checking[0m ferrum-configuration v0.1.0 (/home/runner/work/RoM/RoM/crates/ferrum-configuration)
 [1m[92m    Checking[0m getrandom v0.2.17
 [1m[92m    Checking[0m futures-io v0.3.32
-[1m[92m    Checking[0m untrusted v0.9.0
-[1m[92m    Checking[0m slab v0.4.12
-[1m[92m    Checking[0m futures-task v0.3.32
 [1m[92m   Compiling[0m httparse v1.10.1
+[1m[92m    Checking[0m futures-task v0.3.32
+[1m[92m    Checking[0m slab v0.4.12
+[1m[92m    Checking[0m untrusted v0.9.0
 [1m[92m    Checking[0m futures-util v0.3.32
 [1m[92m    Checking[0m icu_properties v2.2.0
 [1m[92m    Checking[0m icu_normalizer v2.2.0
-[1m[92m    Checking[0m try-lock v0.2.5
 [1m[92m    Checking[0m tower-service v0.3.3
 [1m[92m    Checking[0m byteorder v1.5.0
 [1m[92m   Compiling[0m rustls v0.23.41
+[1m[92m    Checking[0m try-lock v0.2.5
 [1m[92m    Checking[0m idna_adapter v1.2.2
 [1m[92m    Checking[0m want v0.3.1
-[1m[92m    Checking[0m ferrum-rompack v0.1.0 (/home/runner/work/RoM/RoM/crates/ferrum-rompack)
-[1m[92m    Checking[0m ristretto_classfile v0.31.0
 [1m[92m    Checking[0m ferrum-version-26-1-2 v0.1.0 (/home/runner/work/RoM/RoM/crates/ferrum-version-26-1-2)
+[1m[92m    Checking[0m ristretto_classfile v0.31.0
+[1m[92m    Checking[0m ferrum-rompack v0.1.0 (/home/runner/work/RoM/RoM/crates/ferrum-rompack)
 [1m[92m    Checking[0m form_urlencoded v1.2.2
 [1m[92m    Checking[0m ferrum-model v0.1.0 (/home/runner/work/RoM/RoM/crates/ferrum-model)
-[1m[92m    Checking[0m futures-channel v0.3.32
 [1m[92m    Checking[0m rustls-webpki v0.103.13
+[1m[92m    Checking[0m futures-channel v0.3.32
 [1m[92m    Checking[0m tracing-core v0.1.36
-[1m[92m    Checking[0m subtle v2.6.1
 [1m[92m    Checking[0m atomic-waker v1.1.2
-[1m[92m    Checking[0m hyper v1.10.1
+[1m[92m    Checking[0m subtle v2.6.1
 [1m[92m    Checking[0m tracing v0.1.44
+[1m[92m    Checking[0m hyper v1.10.1
 [1m[92m    Checking[0m idna v1.1.0
 [1m[92m    Checking[0m sync_wrapper v1.0.2
-[1m[92m    Checking[0m ipnet v2.12.0
 [1m[92m    Checking[0m tower-layer v0.3.3
 [1m[92m    Checking[0m base64 v0.22.1
+[1m[92m    Checking[0m ipnet v2.12.0
 [1m[92m    Checking[0m hyper-util v0.1.20
 [1m[92m    Checking[0m tower v0.5.3
-[1m[92m    Checking[0m url v2.5.8
 [1m[92m    Checking[0m ferrum-importer v0.1.0 (/home/runner/work/RoM/RoM/crates/ferrum-importer)
+[1m[92m    Checking[0m url v2.5.8
 [1m[92m    Checking[0m webpki-roots v1.0.8
 [1m[92m    Checking[0m ferrum-world v0.1.0 (/home/runner/work/RoM/RoM/crates/ferrum-world)
-[1m[92m   Compiling[0m rustix v1.1.4
 [1m[92m    Checking[0m ryu v1.0.23
 [1m[92m   Compiling[0m getrandom v0.4.3
-[1m[92m    Checking[0m tokio-rustls v0.26.4
+[1m[92m   Compiling[0m rustix v1.1.4
 [1m[92m    Checking[0m serde_urlencoded v0.7.1
 [1m[92m    Checking[0m tower-http v0.6.11
+[1m[92m    Checking[0m tokio-rustls v0.26.4
 [1m[92m    Checking[0m http-body-util v0.1.3
 [1m[92m    Checking[0m ferrum-runtime v0.1.0 (/home/runner/work/RoM/RoM/crates/ferrum-runtime)
-[1m[92m    Checking[0m hyper-rustls v0.27.9
 [1m[92m    Checking[0m linux-raw-sys v0.12.1
+[1m[92m    Checking[0m hyper-rustls v0.27.9
 [1m[92m    Checking[0m reqwest v0.12.28
 [1m[92m    Checking[0m ferrum-play v0.1.0 (/home/runner/work/RoM/RoM/crates/ferrum-play)
 [1m[92m    Checking[0m sha1 v0.10.6
@@ -303,65 +303,33 @@
 [1m[92m    Checking[0m ferrum-server v0.1.0 (/home/runner/work/RoM/RoM/crates/ferrum-server)
 [1m[92m    Checking[0m rom-bootstrap v0.1.0 (/home/runner/work/RoM/RoM/crates/rom-bootstrap)
 [1m[91merror[0m[1m: function `run_static_play_session` is never used[0m
-    [1m[94m--> [0mcrates/ferrum-server/src/main.rs:1424:4
+    [1m[94m--> [0mcrates/ferrum-server/src/main.rs:1425:4
      [1m[94m|[0m
-[1m[94m1424[0m [1m[94m|[0m fn run_static_play_session<R: Read, W: Write>(
+[1m[94m1425[0m [1m[94m|[0m fn run_static_play_session<R: Read, W: Write>(
      [1m[94m|[0m    [1m[91m^^^^^^^^^^^^^^^^^^^^^^^[0m
      [1m[94m|[0m
      [1m[94m= [0m[1mnote[0m: `-D dead-code` implied by `-D warnings`
      [1m[94m= [0m[1mhelp[0m: to override `-D warnings` add `#[expect(dead_code)]` or `#[allow(dead_code)]`
 
-[1m[91merror[0m[1m: function `wait_for_play_bootstrap_acknowledgements` is never used[0m
-    [1m[94m--> [0mcrates/ferrum-server/src/main.rs:1603:4
-     [1m[94m|[0m
-[1m[94m1603[0m [1m[94m|[0m fn wait_for_play_bootstrap_acknowledgements<R: Read>(
-     [1m[94m|[0m    [1m[91m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
-
 [1m[91merror[0m[1m: function `run_keep_alive_loop` is never used[0m
-    [1m[94m--> [0mcrates/ferrum-server/src/main.rs:1673:4
+    [1m[94m--> [0mcrates/ferrum-server/src/main.rs:1680:4
      [1m[94m|[0m
-[1m[94m1673[0m [1m[94m|[0m fn run_keep_alive_loop<R: Read, W: Write>(
+[1m[94m1680[0m [1m[94m|[0m fn run_keep_alive_loop<R: Read, W: Write>(
      [1m[94m|[0m    [1m[91m^^^^^^^^^^^^^^^^^^^[0m
 
-[1m[91merror[0m[1m: function `run_play_loop` is never used[0m
-   [1m[94m--> [0mcrates/ferrum-server/src/play_runtime.rs:320:15
-    [1m[94m|[0m
-[1m[94m320[0m [1m[94m|[0m pub(super) fn run_play_loop<R: Read, W: Write>(
-    [1m[94m|[0m               [1m[91m^^^^^^^^^^^^^[0m
-
-[1m[91merror[0m[1m: this function has too many arguments (8/7)[0m
-   [1m[94m--> [0mcrates/ferrum-server/src/play_runtime.rs:341:1
-    [1m[94m|[0m
-[1m[94m341[0m [1m[94m|[0m [1m[91m/[0m pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
-[1m[94m342[0m [1m[94m|[0m [1m[91m|[0m     reader: &mut R,
-[1m[94m343[0m [1m[94m|[0m [1m[91m|[0m     writer: &mut W,
-[1m[94m344[0m [1m[94m|[0m [1m[91m|[0m     profile: &ProtocolProfile,
-[1m[94m...[0m   [1m[91m|[0m
-[1m[94m349[0m [1m[94m|[0m [1m[91m|[0m     play_round_limit: Option<usize>,
-[1m[94m350[0m [1m[94m|[0m [1m[91m|[0m ) -> Result<()> {
-    [1m[94m|[0m [1m[91m|_______________^[0m
-    [1m[94m|[0m
-    [1m[94m= [0m[1mhelp[0m: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.96.0/index.html#too_many_arguments
-    [1m[94m= [0m[1mnote[0m: `-D clippy::too-many-arguments` implied by `-D warnings`
-    [1m[94m= [0m[1mhelp[0m: to override `-D warnings` add `#[allow(clippy::too_many_arguments)]`
-
-[1m[91merror[0m[1m: this function has too many arguments (8/7)[0m
-    [1m[94m--> [0mcrates/ferrum-server/src/main.rs:1445:1
+[1m[91merror[0m[1m: this lint expectation is unfulfilled[0m
+    [1m[94m--> [0mcrates/ferrum-server/src/main.rs:1700:5
      [1m[94m|[0m
-[1m[94m1445[0m [1m[94m|[0m [1m[91m/[0m fn run_static_play_session_with_bridge<R: Read, W: Write>(
-[1m[94m1446[0m [1m[94m|[0m [1m[91m|[0m     reader: &mut R,
-[1m[94m1447[0m [1m[94m|[0m [1m[91m|[0m     writer: &mut W,
-[1m[94m1448[0m [1m[94m|[0m [1m[91m|[0m     config: &ServerConfig,
-[1m[94m...[0m    [1m[91m|[0m
-[1m[94m1453[0m [1m[94m|[0m [1m[91m|[0m     play_round_limit: Option<usize>,
-[1m[94m1454[0m [1m[94m|[0m [1m[91m|[0m ) -> Result<()> {
-     [1m[94m|[0m [1m[91m|_______________^[0m
+[1m[94m1700[0m [1m[94m|[0m     clippy::too_many_arguments,
+     [1m[94m|[0m     [1m[91m^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
      [1m[94m|[0m
-     [1m[94m= [0m[1mhelp[0m: for further information visit https://rust-lang.github.io/rust-clippy/rust-1.96.0/index.html#too_many_arguments
+     [1m[94m= [0m[1mnote[0m: transitional bridge preserves the finite legacy call boundary
+     [1m[94m= [0m[1mnote[0m: `-D unfulfilled-lint-expectations` implied by `-D warnings`
+     [1m[94m= [0m[1mhelp[0m: to override `-D warnings` add `#[allow(unfulfilled_lint_expectations)]`
 
-[1m[91merror[0m: could not compile `ferrum-server` (bin "ferrum-server") due to 6 previous errors
+[1m[91merror[0m: could not compile `ferrum-server` (bin "ferrum-server") due to 1 previous error
 [1m[33mwarning[0m: build failed, waiting for other jobs to finish...
-[1m[91merror[0m: could not compile `ferrum-server` (bin "ferrum-server" test) due to 4 previous errors
+[1m[91merror[0m: could not compile `ferrum-server` (bin "ferrum-server" test) due to 3 previous errors
 [1m[92m   Compiling[0m cfg-if v1.0.4
 [1m[92m   Compiling[0m libc v0.2.186
 [1m[92m   Compiling[0m serde_core v1.0.228
@@ -382,82 +350,82 @@
 [1m[92m   Compiling[0m allocator-api2 v0.2.21
 [1m[92m   Compiling[0m hashbrown v0.17.1
 [1m[92m   Compiling[0m log v0.4.33
+[1m[92m   Compiling[0m pin-project-lite v0.2.17
 [1m[92m   Compiling[0m generic-array v0.14.7
 [1m[92m   Compiling[0m bytes v1.12.0
-[1m[92m   Compiling[0m pin-project-lite v0.2.17
 [1m[92m   Compiling[0m indexmap v2.14.0
 [1m[92m   Compiling[0m crypto-common v0.1.7
 [1m[92m   Compiling[0m serde v1.0.228
 [1m[92m   Compiling[0m serde_json v1.0.150
 [1m[92m   Compiling[0m block-buffer v0.10.4
 [1m[92m   Compiling[0m crc32fast v1.5.0
-[1m[92m   Compiling[0m bumpalo v3.20.3
+[1m[92m   Compiling[0m simd-adler32 v0.3.9
 [1m[92m   Compiling[0m zlib-rs v0.6.4
 [1m[92m   Compiling[0m futures-core v0.3.32
 [1m[92m   Compiling[0m ferrum-protocol v0.1.0 (/home/runner/work/RoM/RoM/crates/ferrum-protocol)
-[1m[92m   Compiling[0m simd-adler32 v0.3.9
+[1m[92m   Compiling[0m bumpalo v3.20.3
 [1m[92m   Compiling[0m zopfli v0.8.3
 [1m[92m   Compiling[0m digest v0.10.7
 [1m[92m   Compiling[0m tinystr v0.8.3
-[1m[92m   Compiling[0m writeable v0.6.3
-[1m[92m   Compiling[0m utf8parse v0.2.2
-[1m[92m   Compiling[0m smallvec v1.15.2
-[1m[92m   Compiling[0m typed-path v0.12.3
 [1m[92m   Compiling[0m cpufeatures v0.2.17
+[1m[92m   Compiling[0m writeable v0.6.3
+[1m[92m   Compiling[0m typed-path v0.12.3
+[1m[92m   Compiling[0m smallvec v1.15.2
 [1m[92m   Compiling[0m litemap v0.8.2
+[1m[92m   Compiling[0m utf8parse v0.2.2
 [1m[92m   Compiling[0m icu_locale_core v2.2.0
 [1m[92m   Compiling[0m anstyle-parse v1.0.0
 [1m[92m   Compiling[0m anyhow v1.0.103
 [1m[92m   Compiling[0m potential_utf v0.1.5
 [1m[92m   Compiling[0m zerotrie v0.2.4
 [1m[92m   Compiling[0m ferrum-configuration v0.1.0 (/home/runner/work/RoM/RoM/crates/ferrum-configuration)
-[1m[92m   Compiling[0m mio v1.2.1
 [1m[92m   Compiling[0m socket2 v0.6.4
-[1m[92m   Compiling[0m anstyle v1.0.14
+[1m[92m   Compiling[0m mio v1.2.1
+[1m[92m   Compiling[0m utf8_iter v1.0.4
+[1m[92m   Compiling[0m colorchoice v1.0.5
+[1m[92m   Compiling[0m anstyle-query v1.1.5
 [1m[92m   Compiling[0m futures-sink v0.3.32
 [1m[92m   Compiling[0m is_terminal_polyfill v1.70.2
-[1m[92m   Compiling[0m utf8_iter v1.0.4
-[1m[92m   Compiling[0m anstyle-query v1.1.5
-[1m[92m   Compiling[0m colorchoice v1.0.5
+[1m[92m   Compiling[0m anstyle v1.0.14
+[1m[92m   Compiling[0m tokio v1.52.3
 [1m[92m   Compiling[0m icu_collections v2.2.0
 [1m[92m   Compiling[0m anstream v1.0.0
-[1m[92m   Compiling[0m tokio v1.52.3
 [1m[92m   Compiling[0m icu_provider v2.2.0
 [1m[92m   Compiling[0m sha2 v0.10.9
 [1m[92m   Compiling[0m http v1.4.2
-[1m[92m   Compiling[0m clap_lex v1.1.0
 [1m[92m   Compiling[0m zeroize v1.9.0
 [1m[92m   Compiling[0m strsim v0.11.1
+[1m[92m   Compiling[0m clap_lex v1.1.0
 [1m[92m   Compiling[0m percent-encoding v2.3.2
 [1m[92m   Compiling[0m clap_builder v4.6.0
 [1m[92m   Compiling[0m http-body v1.0.1
 [1m[92m   Compiling[0m rustls-pki-types v1.15.0
 [1m[92m   Compiling[0m flate2 v1.1.9
-[1m[92m   Compiling[0m getrandom v0.3.4
-[1m[92m   Compiling[0m icu_normalizer_data v2.2.0
-[1m[92m   Compiling[0m zerocopy v0.8.52
 [1m[92m   Compiling[0m zip v8.6.0
+[1m[92m   Compiling[0m getrandom v0.3.4
 [1m[92m   Compiling[0m icu_properties_data v2.2.0
+[1m[92m   Compiling[0m zerocopy v0.8.52
+[1m[92m   Compiling[0m icu_normalizer_data v2.2.0
 [1m[92m   Compiling[0m getrandom v0.2.17
 [1m[92m   Compiling[0m futures-task v0.3.32
-[1m[92m   Compiling[0m futures-io v0.3.32
 [1m[92m   Compiling[0m untrusted v0.9.0
 [1m[92m   Compiling[0m slab v0.4.12
+[1m[92m   Compiling[0m futures-io v0.3.32
 [1m[92m   Compiling[0m futures-util v0.3.32
 [1m[92m   Compiling[0m ring v0.17.14
-[1m[92m   Compiling[0m icu_properties v2.2.0
+[1m[92m   Compiling[0m icu_normalizer v2.2.0
 [1m[92m   Compiling[0m ahash v0.8.12
 [1m[92m   Compiling[0m clap v4.6.1
-[1m[92m   Compiling[0m icu_normalizer v2.2.0
+[1m[92m   Compiling[0m icu_properties v2.2.0
 [1m[92m   Compiling[0m ferrum-rompack v0.1.0 (/home/runner/work/RoM/RoM/crates/ferrum-rompack)
 [1m[92m   Compiling[0m ferrum-version-26-1-2 v0.1.0 (/home/runner/work/RoM/RoM/crates/ferrum-version-26-1-2)
 [1m[92m   Compiling[0m ferrum-model v0.1.0 (/home/runner/work/RoM/RoM/crates/ferrum-model)
-[1m[92m   Compiling[0m try-lock v0.2.5
 [1m[92m   Compiling[0m tower-service v0.3.3
 [1m[92m   Compiling[0m byteorder v1.5.0
+[1m[92m   Compiling[0m try-lock v0.2.5
 [1m[92m   Compiling[0m want v0.3.1
-[1m[92m   Compiling[0m idna_adapter v1.2.2
 [1m[92m   Compiling[0m ristretto_classfile v0.31.0
+[1m[92m   Compiling[0m idna_adapter v1.2.2
 [1m[92m   Compiling[0m rustls-webpki v0.103.13
 [1m[92m   Compiling[0m httparse v1.10.1
 [1m[92m   Compiling[0m form_urlencoded v1.2.2
@@ -472,53 +440,53 @@
 [1m[92m   Compiling[0m idna v1.1.0
 [1m[92m   Compiling[0m sync_wrapper v1.0.2
 [1m[92m   Compiling[0m ferrum-runtime v0.1.0 (/home/runner/work/RoM/RoM/crates/ferrum-runtime)
-[1m[92m   Compiling[0m base64 v0.22.1
-[1m[92m   Compiling[0m linux-raw-sys v0.12.1
-[1m[92m   Compiling[0m tower-layer v0.3.3
 [1m[92m   Compiling[0m ipnet v2.12.0
+[1m[92m   Compiling[0m base64 v0.22.1
+[1m[92m   Compiling[0m tower-layer v0.3.3
+[1m[92m   Compiling[0m linux-raw-sys v0.12.1
 [1m[92m   Compiling[0m tower v0.5.3
-[1m[92m   Compiling[0m hyper-util v0.1.20
 [1m[92m   Compiling[0m rustix v1.1.4
-[1m[92m   Compiling[0m ferrum-importer v0.1.0 (/home/runner/work/RoM/RoM/crates/ferrum-importer)
+[1m[92m   Compiling[0m hyper-util v0.1.20
 [1m[92m   Compiling[0m tokio-rustls v0.26.4
+[1m[92m   Compiling[0m ferrum-importer v0.1.0 (/home/runner/work/RoM/RoM/crates/ferrum-importer)
 [1m[92m   Compiling[0m url v2.5.8
 [1m[92m   Compiling[0m getrandom v0.4.3
 [1m[92m   Compiling[0m webpki-roots v1.0.8
 [1m[92m   Compiling[0m fastrand v2.4.1
 [1m[92m   Compiling[0m ryu v1.0.23
-[1m[92m   Compiling[0m tempfile v3.27.0
 [1m[92m   Compiling[0m serde_urlencoded v0.7.1
+[1m[92m   Compiling[0m tempfile v3.27.0
 [1m[92m   Compiling[0m hyper-rustls v0.27.9
 [1m[92m   Compiling[0m tower-http v0.6.11
 [1m[92m   Compiling[0m ferrum-play v0.1.0 (/home/runner/work/RoM/RoM/crates/ferrum-play)
 [1m[92m   Compiling[0m http-body-util v0.1.3
-[1m[92m   Compiling[0m sha1 v0.10.6
 [1m[92m   Compiling[0m reqwest v0.12.28
+[1m[92m   Compiling[0m sha1 v0.10.6
 [1m[92m   Compiling[0m ferrum-server v0.1.0 (/home/runner/work/RoM/RoM/crates/ferrum-server)
-[1m[92m   Compiling[0m ferrum v0.1.0 (/home/runner/work/RoM/RoM/crates/ferrum-cli)
 [1m[92m   Compiling[0m rom-bootstrap v0.1.0 (/home/runner/work/RoM/RoM/crates/rom-bootstrap)
 [1m[33mwarning[0m[1m: function `run_static_play_session` is never used[0m
-    [1m[94m--> [0mcrates/ferrum-server/src/main.rs:1424:4
+    [1m[94m--> [0mcrates/ferrum-server/src/main.rs:1425:4
      [1m[94m|[0m
-[1m[94m1424[0m [1m[94m|[0m fn run_static_play_session<R: Read, W: Write>(
+[1m[94m1425[0m [1m[94m|[0m fn run_static_play_session<R: Read, W: Write>(
      [1m[94m|[0m    [1m[33m^^^^^^^^^^^^^^^^^^^^^^^[0m
      [1m[94m|[0m
      [1m[94m= [0m[1mnote[0m: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
 
 [1m[33mwarning[0m[1m: function `run_keep_alive_loop` is never used[0m
-    [1m[94m--> [0mcrates/ferrum-server/src/main.rs:1673:4
+    [1m[94m--> [0mcrates/ferrum-server/src/main.rs:1680:4
      [1m[94m|[0m
-[1m[94m1673[0m [1m[94m|[0m fn run_keep_alive_loop<R: Read, W: Write>(
+[1m[94m1680[0m [1m[94m|[0m fn run_keep_alive_loop<R: Read, W: Write>(
      [1m[94m|[0m    [1m[33m^^^^^^^^^^^^^^^^^^^[0m
 
+[1m[92m   Compiling[0m ferrum v0.1.0 (/home/runner/work/RoM/RoM/crates/ferrum-cli)
 [1m[33mwarning[0m: `ferrum-server` (bin "ferrum-server" test) generated 2 warnings
-[1m[92m    Finished[0m `test` profile [unoptimized + debuginfo] target(s) in 29.07s
+[1m[92m    Finished[0m `test` profile [unoptimized + debuginfo] target(s) in 22.24s
 [1m[92m     Running[0m unittests src/main.rs (target/debug/deps/ferrum-5dbe45dacc6f5081)
 
 running 8 tests
 test fabric::tests::classifies_accessor_and_redirect_mixins ... ok
-test diff::tests::marks_missing_actual_outcome_pending ... ok
 test fabric::tests::parses_fabric_metadata_fields ... ok
+test diff::tests::marks_missing_actual_outcome_pending ... ok
 test diff::tests::compares_matching_replay_outcomes ... ok
 test rules::tests::parses_rewrite_toml_sections ... ok
 test rules::tests::parses_tiny_v2_class_member_mappings ... ok
@@ -564,9 +532,9 @@ test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 [1m[92m     Running[0m tests/control_flow_graph.rs (target/debug/deps/control_flow_graph-a1f7ede28ec9ae19)
 
 running 5 tests
+test builds_cfg_for_straight_line_method ... ok
 test builds_cfg_for_switch_and_loop_methods ... ok
 test malformed_class_does_not_stop_valid_cfg_inventory ... ok
-test builds_cfg_for_straight_line_method ... ok
 test represents_exception_handler_edges ... ok
 test cfg_output_ordering_is_deterministic ... ok
 
@@ -599,8 +567,8 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 [1m[92m     Running[0m unittests src/lib.rs (target/debug/deps/ferrum_nbt-eff8338fe9663747)
 
 running 8 tests
-test tests::anonymous_nbt_omits_the_root_name ... ok
 test tests::encodes_compound_in_deterministic_key_order ... ok
+test tests::anonymous_nbt_omits_the_root_name ... ok
 test tests::encodes_known_int_compound_bytes ... ok
 test tests::enforces_depth_limit ... ok
 test tests::rejects_heterogeneous_lists ... ok
@@ -615,22 +583,22 @@ test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 running 23 tests
 test block_interaction::tests::decodes_26_1_2_stab_action ... ok
 test block_interaction::tests::decodes_player_action_exactly ... ok
-test block_interaction::tests::decodes_use_item_on_block_exactly ... ok
 test block_interaction::tests::maps_block_interactions_to_world_events ... ok
+test block_interaction::tests::decodes_use_item_on_block_exactly ... ok
 test block_interaction::tests::rejects_invalid_block_interaction_payloads ... ok
 test chunk_stream::tests::matches_the_official_26_1_2_chunk_position_fixture ... ok
-test movement::tests::decodes_position_and_flags_exactly ... ok
 test movement::tests::decodes_position_rotation_exactly ... ok
 test movement::tests::decodes_rotation_and_status_packets ... ok
 test movement::tests::player_state_updates_selectively_and_tracks_negative_chunks ... ok
 test movement::tests::rejects_bad_lengths_and_unknown_flag_bits ... ok
+test movement::tests::decodes_position_and_flags_exactly ... ok
 test movement::tests::rejects_non_finite_and_out_of_range_coordinates ... ok
-test tests::encodes_block_change_ack_exactly ... ok
 test tests::encodes_block_update_exactly ... ok
 test tests::encodes_chunk_batch_and_cache_center_payloads ... ok
-test tests::encodes_default_spawn_position_exactly ... ok
+test tests::encodes_block_change_ack_exactly ... ok
 test tests::encodes_player_position_with_absolute_flags ... ok
 test tests::encodes_static_join_game_payload_exactly ... ok
+test tests::encodes_default_spawn_position_exactly ... ok
 test tests::encodes_string_components_for_system_chat_and_disconnect ... ok
 test tests::packs_negative_block_coordinates ... ok
 test tests::packs_palette_values_without_crossing_long_boundaries ... ok
@@ -644,12 +612,12 @@ test result: ok. 23 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
 running 10 tests
 test movement_packet_tests::movement_and_chunk_view_packets_have_expected_metadata ... ok
 test tests::configuration_ack_requires_finish_packet ... ok
-test tests::keep_alive_must_match ... ok
 test tests::invalid_username_does_not_mutate_session ... ok
+test tests::keep_alive_must_match ... ok
 test tests::login_ack_requires_success ... ok
-test tests::packet_ids_can_repeat_across_phases ... ok
-test tests::packet_ids_cannot_collide_inside_one_state_and_direction ... ok
 test tests::profile_owns_version_specific_packet_table ... ok
+test tests::packet_ids_cannot_collide_inside_one_state_and_direction ... ok
+test tests::packet_ids_can_repeat_across_phases ... ok
 test tests::reaches_play_through_modern_login_sequence ... ok
 test tests::status_sequence_closes_after_pong ... ok
 
@@ -663,13 +631,13 @@ test tests::tampering_is_detected ... ok
 test tests::encoding_is_deterministic_and_round_trips ... ok
 test tests::file_round_trip_reports_counts_and_digest ... ok
 
-test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
 
 [1m[92m     Running[0m unittests src/lib.rs (target/debug/deps/ferrum_runtime-f89987c6b8cb8ffa)
 
 running 14 tests
-test tests::assigns_independent_monotonic_sequences ... ok
 test tests::clock_caps_catch_up_and_skips_old_overdue_ticks ... ok
+test tests::assigns_independent_monotonic_sequences ... ok
 test tests::drains_connections_in_deterministic_fair_rounds ... ok
 test tests::enforces_a_global_queue_bound ... ok
 test tests::preserves_remaining_inputs_after_a_tick_budget ... ok
@@ -677,11 +645,11 @@ test tests::removing_a_connection_clears_pending_inputs_and_resets_sequence ... 
 test tests::runtime_applies_inputs_in_tick_order_with_a_fixed_budget ... ok
 test tests::server_clock_ticks_at_twenty_tps ... ok
 test worker::tests::broadcast_reports_full_queues_and_delivers_to_ready_workers ... ok
+test worker::tests::command_channel_is_bounded_and_non_blocking ... ok
 test worker::tests::a_full_output_queue_does_not_block_another_connection ... ok
 test worker::tests::disconnect_removes_pending_input_and_output_registration ... ok
 test worker::tests::inputs_reach_the_authoritative_queue_in_fair_connection_order ... ok
 test worker::tests::split_endpoints_support_independent_reader_and_writer_ownership ... ok
-test worker::tests::command_channel_is_bounded_and_non_blocking ... ok
 
 test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
@@ -691,17 +659,17 @@ running 17 tests
 test authoritative_runtime::tests::disconnect_input_removes_connection_state ... ok
 test authoritative_runtime::tests::ingests_worker_input_on_authoritative_ticks ... ok
 test authoritative_runtime::tests::poll_before_deadline_only_ingests_commands ... ok
+test authoritative_runtime::tests::worker_disconnect_removes_state_before_the_next_tick ... ok
 test play_connection::tests::command_backpressure_returns_the_decoded_input ... ok
 test play_connection::tests::disconnect_command_removes_the_worker_registration ... ok
 test play_connection::tests::malformed_payloads_are_reported_before_queue_submission ... ok
-test play_connection::tests::submits_decoded_packets_to_the_authoritative_input_queue ... ok
-test authoritative_runtime::tests::worker_disconnect_removes_state_before_the_next_tick ... ok
-test play_input::tests::decodes_all_movement_shapes ... ok
-test play_input::tests::decodes_tick_and_keep_alive_payloads_exactly ... ok
 test play_connection::tests::unsupported_packets_stay_at_the_connection_boundary ... ok
+test play_connection::tests::submits_decoded_packets_to_the_authoritative_input_queue ... ok
+test play_input::tests::decodes_all_movement_shapes ... ok
 test play_input::tests::leaves_unmigrated_play_packets_at_the_connection_boundary ... ok
-test shared_runtime::tests::rejects_zero_poll_interval ... ok
 test play_input::tests::validates_chunk_batch_acknowledgements ... ok
+test play_input::tests::decodes_tick_and_keep_alive_payloads_exactly ... ok
+test shared_runtime::tests::rejects_zero_poll_interval ... ok
 test shared_runtime::tests::final_shutdown_poll_ingests_connection_commands ... ok
 test shared_runtime::tests::connector_disconnect_is_observed_before_exit ... ok
 test shared_runtime::tests::starts_and_stops_cleanly ... ok
@@ -711,28 +679,28 @@ test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fin
 [1m[92m     Running[0m unittests src/main.rs (target/debug/deps/ferrum_server-1c7088dd2f072bda)
 
 running 59 tests
-test codec::tests::does_not_skip_malformed_brand_payloads ... ok
-test codec::tests::does_not_skip_other_custom_payload_channels ... ok
 test codec::tests::reads_big_endian_float_payloads ... ok
+test codec::tests::does_not_skip_other_custom_payload_channels ... ok
+test codec::tests::does_not_skip_malformed_brand_payloads ... ok
 test codec::tests::string_round_trips_utf8_payloads ... ok
 test codec::tests::varint_round_trips_protocol_values ... ok
-test codec::tests::skips_configuration_brand_payload_before_expected_packet ... ok
 test identity::tests::offline_uuid_matches_java_name_uuid_for_steve ... ok
 test play_runtime::tests::block_interaction_reach_uses_player_eye_to_block_center_distance ... ok
+test codec::tests::skips_configuration_brand_payload_before_expected_packet ... ok
 test play_runtime::tests::generated_world_profile_drives_chunk_layout_and_block_states ... ok
 test play_runtime::tests::movement_delta_validation_allows_normal_steps_and_rejects_large_jumps ... ok
 test play_runtime::tests::movement_floor_validation_rejects_flat_floor_penetration ... ok
 test play_runtime::tests::movement_packet_classifier_is_phase_and_direction_aware ... ok
-test play_runtime::tests::block_interaction_state_checks_treat_world_height_outside_as_unavailable ... ok
 test play_runtime::tests::local_world_runtime_applies_block_events_through_authoritative_ticks ... ok
+test play_runtime::tests::block_interaction_state_checks_treat_world_height_outside_as_unavailable ... ok
 test play_runtime::tests::play_loop_acknowledges_air_break_without_sending_block_update ... ok
 test play_runtime::tests::play_loop_acknowledges_bedrock_break_without_mutating_world ... ok
 test play_runtime::tests::play_loop_acknowledges_far_placement_without_mutating_world ... ok
 test play_runtime::tests::play_loop_acknowledges_height_outside_placement_without_error ... ok
+test play_runtime::tests::configured_play_policy_controls_loaded_radius_and_keep_alive_cadence ... ok
 test play_runtime::tests::play_loop_acknowledges_occupied_placement_without_replacing_block ... ok
 test play_runtime::tests::play_loop_drains_peer_updates_after_read_timeout ... ok
 test play_runtime::tests::sends_block_change_prediction_acknowledgement ... ok
-test play_runtime::tests::configured_play_policy_controls_loaded_radius_and_keep_alive_cadence ... ok
 test play_runtime::tests::play_loop_rejects_large_position_jump_before_chunk_streaming ... ok
 test play_runtime::tests::play_loop_rejects_position_below_flat_floor ... ok
 test play_runtime::tests::sends_block_update_when_profile_exposes_packet_id ... ok
@@ -763,24 +731,24 @@ test tests::parses_handshake_packet ... ok
 test tests::parses_server_config ... ok
 test tests::rejects_unoffered_known_pack_response ... ok
 test tests::requires_config_argument ... ok
-test tests::disconnects_login_attempts_with_configured_message ... ok
-test tests::status_json_includes_vanilla_server_list_metadata ... ok
 test tests::completes_the_configured_configuration_sequence ... ok
+test tests::status_json_includes_vanilla_server_list_metadata ... ok
+test tests::disconnects_login_attempts_with_configured_message ... ok
 test tests::varint_round_trips_protocol_values ... ok
 test tests::status_json_can_use_live_online_player_count ... ok
 test tests::supports_configured_packet_ids ... ok
 test tests::completes_builtin_26_1_2_known_pack_configuration_sequence ... ok
 
-test result: ok. 59 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.11s
+test result: ok. 59 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.09s
 
 [1m[92m     Running[0m unittests src/lib.rs (target/debug/deps/ferrum_version_26_1_2-cc990c8a340f8c20)
 
 running 6 tests
 test tests::advertises_the_vanilla_core_pack ... ok
 test tests::exposes_static_overworld_numeric_ids_from_official_reports ... ok
+test tests::registry_packets_reference_the_accepted_core_pack ... ok
 test tests::exposes_the_complete_synchronized_registry_manifest ... ok
 test tests::exposes_the_expected_protocol_identity ... ok
-test tests::registry_packets_reference_the_accepted_core_pack ... ok
 test tests::uses_the_documented_configuration_packet_ids ... ok
 
 test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
@@ -791,17 +759,17 @@ running 14 tests
 test chunk_view::tests::can_seed_a_chunk_that_was_already_sent ... ok
 test chunk_view::tests::crossing_one_chunk_boundary_loads_and_unloads_only_one_column ... ok
 test chunk_view::tests::initial_three_by_three_view_is_deterministic ... ok
+test chunk_view::tests::staying_in_the_same_chunk_produces_no_delta ... ok
 test chunk_view::tests::rejects_negative_radius_and_coordinate_overflow ... ok
 test tests::block_index_matches_minecraft_section_order ... ok
-test chunk_view::tests::staying_in_the_same_chunk_produces_no_delta ... ok
 test tests::applies_world_block_mutations_with_negative_coordinate_flooring ... ok
-test tests::builds_a_four_layer_flat_overworld_floor ... ok
 test tests::chunk_store_applies_world_mutations_to_the_target_chunk ... ok
 test tests::chunk_store_can_run_as_authoritative_runtime_state ... ok
+test tests::builds_a_four_layer_flat_overworld_floor ... ok
 test tests::rejects_world_block_mutations_for_other_chunks ... ok
+test tests::chunk_store_iteration_is_deterministic_and_reports_missing_chunks ... ok
 test tests::tracks_air_transitions_without_recounting_the_section ... ok
 test tests::rejects_world_y_outside_the_chunk ... ok
-test tests::chunk_store_iteration_is_deterministic_and_reports_missing_chunks ... ok
 
 test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
@@ -819,7 +787,7 @@ test extract::tests::resolves_and_verifies_the_embedded_game_jar ... ok
 test tests::existing_server_configuration_is_preserved ... ok
 test tests::instance_status_verifies_the_cached_source ... ok
 
-test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
 
 [1m[92m     Running[0m unittests src/main.rs (target/debug/deps/rom_bootstrap-47707baee5bb5a29)
 
@@ -901,6 +869,7 @@ test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 
 
 patch_status=0
+fix_status=0
 fmt_apply_status=0
 fmt_status=0
 clippy_status=101
