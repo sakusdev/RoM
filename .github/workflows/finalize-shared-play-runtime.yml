@@ -1,0 +1,32 @@
+name: Finalize shared Play runtime
+
+on:
+  pull_request:
+    branches: [master]
+    types: [synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]' && github.head_ref == 'feature/shared-play-runtime'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/shared-play-runtime
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Format and validate
+        run: |
+          cargo fmt --all
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: Finalize shared Play runtime
+          branch: feature/shared-play-runtime
+          file_pattern: crates/ferrum-server/src/shared_runtime.rs crates/ferrum-server/src/lib.rs
