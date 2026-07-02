@@ -16,21 +16,29 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: feature/live-play-shadow-routing
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
       - name: Apply and validate routing
         run: |
           python3 tools/apply_live_play_shadow_routing.py
-          python3 tools/fix_live_play_shadow_routing_clippy.py
-          rm tools/apply_live_play_shadow_routing.py
-          rm tools/fix_live_play_shadow_routing_clippy.py
+          python3 tools/fix_live_play_shadow_routing.py
+          rm -f tools/apply_live_play_shadow_routing.py
+          rm -f tools/fix_live_play_shadow_routing.py
+          rm -f tools/fix_live_play_shadow_routing_clippy.py
+          rm -f shadow-routing-validation.txt
+          rm -f .github/workflows/diagnose-live-play-shadow-routing.yml
           cargo fmt --all
           cargo fmt --all --check
           cargo clippy --workspace --all-targets -- -D warnings
           cargo test --workspace
-      - uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: Route live Play inputs to shared runtime
-          branch: feature/live-play-shadow-routing
-          file_pattern: crates/ferrum-server/src/main.rs crates/ferrum-server/src/play_runtime.rs tools/apply_live_play_shadow_routing.py tools/fix_live_play_shadow_routing_clippy.py
+      - name: Commit finalized routing
+        run: |
+          rm .github/workflows/apply-live-play-shadow-routing.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Route live Play inputs to shared runtime"
+          git push origin HEAD:feature/live-play-shadow-routing
