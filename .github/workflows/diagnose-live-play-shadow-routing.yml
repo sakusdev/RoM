@@ -24,22 +24,15 @@ jobs:
           set +e
           python3 tools/apply_live_play_shadow_routing.py > shadow-routing-validation.txt 2>&1
           patch_status=$?
-          if [ "$patch_status" -eq 0 ]; then
-            cargo fmt --all >> shadow-routing-validation.txt 2>&1
-            fmt_apply_status=$?
-            cargo fmt --all --check >> shadow-routing-validation.txt 2>&1
-            fmt_status=$?
-            cargo clippy --workspace --all-targets -- -D warnings >> shadow-routing-validation.txt 2>&1
-            clippy_status=$?
-            cargo test --workspace >> shadow-routing-validation.txt 2>&1
-            test_status=$?
-          else
-            fmt_apply_status=99
-            fmt_status=99
-            clippy_status=99
-            test_status=99
-          fi
-          printf '\npatch_status=%s\nfmt_apply_status=%s\nfmt_status=%s\nclippy_status=%s\ntest_status=%s\n' "$patch_status" "$fmt_apply_status" "$fmt_status" "$clippy_status" "$test_status" >> shadow-routing-validation.txt
+          python3 tools/fix_live_play_shadow_routing_clippy.py >> shadow-routing-validation.txt 2>&1
+          fix_status=$?
+          cargo fmt --all >> shadow-routing-validation.txt 2>&1
+          fmt_status=$?
+          cargo clippy --workspace --all-targets -- -D warnings >> shadow-routing-validation.txt 2>&1
+          clippy_status=$?
+          cargo test --workspace >> shadow-routing-validation.txt 2>&1
+          test_status=$?
+          printf '\npatch_status=%s\nfix_status=%s\nfmt_status=%s\nclippy_status=%s\ntest_status=%s\n' "$patch_status" "$fix_status" "$fmt_status" "$clippy_status" "$test_status" >> shadow-routing-validation.txt
           git reset --hard HEAD
       - uses: stefanzweifel/git-auto-commit-action@v5
         with:
