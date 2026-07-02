@@ -22,7 +22,9 @@ jobs:
       - name: Apply and validate routing
         run: |
           python3 tools/apply_live_play_shadow_routing.py
+          python3 tools/fix_live_play_shadow_routing_clippy.py
           rm tools/apply_live_play_shadow_routing.py
+          rm tools/fix_live_play_shadow_routing_clippy.py
           cargo fmt --all
           cargo fmt --all --check
           cargo clippy --workspace --all-targets -- -D warnings
@@ -31,4 +33,4 @@ jobs:
         with:
           commit_message: Route live Play inputs to shared runtime
           branch: feature/live-play-shadow-routing
-          file_pattern: crates/ferrum-server/src/main.rs crates/ferrum-server/src/play_runtime.rs tools/apply_live_play_shadow_routing.py
+          file_pattern: crates/ferrum-server/src/main.rs crates/ferrum-server/src/play_runtime.rs tools/apply_live_play_shadow_routing.py tools/fix_live_play_shadow_routing_clippy.py
