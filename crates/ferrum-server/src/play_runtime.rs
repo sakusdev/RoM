@@ -16,7 +16,10 @@ use ferrum_protocol::{
 };
 use ferrum_rompack::{RomPackBiomes, RomPackBlockStates, RomPackWorld};
 use ferrum_runtime::{ConnectionId, DeterministicRuntime, Tick};
-use ferrum_server::{authoritative_runtime::PlayInput, play_input::decode_play_input};
+use ferrum_server::{
+    authoritative_runtime::PlayInput, play_connection::PlayReaderEndpoint,
+    play_input::decode_play_input,
+};
 use ferrum_world::{
     AppliedWorldEvent, BiomeId, BlockPos, BlockStateId, ChunkPos, ChunkStore, ChunkView,
     ChunkViewDelta, FlatWorldSpec, StaticChunk, WorldError, WorldEvent,
@@ -314,6 +317,8 @@ pub(super) fn is_movement_packet_id(profile: &ProtocolProfile, packet_id: i32) -
     )
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 pub(super) fn run_play_loop<R: Read, W: Write>(
     reader: &mut R,
     writer: &mut W,
@@ -321,6 +326,32 @@ pub(super) fn run_play_loop<R: Read, W: Write>(
     session: &mut ProtocolSession,
     shared_world: &SharedWorld,
     connection: ConnectionId,
+    play_round_limit: Option<usize>,
+) -> Result<()> {
+    run_play_loop_with_bridge(
+        reader,
+        writer,
+        profile,
+        session,
+        shared_world,
+        connection,
+        None,
+        play_round_limit,
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "transitional bridge preserves the finite legacy call boundary"
+)]
+pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    profile: &ProtocolProfile,
+    session: &mut ProtocolSession,
+    shared_world: &SharedWorld,
+    connection: ConnectionId,
+    play_reader: Option<&PlayReaderEndpoint>,
     play_round_limit: Option<usize>,
 ) -> Result<()> {
     if play_round_limit == Some(0) {
@@ -394,6 +425,11 @@ pub(super) fn run_play_loop<R: Read, W: Write>(
                 ) => {
                     let input = decode_play_input(kind, packet_reader.take_remaining())?
                         .context("resolved migrated Play packet did not decode")?;
+                    if let Some(play_reader) = play_reader {
+                        play_reader
+                            .try_submit_input(input.clone())
+                            .context("cannot route decoded Play input")?;
+                    }
                     match input {
                         PlayInput::KeepAliveResponse(received_id) => {
                             if received_id != keep_alive_id {

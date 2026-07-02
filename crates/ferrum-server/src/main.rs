@@ -24,6 +24,11 @@ use ferrum_play::{
 use ferrum_protocol::{HandshakeIntent, PacketKind, PacketTable, ProtocolProfile, ProtocolSession};
 use ferrum_rompack::{RomPack, RomPackPacket, RomPackRegistry, RomPackWorld, read_rompack};
 use ferrum_runtime::ConnectionId;
+use ferrum_server::{
+    authoritative_runtime::PlayInput,
+    play_connection::{PlayReaderEndpoint, PlayWriterEndpoint, register_play_connection},
+    shared_runtime::{SharedPlayRuntime, SharedPlayRuntimeConfig, spawn_shared_play_runtime},
+};
 use ferrum_version_26_1_2 as version_26_1_2;
 #[cfg(test)]
 use ferrum_world::ChunkPos;
@@ -34,6 +39,7 @@ use std::{
     fs,
     io::{self, Read, Write},
     net::{TcpListener, TcpStream},
+    num::NonZeroUsize,
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -59,6 +65,7 @@ const MAX_KEEP_ALIVE_INTERVAL_SECONDS: u64 = 300;
 const MAX_WELCOME_MESSAGE_BYTES: usize = 256;
 const MAX_CONFIGURATION_AUXILIARY_PACKETS: usize = 16;
 const MAX_IGNORED_PLAY_PACKETS: usize = 1_024;
+const PLAY_OUTPUT_QUEUE_CAPACITY: usize = 256;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -160,6 +167,7 @@ struct ServerState {
     next_connection_id: AtomicU64,
     world: play_runtime::SharedWorld,
     registry_payloads: Vec<Vec<u8>>,
+    shared_play_runtime: SharedPlayRuntime,
 }
 
 impl ServerState {
@@ -186,14 +194,15 @@ impl ServerState {
         registry_payloads: Vec<Vec<u8>>,
         play_policy: PlayPolicy,
     ) -> Result<Self> {
+        let center = play_runtime::spawn_chunk(&world);
+        let shared_world = play_runtime::SharedWorld::new_with_policy(center, world, play_policy)?;
+        let shared_play_runtime = spawn_shared_play_runtime(SharedPlayRuntimeConfig::default())?;
         Ok(Self {
             online_players: AtomicI32::new(initial_online_players),
             next_connection_id: AtomicU64::new(1),
-            world: {
-                let center = play_runtime::spawn_chunk(&world);
-                play_runtime::SharedWorld::new_with_policy(center, world, play_policy)?
-            },
+            world: shared_world,
             registry_payloads,
+            shared_play_runtime,
         })
     }
 
@@ -201,13 +210,28 @@ impl ServerState {
         self.online_players.load(Ordering::Relaxed)
     }
 
-    fn enter_play(&self) -> OnlinePlayerGuard<'_> {
-        self.online_players.fetch_add(1, Ordering::Relaxed);
+    fn try_enter_play(&self) -> Result<OnlinePlayerGuard<'_>> {
         let id = self.next_connection_id.fetch_add(1, Ordering::Relaxed);
-        OnlinePlayerGuard {
+        let connection_id = ConnectionId::new(id);
+        let (play_reader, play_writer) = register_play_connection(
+            &self.shared_play_runtime.connector(),
+            connection_id,
+            NonZeroUsize::new(PLAY_OUTPUT_QUEUE_CAPACITY)
+                .expect("Play output queue capacity is non-zero"),
+        )?;
+        self.online_players.fetch_add(1, Ordering::Relaxed);
+        Ok(OnlinePlayerGuard {
             state: self,
-            connection_id: ConnectionId::new(id),
-        }
+            connection_id,
+            play_reader,
+            _play_writer: play_writer,
+        })
+    }
+
+    #[cfg(test)]
+    fn enter_play(&self) -> OnlinePlayerGuard<'_> {
+        self.try_enter_play()
+            .expect("test Play connection must register")
     }
 
     fn world(&self) -> &play_runtime::SharedWorld {
@@ -223,16 +247,23 @@ impl ServerState {
 struct OnlinePlayerGuard<'a> {
     state: &'a ServerState,
     connection_id: ConnectionId,
+    play_reader: PlayReaderEndpoint,
+    _play_writer: PlayWriterEndpoint,
 }
 
 impl OnlinePlayerGuard<'_> {
     fn connection_id(&self) -> ConnectionId {
         self.connection_id
     }
+
+    fn play_reader(&self) -> &PlayReaderEndpoint {
+        &self.play_reader
+    }
 }
 
 impl Drop for OnlinePlayerGuard<'_> {
     fn drop(&mut self) {
+        let _ = self.play_reader.try_disconnect();
         self.state.online_players.fetch_sub(1, Ordering::Relaxed);
     }
 }
@@ -1364,8 +1395,8 @@ fn handle_play_protocol<R: Read, W: Write>(
         return Ok(());
     }
 
-    let online_player = context.state.enter_play();
-    let result = run_static_play_session(
+    let online_player = context.state.try_enter_play()?;
+    let result = run_static_play_session_with_bridge(
         reader,
         writer,
         config,
@@ -1375,6 +1406,7 @@ fn handle_play_protocol<R: Read, W: Write>(
             shared_world: context.state.world(),
             connection: online_player.connection_id(),
         },
+        Some(online_player.play_reader()),
         play_round_limit,
     );
     if let Err(error) = result {
@@ -1389,6 +1421,8 @@ fn handle_play_protocol<R: Read, W: Write>(
     Ok(())
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 fn run_static_play_session<R: Read, W: Write>(
     reader: &mut R,
     writer: &mut W,
@@ -1396,6 +1430,32 @@ fn run_static_play_session<R: Read, W: Write>(
     profile: &ProtocolProfile,
     session: &mut ProtocolSession,
     world: PlayWorldContext<'_>,
+    play_round_limit: Option<usize>,
+) -> Result<()> {
+    run_static_play_session_with_bridge(
+        reader,
+        writer,
+        config,
+        profile,
+        session,
+        world,
+        None,
+        play_round_limit,
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "transitional bridge preserves the finite legacy call boundary"
+)]
+fn run_static_play_session_with_bridge<R: Read, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    config: &ServerConfig,
+    profile: &ProtocolProfile,
+    session: &mut ProtocolSession,
+    world: PlayWorldContext<'_>,
+    play_reader: Option<&PlayReaderEndpoint>,
     play_round_limit: Option<usize>,
 ) -> Result<()> {
     let _world_subscription = world.shared_world.subscribe(world.connection)?;
@@ -1455,8 +1515,21 @@ fn run_static_play_session<R: Read, W: Write>(
     )?;
     writer.flush()?;
 
-    wait_for_play_bootstrap_acknowledgements(reader, profile, STATIC_TELEPORT_ID)?;
-    run_keep_alive_loop(reader, writer, profile, session, world, play_round_limit)
+    wait_for_play_bootstrap_acknowledgements_with_bridge(
+        reader,
+        profile,
+        STATIC_TELEPORT_ID,
+        play_reader,
+    )?;
+    run_keep_alive_loop_with_bridge(
+        reader,
+        writer,
+        profile,
+        session,
+        world,
+        play_reader,
+        play_round_limit,
+    )
 }
 
 fn static_join_game(config: &ServerConfig, world: &RomPackWorld) -> JoinGame {
@@ -1533,10 +1606,26 @@ fn write_play_payload<W: Write>(
     Ok(())
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 fn wait_for_play_bootstrap_acknowledgements<R: Read>(
     reader: &mut R,
     profile: &ProtocolProfile,
     expected_teleport_id: i32,
+) -> Result<()> {
+    wait_for_play_bootstrap_acknowledgements_with_bridge(
+        reader,
+        profile,
+        expected_teleport_id,
+        None,
+    )
+}
+
+fn wait_for_play_bootstrap_acknowledgements_with_bridge<R: Read>(
+    reader: &mut R,
+    profile: &ProtocolProfile,
+    expected_teleport_id: i32,
+    play_reader: Option<&PlayReaderEndpoint>,
 ) -> Result<()> {
     let teleport_packet_id = profile.packets().require(PacketKind::AcceptTeleportation)?;
     let chunk_batch_packet_id = profile.packets().require(PacketKind::ChunkBatchReceived)?;
@@ -1571,6 +1660,11 @@ fn wait_for_play_bootstrap_acknowledgements<R: Read>(
             if !packet_reader.take_remaining().is_empty() {
                 bail!("chunk batch acknowledgement contains trailing bytes");
             }
+            if let Some(play_reader) = play_reader {
+                play_reader
+                    .try_submit_input(PlayInput::ChunkBatchReceived(desired_chunks_per_tick))
+                    .context("cannot route Play bootstrap chunk acknowledgement")?;
+            }
             chunk_batch_acknowledged = true;
         }
 
@@ -1584,6 +1678,8 @@ fn wait_for_play_bootstrap_acknowledgements<R: Read>(
     )
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 fn run_keep_alive_loop<R: Read, W: Write>(
     reader: &mut R,
     writer: &mut W,
@@ -1592,13 +1688,34 @@ fn run_keep_alive_loop<R: Read, W: Write>(
     world: PlayWorldContext<'_>,
     play_round_limit: Option<usize>,
 ) -> Result<()> {
-    play_runtime::run_play_loop(
+    run_keep_alive_loop_with_bridge(
+        reader,
+        writer,
+        profile,
+        session,
+        world,
+        None,
+        play_round_limit,
+    )
+}
+
+fn run_keep_alive_loop_with_bridge<R: Read, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    profile: &ProtocolProfile,
+    session: &mut ProtocolSession,
+    world: PlayWorldContext<'_>,
+    play_reader: Option<&PlayReaderEndpoint>,
+    play_round_limit: Option<usize>,
+) -> Result<()> {
+    play_runtime::run_play_loop_with_bridge(
         reader,
         writer,
         profile,
         session,
         world.shared_world,
         world.connection,
+        play_reader,
         play_round_limit,
     )
 }
