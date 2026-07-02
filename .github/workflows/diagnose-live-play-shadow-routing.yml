@@ -1,0 +1,48 @@
+name: Diagnose live Play shadow routing
+
+on:
+  pull_request:
+    branches: [master]
+    types: [synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    if: github.actor != 'github-actions[bot]' && github.head_ref == 'feature/live-play-shadow-routing'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/live-play-shadow-routing
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Capture diagnostics
+        run: |
+          set +e
+          python3 tools/apply_live_play_shadow_routing.py > shadow-routing-validation.txt 2>&1
+          patch_status=$?
+          if [ "$patch_status" -eq 0 ]; then
+            cargo fmt --all >> shadow-routing-validation.txt 2>&1
+            fmt_apply_status=$?
+            cargo fmt --all --check >> shadow-routing-validation.txt 2>&1
+            fmt_status=$?
+            cargo clippy --workspace --all-targets -- -D warnings >> shadow-routing-validation.txt 2>&1
+            clippy_status=$?
+            cargo test --workspace >> shadow-routing-validation.txt 2>&1
+            test_status=$?
+          else
+            fmt_apply_status=99
+            fmt_status=99
+            clippy_status=99
+            test_status=99
+          fi
+          printf '\npatch_status=%s\nfmt_apply_status=%s\nfmt_status=%s\nclippy_status=%s\ntest_status=%s\n' "$patch_status" "$fmt_apply_status" "$fmt_status" "$clippy_status" "$test_status" >> shadow-routing-validation.txt
+          git reset --hard HEAD
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: Capture live Play routing diagnostics
+          branch: feature/live-play-shadow-routing
+          file_pattern: shadow-routing-validation.txt
