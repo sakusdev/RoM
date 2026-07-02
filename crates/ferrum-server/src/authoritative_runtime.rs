@@ -186,9 +186,7 @@ mod tests {
             non_zero_u32(4),
         )
         .unwrap();
-        let report = runtime
-            .poll(start + Duration::from_millis(50))
-            .unwrap();
+        let report = runtime.poll(start + Duration::from_millis(50)).unwrap();
 
         assert_eq!(report.executed_ticks, 1);
         assert_eq!(report.processed_inputs, 2);
@@ -217,15 +215,11 @@ mod tests {
             non_zero_u32(4),
         )
         .unwrap();
-        runtime
-            .poll(start + Duration::from_millis(50))
-            .unwrap();
+        runtime.poll(start + Duration::from_millis(50)).unwrap();
         assert_eq!(runtime.connection_count(), 1);
 
         worker.try_send_input(PlayInput::Disconnected).unwrap();
-        runtime
-            .poll(start + Duration::from_millis(100))
-            .unwrap();
+        runtime.poll(start + Duration::from_millis(100)).unwrap();
         assert_eq!(runtime.connection_count(), 0);
     }
 
@@ -248,9 +242,7 @@ mod tests {
             non_zero_u32(2),
         )
         .unwrap();
-        let report = runtime
-            .poll(start + Duration::from_millis(10))
-            .unwrap();
+        let report = runtime.poll(start + Duration::from_millis(10)).unwrap();
 
         assert_eq!(report.executed_ticks, 0);
         assert_eq!(report.ingress.accepted_inputs, 1);
