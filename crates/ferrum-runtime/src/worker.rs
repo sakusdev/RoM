@@ -164,20 +164,11 @@ pub enum WorkerReceiveError {
 #[derive(Debug, PartialEq, Eq, Error)]
 pub enum WorkerOutputError<O> {
     #[error("connection is not registered")]
-    UnknownConnection {
-        connection: ConnectionId,
-        output: O,
-    },
+    UnknownConnection { connection: ConnectionId, output: O },
     #[error("connection output queue is full")]
-    Full {
-        connection: ConnectionId,
-        output: O,
-    },
+    Full { connection: ConnectionId, output: O },
     #[error("connection output worker is disconnected")]
-    WorkerDisconnected {
-        connection: ConnectionId,
-        output: O,
-    },
+    WorkerDisconnected { connection: ConnectionId, output: O },
 }
 
 impl<O> WorkerOutputError<O> {
@@ -307,9 +298,7 @@ impl<I, O> WorkerRuntime<I, O> {
         };
         match sender.try_send(output) {
             Ok(()) => Ok(()),
-            Err(TrySendError::Full(output)) => {
-                Err(WorkerOutputError::Full { connection, output })
-            }
+            Err(TrySendError::Full(output)) => Err(WorkerOutputError::Full { connection, output }),
             Err(TrySendError::Disconnected(output)) => {
                 self.outputs.remove(&connection);
                 Err(WorkerOutputError::WorkerDisconnected { connection, output })
@@ -396,13 +385,7 @@ mod tests {
         let drained = inputs.drain_tick(4);
         let observed = drained
             .into_iter()
-            .map(|event| {
-                (
-                    event.connection.get(),
-                    event.sequence.get(),
-                    event.payload,
-                )
-            })
+            .map(|event| (event.connection.get(), event.sequence.get(), event.payload))
             .collect::<Vec<_>>();
         assert_eq!(
             observed,

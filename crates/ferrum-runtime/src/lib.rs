@@ -2,7 +2,16 @@
 //!
 //! This crate intentionally does not own sockets or Minecraft packet codecs. It
 //! provides a fixed-rate tick clock, bounded per-connection input queues, and a
-//! small state runner that applies queued inputs in a stable order.
+//! small state runner that applies queued inputs in a stable order. A bounded
+//! worker hub provides the non-blocking boundary for future socket workers.
+
+mod worker;
+
+pub use worker::{
+    ConnectionWorker, WorkerBroadcastReport, WorkerConnector, WorkerControlError,
+    WorkerIngressReport, WorkerInputError, WorkerOutputError, WorkerReceiveError, WorkerRuntime,
+    worker_channel,
+};
 
 use std::{
     collections::{BTreeMap, VecDeque},
