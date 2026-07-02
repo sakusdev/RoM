@@ -1,0 +1,27 @@
+name: Cleanup shared Play runtime
+
+on:
+  pull_request:
+    branches: [master]
+    types: [synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: github.actor != 'github-actions[bot]' && github.head_ref == 'feature/shared-play-runtime'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/shared-play-runtime
+      - name: Remove temporary workflows
+        run: |
+          rm .github/workflows/finalize-shared-play-runtime.yml
+          rm .github/workflows/cleanup-shared-play-runtime.yml
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: Remove shared Play runtime workflows
+          branch: feature/shared-play-runtime
+          file_pattern: .github/workflows
