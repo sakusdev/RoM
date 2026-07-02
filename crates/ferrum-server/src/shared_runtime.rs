@@ -1,5 +1,7 @@
 use crate::{
-    authoritative_runtime::{AuthoritativePlayRuntime, AuthoritativePollReport, PlayInput, PlayOutput},
+    authoritative_runtime::{
+        AuthoritativePlayRuntime, AuthoritativePollReport, PlayInput, PlayOutput,
+    },
     play_connection::PlayWorkerConnector,
 };
 use anyhow::{Context, Result, bail};
