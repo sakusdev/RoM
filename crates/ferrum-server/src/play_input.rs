@@ -111,7 +111,7 @@ mod tests {
         let mut position = Vec::new();
         position.extend_from_slice(&1.0_f64.to_be_bytes());
         position.extend_from_slice(&65.0_f64.to_be_bytes());
-        position.extend_from_slice(&-2.0_f64.to_be_bytes());
+        position.extend_from_slice(&(-2.0_f64).to_be_bytes());
         position.push(0x03);
         assert_eq!(
             decode_play_input(PacketKind::MovePlayerPosition, &position).unwrap(),
@@ -135,7 +135,7 @@ mod tests {
 
         let mut rotation = Vec::new();
         rotation.extend_from_slice(&45.0_f32.to_be_bytes());
-        rotation.extend_from_slice(&-10.0_f32.to_be_bytes());
+        rotation.extend_from_slice(&(-10.0_f32).to_be_bytes());
         rotation.push(0x00);
         assert!(matches!(
             decode_play_input(PacketKind::MovePlayerRotation, &rotation).unwrap(),
