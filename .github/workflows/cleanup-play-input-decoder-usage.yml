@@ -1,0 +1,28 @@
+name: Cleanup Play input decoder usage
+
+on:
+  pull_request:
+    branches: [master]
+    types: [synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: github.actor != 'github-actions[bot]' && github.head_ref == 'feature/use-play-input-decoder'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/use-play-input-decoder
+      - name: Remove temporary workflows
+        run: |
+          rm .github/workflows/build-play-input-decoder-usage.yml
+          rm .github/workflows/save-play-input-decoder-usage.yml
+          rm .github/workflows/cleanup-play-input-decoder-usage.yml
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: Remove temporary Play decoder workflows
+          branch: feature/use-play-input-decoder
+          file_pattern: .github/workflows
