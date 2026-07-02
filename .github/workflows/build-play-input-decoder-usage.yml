@@ -1,0 +1,29 @@
+name: Build Play input decoder usage
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened]
+
+jobs:
+  build:
+    if: github.head_ref == 'feature/use-play-input-decoder'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/use-play-input-decoder
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Apply integration
+        run: |
+          python3 tools/apply_play_input_decoder_usage.py
+          cargo fmt --all
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: play-input-decoder-usage
+          path: crates/ferrum-server/src/play_runtime.rs
