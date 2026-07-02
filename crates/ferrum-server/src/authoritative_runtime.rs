@@ -35,6 +35,7 @@ pub struct ConnectionRuntimeState {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct AuthoritativePollReport {
     pub ingress: WorkerIngressReport,
+    pub removed_connections: usize,
     pub executed_ticks: u32,
     pub dropped_ticks: u32,
     pub processed_inputs: usize,
@@ -75,6 +76,7 @@ impl AuthoritativePlayRuntime {
             .workers
             .ingest_available(&mut self.inputs, self.max_commands_per_poll.get())
             .context("cannot ingest network-worker commands")?;
+        let removed_connections = self.remove_unregistered_connection_state();
         let Some(batch) = self
             .clock
             .poll(now)
@@ -82,6 +84,7 @@ impl AuthoritativePlayRuntime {
         else {
             return Ok(AuthoritativePollReport {
                 ingress,
+                removed_connections,
                 ..AuthoritativePollReport::default()
             });
         };
@@ -93,10 +96,19 @@ impl AuthoritativePlayRuntime {
 
         Ok(AuthoritativePollReport {
             ingress,
+            removed_connections,
             executed_ticks: batch.count,
             dropped_ticks: batch.dropped,
             processed_inputs,
         })
+    }
+
+    fn remove_unregistered_connection_state(&mut self) -> usize {
+        let previous = self.connections.len();
+        let workers = &self.workers;
+        self.connections
+            .retain(|connection, _| workers.contains_connection(*connection));
+        previous - self.connections.len()
     }
 
     fn execute_tick(&mut self, _tick: Tick) -> usize {
@@ -221,6 +233,36 @@ mod tests {
         worker.try_send_input(PlayInput::Disconnected).unwrap();
         runtime.poll(start + Duration::from_millis(100)).unwrap();
         assert_eq!(runtime.connection_count(), 0);
+    }
+
+    #[test]
+    fn worker_disconnect_removes_state_before_the_next_tick() {
+        let start = Instant::now();
+        let (connector, workers) = worker_channel(non_zero_usize(16));
+        let connection = ConnectionId::new(12);
+        let worker = connector
+            .try_connect(connection, non_zero_usize(4))
+            .unwrap();
+        worker.try_send_input(PlayInput::ClientTickEnd).unwrap();
+
+        let mut runtime = AuthoritativePlayRuntime::new(
+            workers,
+            start,
+            non_zero_usize(32),
+            non_zero_usize(32),
+            non_zero_usize(8),
+            non_zero_u32(4),
+        )
+        .unwrap();
+        runtime.poll(start + Duration::from_millis(50)).unwrap();
+        assert_eq!(runtime.connection_count(), 1);
+
+        worker.try_disconnect().unwrap();
+        let report = runtime.poll(start + Duration::from_millis(60)).unwrap();
+        assert_eq!(report.ingress.disconnections, 1);
+        assert_eq!(report.removed_connections, 1);
+        assert_eq!(report.executed_ticks, 0);
+        assert!(runtime.connection_state(connection).is_none());
     }
 
     #[test]
