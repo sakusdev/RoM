@@ -47,9 +47,8 @@ fn is_configuration_brand_payload(packet: &[u8]) -> bool {
 }
 
 pub(crate) fn write_packet(writer: &mut impl Write, packet: &[u8]) -> io::Result<()> {
-    let length = i32::try_from(packet.len()).map_err(|_| {
-        io::Error::new(io::ErrorKind::InvalidInput, "packet length exceeds i32")
-    })?;
+    let length = i32::try_from(packet.len())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "packet length exceeds i32"))?;
     let mut framed = Vec::with_capacity(packet.len().saturating_add(5));
     write_varint_vec(&mut framed, length);
     framed.extend_from_slice(packet);
