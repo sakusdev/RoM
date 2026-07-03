@@ -10,7 +10,7 @@ mod worker;
 pub use worker::{
     ConnectionInput, ConnectionOutput, ConnectionWorker, WorkerBroadcastReport, WorkerConnector,
     WorkerControlError, WorkerIngressReport, WorkerInputError, WorkerOutputError,
-    WorkerReceiveError, WorkerRuntime, worker_channel,
+    WorkerReceiveError, WorkerRuntime, WorkerWaitError, worker_channel,
 };
 
 use std::{
