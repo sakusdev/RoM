@@ -1483,17 +1483,26 @@ fn handle_play_protocol<R: Read, W: Write>(
     Ok(())
 }
 
+#[derive(Debug, Clone, Copy)]
+struct PlayOutputPacketIds {
+    keep_alive_request: i32,
+    disconnect: i32,
+}
+
 fn spawn_live_play_writer(
     endpoint: PlayWriterEndpoint,
     writer: SharedWriter<TcpStream>,
     profile: &ProtocolProfile,
 ) -> Result<PlayWriterWorker<SharedWriter<TcpStream>>> {
-    let disconnect_packet_id = profile.packets().require(PacketKind::PlayDisconnect)?;
+    let packet_ids = PlayOutputPacketIds {
+        keep_alive_request: profile.packets().require(PacketKind::KeepAliveRequest)?,
+        disconnect: profile.packets().require(PacketKind::PlayDisconnect)?,
+    };
     spawn_play_writer(
         endpoint,
         writer,
         Duration::from_millis(PLAY_WRITER_WAIT_MILLIS),
-        move |writer, output| write_live_play_output(writer, disconnect_packet_id, output),
+        move |writer, output| write_live_play_output(writer, packet_ids, output),
     )
 }
 
@@ -1510,7 +1519,7 @@ fn shutdown_live_play_writer(
 
 fn write_live_play_output<W: Write>(
     writer: &mut W,
-    disconnect_packet_id: i32,
+    packet_ids: PlayOutputPacketIds,
     output: PlayOutput,
 ) -> Result<PlayWriterDirective> {
     let directive = match output {
@@ -1518,11 +1527,21 @@ fn write_live_play_output<W: Write>(
             write_packet(writer, &packet)?;
             PlayWriterDirective::Continue
         }
+        PlayOutput::KeepAliveRequest(id) => {
+            write_packet(
+                writer,
+                &build_packet(packet_ids.keep_alive_request, |body| {
+                    body.extend_from_slice(&id.to_be_bytes());
+                    Ok(())
+                })?,
+            )?;
+            PlayWriterDirective::Continue
+        }
         PlayOutput::Disconnect(reason) => {
             let payload = encode_play_disconnect(&reason)?;
             write_packet(
                 writer,
-                &build_packet(disconnect_packet_id, |body| {
+                &build_packet(packet_ids.disconnect, |body| {
                     body.extend_from_slice(&payload);
                     Ok(())
                 })?,
@@ -2016,9 +2035,15 @@ mod tests {
     #[test]
     fn live_writer_frames_authoritative_packets() {
         let mut writer = Vec::new();
-        let directive =
-            write_live_play_output(&mut writer, 0x44, PlayOutput::Packet(vec![0x03, 0xaa]))
-                .unwrap();
+        let directive = write_live_play_output(
+            &mut writer,
+            PlayOutputPacketIds {
+                keep_alive_request: 0x43,
+                disconnect: 0x44,
+            },
+            PlayOutput::Packet(vec![0x03, 0xaa]),
+        )
+        .unwrap();
         assert_eq!(directive, PlayWriterDirective::Continue);
         assert_eq!(
             read_packet(&mut Cursor::new(writer)).unwrap(),
@@ -2027,11 +2052,37 @@ mod tests {
     }
 
     #[test]
+    fn live_writer_encodes_semantic_keep_alive_request() {
+        let mut writer = Vec::new();
+        let directive = write_live_play_output(
+            &mut writer,
+            PlayOutputPacketIds {
+                keep_alive_request: 0x43,
+                disconnect: 0x44,
+            },
+            PlayOutput::KeepAliveRequest(73),
+        )
+        .unwrap();
+        assert_eq!(directive, PlayWriterDirective::Continue);
+        let packet = read_packet(&mut Cursor::new(writer)).unwrap();
+        let mut reader = PacketReader::new(&packet);
+        assert_eq!(reader.read_varint().unwrap(), 0x43);
+        assert_eq!(reader.read_i64().unwrap(), 73);
+        assert!(reader.take_remaining().is_empty());
+    }
+
+    #[test]
     fn live_writer_encodes_disconnect_and_stops() {
         let mut writer = Vec::new();
-        let directive =
-            write_live_play_output(&mut writer, 0x44, PlayOutput::Disconnect("bye".to_owned()))
-                .unwrap();
+        let directive = write_live_play_output(
+            &mut writer,
+            PlayOutputPacketIds {
+                keep_alive_request: 0x43,
+                disconnect: 0x44,
+            },
+            PlayOutput::Disconnect("bye".to_owned()),
+        )
+        .unwrap();
         assert_eq!(directive, PlayWriterDirective::Stop);
         let packet = read_packet(&mut Cursor::new(writer)).unwrap();
         let mut reader = PacketReader::new(&packet);

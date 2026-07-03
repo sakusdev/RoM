@@ -22,6 +22,8 @@ pub enum PlayInput {
 pub enum PlayOutput {
     /// Unframed protocol packet bytes including the packet ID.
     Packet(Vec<u8>),
+    /// Request a protocol-aware Keep Alive packet with this identifier.
+    KeepAliveRequest(i64),
     /// Request a protocol-aware Play disconnect with this reason.
     Disconnect(String),
 }
