@@ -1,0 +1,24 @@
+name: Cleanup semantic output
+
+on:
+  pull_request:
+    branches: [master]
+    types: [synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: github.actor != 'github-actions[bot]' && github.head_ref == 'feature/authoritative-keep-alive-output'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/authoritative-keep-alive-output
+      - run: python3 tools/finalize_semantic_keep_alive.py
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: Cleanup semantic output
+          branch: feature/authoritative-keep-alive-output
+          file_pattern: .github/workflows tools
