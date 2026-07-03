@@ -65,6 +65,8 @@ The native server currently supports:
 - Configurable system chat and Keep Alive validation
 - Version-neutral 20 TPS scheduling and bounded deterministic input primitives
 - Generic bounded worker command channels and independently bounded non-blocking connection outputs
+- Protocol-aware Keep Alive and disconnect encoding for live Play writer outputs
+- Authoritative runtime Keep Alive requests routed through semantic Play output queues
 
 The implemented connection flow is:
 

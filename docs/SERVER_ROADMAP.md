@@ -190,6 +190,8 @@ Completed:
 - Add a generic deterministic state runner for applying envelopes at an authoritative tick.
 - Add a generic socket-independent worker hub that ingests registered connection inputs into the deterministic queue.
 - Add independently bounded non-blocking output queues so one full or disconnected writer cannot block another connection.
+- Encode semantic Keep Alive and disconnect outputs in live Play writers without exposing packet IDs to the runtime queue.
+- Emit authoritative semantic Keep Alive requests through the shared runtime output queues.
 - Remove pending authoritative input and output registration when a connection disconnects or is replaced.
 - Cover timing, overload, fairness, queue limits, disconnect cleanup, mutation order, and slow-output isolation with tests.
 
