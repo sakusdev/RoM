@@ -47,13 +47,13 @@ fn is_configuration_brand_payload(packet: &[u8]) -> bool {
 }
 
 pub(crate) fn write_packet(writer: &mut impl Write, packet: &[u8]) -> io::Result<()> {
-    write_varint_io(
-        writer,
-        i32::try_from(packet.len()).map_err(|_| {
-            io::Error::new(io::ErrorKind::InvalidInput, "packet length exceeds i32")
-        })?,
-    )?;
-    writer.write_all(packet)
+    let length = i32::try_from(packet.len()).map_err(|_| {
+        io::Error::new(io::ErrorKind::InvalidInput, "packet length exceeds i32")
+    })?;
+    let mut framed = Vec::with_capacity(packet.len().saturating_add(5));
+    write_varint_vec(&mut framed, length);
+    framed.extend_from_slice(packet);
+    writer.write_all(&framed)
 }
 
 pub(crate) fn build_packet(
@@ -87,21 +87,6 @@ pub(crate) fn read_varint_io(reader: &mut impl Read) -> io::Result<i32> {
         io::ErrorKind::InvalidData,
         "VarInt exceeds 5 bytes",
     ))
-}
-
-fn write_varint_io(writer: &mut impl Write, value: i32) -> io::Result<()> {
-    let mut value = value as u32;
-    loop {
-        let mut byte = (value & 0x7f) as u8;
-        value >>= 7;
-        if value != 0 {
-            byte |= 0x80;
-        }
-        writer.write_all(&[byte])?;
-        if value == 0 {
-            return Ok(());
-        }
-    }
 }
 
 pub(crate) fn write_varint_vec(output: &mut Vec<u8>, value: i32) {
@@ -209,6 +194,22 @@ mod tests {
     use super::*;
     use std::io::Cursor;
 
+    #[derive(Default)]
+    struct RecordingWriter {
+        writes: Vec<Vec<u8>>,
+    }
+
+    impl Write for RecordingWriter {
+        fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+            self.writes.push(buffer.to_vec());
+            Ok(buffer.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
     #[test]
     fn varint_round_trips_protocol_values() {
         for value in [0, 1, 127, 128, 255, 2_600, i32::MAX, -1] {
@@ -217,6 +218,13 @@ mod tests {
             let mut cursor = Cursor::new(encoded);
             assert_eq!(read_varint_io(&mut cursor).unwrap(), value);
         }
+    }
+
+    #[test]
+    fn writes_each_framed_packet_as_one_buffer() {
+        let mut writer = RecordingWriter::default();
+        write_packet(&mut writer, &[0x01, 0x02]).unwrap();
+        assert_eq!(writer.writes, vec![vec![0x02, 0x01, 0x02]]);
     }
 
     #[test]
