@@ -5,3 +5,4 @@ pub mod play_connection;
 pub mod play_input;
 pub mod play_writer;
 pub mod shared_runtime;
+pub mod shared_writer;
