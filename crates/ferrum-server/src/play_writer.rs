@@ -1,7 +1,4 @@
-use crate::{
-    authoritative_runtime::PlayOutput,
-    play_connection::PlayWriterEndpoint,
-};
+use crate::{authoritative_runtime::PlayOutput, play_connection::PlayWriterEndpoint};
 use anyhow::{Context, Result, bail};
 use ferrum_runtime::WorkerWaitError;
 use std::{
@@ -116,15 +113,7 @@ where
     let (shutdown, shutdown_receiver) = sync_channel(1);
     let worker = thread::Builder::new()
         .name(format!("rom-play-writer-{}", connection.get()))
-        .spawn(move || {
-            run_play_writer(
-                endpoint,
-                writer,
-                wait_timeout,
-                shutdown_receiver,
-                handler,
-            )
-        })
+        .spawn(move || run_play_writer(endpoint, writer, wait_timeout, shutdown_receiver, handler))
         .context("cannot spawn Play writer worker")?;
 
     Ok(PlayWriterWorker {
@@ -194,7 +183,7 @@ mod tests {
         let (connector, _runtime) = worker_channel(non_zero(2));
         let (_reader, writer) =
             register_play_connection(&connector, ConnectionId::new(1), non_zero(1)).unwrap();
-        let error = spawn_play_writer(writer, Vec::new(), Duration::ZERO, |_, _| {
+        let error = spawn_play_writer(writer, Vec::<u8>::new(), Duration::ZERO, |_, _| {
             Ok(PlayWriterDirective::Continue)
         })
         .unwrap_err();
