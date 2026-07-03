@@ -1,0 +1,38 @@
+name: Diagnose Play writer worker
+
+on:
+  pull_request:
+    branches: [master]
+    types: [synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    if: github.actor != 'github-actions[bot]' && github.head_ref == 'feature/play-writer-worker'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/play-writer-worker
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Capture diagnostics
+        run: |
+          set +e
+          cargo fmt --all
+          cargo clippy --workspace --all-targets --message-format=short -- -D warnings > play-writer-validation.txt 2>&1
+          clippy_status=$?
+          cargo test --workspace >> play-writer-validation.txt 2>&1
+          test_status=$?
+          printf '\nclippy_status=%s\ntest_status=%s\n' "$clippy_status" "$test_status" >> play-writer-validation.txt
+          git reset --hard HEAD
+      - name: Commit diagnostics
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add play-writer-validation.txt
+          git commit -m "Capture Play writer diagnostics"
+          git push origin HEAD:feature/play-writer-worker
