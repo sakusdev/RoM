@@ -1,0 +1,50 @@
+name: Build semantic Keep Alive output
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: github.actor != 'github-actions[bot]' && github.head_ref == 'feature/authoritative-keep-alive-output'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/authoritative-keep-alive-output
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Apply semantic output support
+        run: |
+          python3 tools/add_semantic_keep_alive_output.py
+          python3 tools/add_keep_alive_output_encoder.py
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('crates/ferrum-server/src/play_writer.rs')
+          source = path.read_text()
+          source = source.replace(
+              '                    PlayOutput::Packet(bytes) => writer.write_all(&bytes)?,\n                    PlayOutput::Disconnect(_) => return Ok(PlayWriterDirective::Stop),\n',
+              '                    PlayOutput::Packet(bytes) => writer.write_all(&bytes)?,\n                    PlayOutput::KeepAliveRequest(id) => writer.write_all(&id.to_be_bytes())?,\n                    PlayOutput::Disconnect(_) => return Ok(PlayWriterDirective::Stop),\n',
+              1,
+          )
+          source = source.replace(
+              '                PlayOutput::Packet(_) => Ok(PlayWriterDirective::Continue),\n                PlayOutput::Disconnect(reason) => {\n',
+              '                PlayOutput::Packet(_) | PlayOutput::KeepAliveRequest(_) => {\n                    Ok(PlayWriterDirective::Continue)\n                }\n                PlayOutput::Disconnect(reason) => {\n',
+              1,
+          )
+          path.write_text(source)
+          PY
+          cargo fmt --all
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: Add semantic Keep Alive output
+          branch: feature/authoritative-keep-alive-output
+          file_pattern: crates/ferrum-server/src/authoritative_runtime.rs crates/ferrum-server/src/main.rs crates/ferrum-server/src/play_writer.rs
