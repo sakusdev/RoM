@@ -21,8 +21,9 @@ jobs:
           components: rustfmt, clippy
       - name: Apply and validate
         run: |
-          python3 tools/apply_writer_wait.py
+          python3 tools/apply_writer_wait_v2.py
           rm tools/apply_writer_wait.py
+          rm tools/apply_writer_wait_v2.py
           cargo fmt --all
           cargo fmt --all --check
           cargo clippy --workspace --all-targets -- -D warnings
