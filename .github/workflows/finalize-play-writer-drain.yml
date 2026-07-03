@@ -1,0 +1,32 @@
+name: Finalize Play writer drain
+
+on:
+  pull_request:
+    branches: [master]
+    types: [synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]' && github.head_ref == 'feature/drain-play-writer-shutdown'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/drain-play-writer-shutdown
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Format and validate
+        run: |
+          cargo fmt --all
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: Finalize Play writer shutdown drain
+          branch: feature/drain-play-writer-shutdown
+          file_pattern: crates/ferrum-server/src/play_writer.rs
