@@ -107,7 +107,7 @@ mod tests {
         assert_eq!(bytes.len(), 2_048);
         let transition_count = bytes.windows(2).filter(|pair| pair[0] != pair[1]).count();
         assert_eq!(transition_count, 1);
-        assert!(bytes.iter().all(|byte| matches!(byte, 1 | 2)));
+        assert!(bytes.iter().all(|byte| matches!(*byte, 1 | 2)));
     }
 
     #[test]
