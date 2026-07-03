@@ -1,6 +1,6 @@
 use crate::{authoritative_runtime::PlayOutput, play_connection::PlayWriterEndpoint};
 use anyhow::{Context, Result, bail};
-use ferrum_runtime::WorkerWaitError;
+use ferrum_runtime::{WorkerReceiveError, WorkerWaitError};
 use std::{
     sync::mpsc::{SyncSender, TryRecvError, TrySendError, sync_channel},
     thread::{self, JoinHandle},
@@ -56,6 +56,8 @@ pub struct PlayWriterWorker<W> {
 }
 
 impl<W> PlayWriterWorker<W> {
+    /// Request a graceful stop, draining outputs already queued for this
+    /// connection before the writer thread exits.
     pub fn shutdown(mut self) -> Result<PlayWriterExit<W>> {
         self.signal_shutdown();
         self.join_worker()
@@ -136,10 +138,12 @@ where
     loop {
         match shutdown.try_recv() {
             Ok(()) | Err(TryRecvError::Disconnected) => {
+                let reason =
+                    drain_pending_outputs(&endpoint, &mut writer, &mut outputs, &mut handler)?;
                 return Ok(PlayWriterExit {
                     writer,
                     outputs,
-                    reason: PlayWriterExitReason::Shutdown,
+                    reason,
                 });
             }
             Err(TryRecvError::Empty) => {}
@@ -156,8 +160,7 @@ where
                 });
             }
         };
-        outputs = outputs.saturating_add(1);
-        if handler(&mut writer, output)? == PlayWriterDirective::Stop {
+        if process_output(&mut writer, &mut outputs, &mut handler, output)? {
             return Ok(PlayWriterExit {
                 writer,
                 outputs,
@@ -165,6 +168,43 @@ where
             });
         }
     }
+}
+
+fn drain_pending_outputs<W, H>(
+    endpoint: &PlayWriterEndpoint,
+    writer: &mut W,
+    outputs: &mut u64,
+    handler: &mut H,
+) -> Result<PlayWriterExitReason>
+where
+    H: FnMut(&mut W, PlayOutput) -> Result<PlayWriterDirective>,
+{
+    loop {
+        match endpoint.try_recv_output() {
+            Ok(output) => {
+                if process_output(writer, outputs, handler, output)? {
+                    return Ok(PlayWriterExitReason::HandlerRequestedStop);
+                }
+            }
+            Err(WorkerReceiveError::Empty) => return Ok(PlayWriterExitReason::Shutdown),
+            Err(WorkerReceiveError::RuntimeDisconnected) => {
+                return Ok(PlayWriterExitReason::RuntimeDisconnected);
+            }
+        }
+    }
+}
+
+fn process_output<W, H>(
+    writer: &mut W,
+    outputs: &mut u64,
+    handler: &mut H,
+    output: PlayOutput,
+) -> Result<bool>
+where
+    H: FnMut(&mut W, PlayOutput) -> Result<PlayWriterDirective>,
+{
+    *outputs = outputs.saturating_add(1);
+    Ok(handler(writer, output)? == PlayWriterDirective::Stop)
 }
 
 #[cfg(test)]
@@ -220,6 +260,67 @@ mod tests {
         assert_eq!(exit.outputs(), 1);
         assert_eq!(exit.reason(), PlayWriterExitReason::RuntimeDisconnected);
         assert_eq!(exit.into_writer(), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn graceful_shutdown_drains_outputs_already_in_the_queue() {
+        let (connector, mut runtime) = worker_channel(non_zero(4));
+        let connection = ConnectionId::new(21);
+        let (_reader, writer) =
+            register_play_connection(&connector, connection, non_zero(4)).unwrap();
+        let mut inputs = BoundedInputQueue::try_new(2).unwrap();
+        runtime.ingest_available(&mut inputs, 1).unwrap();
+        runtime
+            .try_send_output(connection, PlayOutput::Packet(vec![1, 2]))
+            .unwrap();
+        runtime
+            .try_send_output(connection, PlayOutput::Packet(vec![3, 4]))
+            .unwrap();
+
+        let worker = spawn_play_writer(
+            writer,
+            Vec::new(),
+            Duration::from_secs(1),
+            |writer, output| {
+                if let PlayOutput::Packet(bytes) = output {
+                    writer.write_all(&bytes)?;
+                }
+                Ok(PlayWriterDirective::Continue)
+            },
+        )
+        .unwrap();
+        let exit = worker.shutdown().unwrap();
+        assert_eq!(exit.outputs(), 2);
+        assert_eq!(exit.reason(), PlayWriterExitReason::Shutdown);
+        assert_eq!(exit.into_writer(), vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn shutdown_drain_preserves_handler_requested_stop() {
+        let (connector, mut runtime) = worker_channel(non_zero(4));
+        let connection = ConnectionId::new(22);
+        let (_reader, writer) =
+            register_play_connection(&connector, connection, non_zero(2)).unwrap();
+        let mut inputs = BoundedInputQueue::try_new(2).unwrap();
+        runtime.ingest_available(&mut inputs, 1).unwrap();
+        runtime
+            .try_send_output(connection, PlayOutput::Disconnect("done".to_owned()))
+            .unwrap();
+
+        let mut bytes = Vec::<u8>::new();
+        let mut outputs = 0_u64;
+        let mut handler = |writer: &mut Vec<u8>, output| {
+            if let PlayOutput::Disconnect(reason) = output {
+                writer.write_all(reason.as_bytes())?;
+                return Ok(PlayWriterDirective::Stop);
+            }
+            Ok(PlayWriterDirective::Continue)
+        };
+        let reason =
+            drain_pending_outputs(&writer, &mut bytes, &mut outputs, &mut handler).unwrap();
+        assert_eq!(outputs, 1);
+        assert_eq!(reason, PlayWriterExitReason::HandlerRequestedStop);
+        assert_eq!(bytes, b"done");
     }
 
     #[test]
