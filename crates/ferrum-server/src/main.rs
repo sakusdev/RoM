@@ -41,7 +41,7 @@ use std::{
     fs,
     io::{self, Read, Write},
     net::{TcpListener, TcpStream},
-    num::NonZeroUsize,
+    num::{NonZeroU32, NonZeroUsize},
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -198,8 +198,9 @@ impl ServerState {
         play_policy: PlayPolicy,
     ) -> Result<Self> {
         let center = play_runtime::spawn_chunk(&world);
+        let shared_runtime_config = shared_play_runtime_config(&play_policy)?;
         let shared_world = play_runtime::SharedWorld::new_with_policy(center, world, play_policy)?;
-        let shared_play_runtime = spawn_shared_play_runtime(SharedPlayRuntimeConfig::default())?;
+        let shared_play_runtime = spawn_shared_play_runtime(shared_runtime_config)?;
         Ok(Self {
             online_players: AtomicI32::new(initial_online_players),
             next_connection_id: AtomicU64::new(1),
@@ -244,6 +245,21 @@ impl ServerState {
     fn registry_payloads(&self) -> &[Vec<u8>] {
         &self.registry_payloads
     }
+}
+
+fn shared_play_runtime_config(play_policy: &PlayPolicy) -> Result<SharedPlayRuntimeConfig> {
+    let keep_alive_interval_ticks = play_policy
+        .keep_alive_interval_seconds
+        .checked_mul(20)
+        .context("shared runtime Keep Alive tick interval overflow")?;
+    Ok(SharedPlayRuntimeConfig {
+        keep_alive_interval_ticks: NonZeroU32::new(
+            u32::try_from(keep_alive_interval_ticks)
+                .context("shared runtime Keep Alive interval exceeds u32")?,
+        )
+        .context("shared runtime Keep Alive interval must be greater than zero")?,
+        ..SharedPlayRuntimeConfig::default()
+    })
 }
 
 #[derive(Debug)]
@@ -2161,6 +2177,30 @@ mod tests {
         ] {
             assert!(ServerConfig::from_toml_like_with_base(invalid, None).is_err());
         }
+    }
+
+    #[test]
+    fn play_policy_drives_shared_runtime_keep_alive_interval() {
+        let mut policy = PlayPolicy {
+            keep_alive_interval_seconds: 1,
+            ..PlayPolicy::default()
+        };
+        assert_eq!(
+            shared_play_runtime_config(&policy)
+                .unwrap()
+                .keep_alive_interval_ticks
+                .get(),
+            20
+        );
+
+        policy.keep_alive_interval_seconds = MAX_KEEP_ALIVE_INTERVAL_SECONDS;
+        assert_eq!(
+            shared_play_runtime_config(&policy)
+                .unwrap()
+                .keep_alive_interval_ticks
+                .get(),
+            6_000
+        );
     }
 
     #[test]
