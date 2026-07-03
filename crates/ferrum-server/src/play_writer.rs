@@ -138,12 +138,8 @@ where
     loop {
         match shutdown.try_recv() {
             Ok(()) | Err(TryRecvError::Disconnected) => {
-                let reason = drain_pending_outputs(
-                    &endpoint,
-                    &mut writer,
-                    &mut outputs,
-                    &mut handler,
-                )?;
+                let reason =
+                    drain_pending_outputs(&endpoint, &mut writer, &mut outputs, &mut handler)?;
                 return Ok(PlayWriterExit {
                     writer,
                     outputs,
@@ -320,7 +316,8 @@ mod tests {
             }
             Ok(PlayWriterDirective::Continue)
         };
-        let reason = drain_pending_outputs(&writer, &mut bytes, &mut outputs, &mut handler).unwrap();
+        let reason =
+            drain_pending_outputs(&writer, &mut bytes, &mut outputs, &mut handler).unwrap();
         assert_eq!(outputs, 1);
         assert_eq!(reason, PlayWriterExitReason::HandlerRequestedStop);
         assert_eq!(bytes, b"done");
