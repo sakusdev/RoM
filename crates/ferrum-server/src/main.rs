@@ -25,9 +25,11 @@ use ferrum_protocol::{HandshakeIntent, PacketKind, PacketTable, ProtocolProfile,
 use ferrum_rompack::{RomPack, RomPackPacket, RomPackRegistry, RomPackWorld, read_rompack};
 use ferrum_runtime::ConnectionId;
 use ferrum_server::{
-    authoritative_runtime::PlayInput,
+    authoritative_runtime::{PlayInput, PlayOutput},
     play_connection::{PlayReaderEndpoint, PlayWriterEndpoint, register_play_connection},
+    play_writer::{PlayWriterDirective, PlayWriterWorker, spawn_play_writer},
     shared_runtime::{SharedPlayRuntime, SharedPlayRuntimeConfig, spawn_shared_play_runtime},
+    shared_writer::SharedWriter,
 };
 use ferrum_version_26_1_2 as version_26_1_2;
 #[cfg(test)]
@@ -66,6 +68,7 @@ const MAX_WELCOME_MESSAGE_BYTES: usize = 256;
 const MAX_CONFIGURATION_AUXILIARY_PACKETS: usize = 16;
 const MAX_IGNORED_PLAY_PACKETS: usize = 1_024;
 const PLAY_OUTPUT_QUEUE_CAPACITY: usize = 256;
+const PLAY_WRITER_WAIT_MILLIS: u64 = 50;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -224,7 +227,7 @@ impl ServerState {
             state: self,
             connection_id,
             play_reader,
-            _play_writer: play_writer,
+            play_writer: Some(play_writer),
         })
     }
 
@@ -248,7 +251,7 @@ struct OnlinePlayerGuard<'a> {
     state: &'a ServerState,
     connection_id: ConnectionId,
     play_reader: PlayReaderEndpoint,
-    _play_writer: PlayWriterEndpoint,
+    play_writer: Option<PlayWriterEndpoint>,
 }
 
 impl OnlinePlayerGuard<'_> {
@@ -258,6 +261,12 @@ impl OnlinePlayerGuard<'_> {
 
     fn play_reader(&self) -> &PlayReaderEndpoint {
         &self.play_reader
+    }
+
+    fn take_play_writer(&mut self) -> Result<PlayWriterEndpoint> {
+        self.play_writer
+            .take()
+            .context("Play writer endpoint was already taken")
     }
 }
 
@@ -1093,9 +1102,49 @@ fn base64_encode(bytes: &[u8]) -> String {
     output
 }
 
+std::thread_local! {
+    static LIVE_PLAY_WRITER: std::cell::RefCell<Option<SharedWriter<TcpStream>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+struct LivePlayWriterRegistration;
+
+impl LivePlayWriterRegistration {
+    fn install(writer: SharedWriter<TcpStream>) -> Result<Self> {
+        LIVE_PLAY_WRITER.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            if slot.is_some() {
+                bail!("live Play writer is already registered on this thread");
+            }
+            *slot = Some(writer);
+            Ok(Self)
+        })
+    }
+}
+
+impl Drop for LivePlayWriterRegistration {
+    fn drop(&mut self) {
+        LIVE_PLAY_WRITER.with(|slot| {
+            slot.borrow_mut().take();
+        });
+    }
+}
+
+fn take_live_play_writer() -> Option<SharedWriter<TcpStream>> {
+    LIVE_PLAY_WRITER.with(|slot| slot.borrow_mut().take())
+}
+
 fn handle_client(stream: &mut TcpStream, config: &ServerConfig, state: &ServerState) -> Result<()> {
-    let mut reader = stream.try_clone().context("cannot clone TCP stream")?;
-    handle_connection_protocol_with_play_round_limit(&mut reader, stream, config, state, None)
+    let mut reader = stream
+        .try_clone()
+        .context("cannot clone TCP stream reader")?;
+    let writer = SharedWriter::new(
+        stream
+            .try_clone()
+            .context("cannot clone TCP stream writer")?,
+    );
+    let _live_writer = LivePlayWriterRegistration::install(writer.clone())?;
+    handle_connection_protocol_with_play_round_limit(&mut reader, writer, config, state, None)
 }
 
 #[cfg(test)]
@@ -1395,7 +1444,15 @@ fn handle_play_protocol<R: Read, W: Write>(
         return Ok(());
     }
 
-    let online_player = context.state.try_enter_play()?;
+    let mut online_player = context.state.try_enter_play()?;
+    let writer_worker = match take_live_play_writer() {
+        Some(live_writer) => Some(spawn_live_play_writer(
+            online_player.take_play_writer()?,
+            live_writer,
+            profile,
+        )?),
+        None => None,
+    };
     let result = run_static_play_session_with_bridge(
         reader,
         writer,
@@ -1409,7 +1466,11 @@ fn handle_play_protocol<R: Read, W: Write>(
         Some(online_player.play_reader()),
         play_round_limit,
     );
+    let writer_result = shutdown_live_play_writer(writer_worker);
     if let Err(error) = result {
+        if let Err(writer_error) = writer_result {
+            eprintln!("Play writer shutdown also failed: {writer_error:#}");
+        }
         let reason = format!("Ferrum closed the connection: {error}");
         if let Ok(payload) = encode_play_disconnect(&reason) {
             let _ = write_play_payload(writer, profile, PacketKind::PlayDisconnect, &payload);
@@ -1418,7 +1479,59 @@ fn handle_play_protocol<R: Read, W: Write>(
         session.disconnect();
         return Err(error);
     }
+    writer_result?;
     Ok(())
+}
+
+fn spawn_live_play_writer(
+    endpoint: PlayWriterEndpoint,
+    writer: SharedWriter<TcpStream>,
+    profile: &ProtocolProfile,
+) -> Result<PlayWriterWorker<SharedWriter<TcpStream>>> {
+    let disconnect_packet_id = profile.packets().require(PacketKind::PlayDisconnect)?;
+    spawn_play_writer(
+        endpoint,
+        writer,
+        Duration::from_millis(PLAY_WRITER_WAIT_MILLIS),
+        move |writer, output| write_live_play_output(writer, disconnect_packet_id, output),
+    )
+}
+
+fn shutdown_live_play_writer(
+    writer: Option<PlayWriterWorker<SharedWriter<TcpStream>>>,
+) -> Result<()> {
+    if let Some(writer) = writer {
+        writer
+            .shutdown()
+            .context("cannot shut down live Play writer")?;
+    }
+    Ok(())
+}
+
+fn write_live_play_output<W: Write>(
+    writer: &mut W,
+    disconnect_packet_id: i32,
+    output: PlayOutput,
+) -> Result<PlayWriterDirective> {
+    let directive = match output {
+        PlayOutput::Packet(packet) => {
+            write_packet(writer, &packet)?;
+            PlayWriterDirective::Continue
+        }
+        PlayOutput::Disconnect(reason) => {
+            let payload = encode_play_disconnect(&reason)?;
+            write_packet(
+                writer,
+                &build_packet(disconnect_packet_id, |body| {
+                    body.extend_from_slice(&payload);
+                    Ok(())
+                })?,
+            )?;
+            PlayWriterDirective::Stop
+        }
+    };
+    writer.flush()?;
+    Ok(directive)
 }
 
 #[cfg(test)]
@@ -1899,6 +2012,32 @@ fn parse_handshake_packet(packet: &[u8], packets: &PacketTable) -> Result<Handsh
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn live_writer_frames_authoritative_packets() {
+        let mut writer = Vec::new();
+        let directive =
+            write_live_play_output(&mut writer, 0x44, PlayOutput::Packet(vec![0x03, 0xaa]))
+                .unwrap();
+        assert_eq!(directive, PlayWriterDirective::Continue);
+        assert_eq!(
+            read_packet(&mut Cursor::new(writer)).unwrap(),
+            vec![0x03, 0xaa]
+        );
+    }
+
+    #[test]
+    fn live_writer_encodes_disconnect_and_stops() {
+        let mut writer = Vec::new();
+        let directive =
+            write_live_play_output(&mut writer, 0x44, PlayOutput::Disconnect("bye".to_owned()))
+                .unwrap();
+        assert_eq!(directive, PlayWriterDirective::Stop);
+        let packet = read_packet(&mut Cursor::new(writer)).unwrap();
+        let mut reader = PacketReader::new(&packet);
+        assert_eq!(reader.read_varint().unwrap(), 0x44);
+        assert!(!reader.take_remaining().is_empty());
+    }
 
     #[test]
     fn generated_play_metadata_drives_join_and_spawn_payloads() {
