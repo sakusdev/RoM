@@ -2,7 +2,10 @@ use crate::{BoundedInputQueue, ConnectionId, QueueError};
 use std::{
     collections::BTreeMap,
     num::NonZeroUsize,
-    sync::mpsc::{Receiver, SyncSender, TryRecvError, TrySendError, sync_channel},
+    sync::mpsc::{
+        Receiver, RecvTimeoutError, SyncSender, TryRecvError, TrySendError, sync_channel,
+    },
+    time::Duration,
 };
 use thiserror::Error;
 
@@ -146,6 +149,14 @@ impl<I, O> ConnectionWorker<I, O> {
             Err(TryRecvError::Disconnected) => Err(WorkerReceiveError::RuntimeDisconnected),
         }
     }
+
+    pub fn recv_output(&self) -> Result<O, WorkerWaitError> {
+        recv_output(&self.output)
+    }
+
+    pub fn recv_output_timeout(&self, timeout: Duration) -> Result<O, WorkerWaitError> {
+        recv_output_timeout(&self.output, timeout)
+    }
 }
 
 /// Cloneable per-connection endpoint used by network reader workers.
@@ -219,6 +230,36 @@ impl<O> ConnectionOutput<O> {
             Err(TryRecvError::Disconnected) => Err(WorkerReceiveError::RuntimeDisconnected),
         }
     }
+
+    pub fn recv_output(&self) -> Result<O, WorkerWaitError> {
+        recv_output(&self.output)
+    }
+
+    pub fn recv_output_timeout(&self, timeout: Duration) -> Result<O, WorkerWaitError> {
+        recv_output_timeout(&self.output, timeout)
+    }
+}
+
+fn recv_output<O>(output: &Receiver<O>) -> Result<O, WorkerWaitError> {
+    output
+        .recv()
+        .map_err(|_| WorkerWaitError::RuntimeDisconnected)
+}
+
+fn recv_output_timeout<O>(output: &Receiver<O>, timeout: Duration) -> Result<O, WorkerWaitError> {
+    match output.recv_timeout(timeout) {
+        Ok(output) => Ok(output),
+        Err(RecvTimeoutError::Timeout) => Err(WorkerWaitError::Timeout),
+        Err(RecvTimeoutError::Disconnected) => Err(WorkerWaitError::RuntimeDisconnected),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum WorkerWaitError {
+    #[error("timed out waiting for connection output")]
+    Timeout,
+    #[error("authoritative worker runtime is disconnected")]
+    RuntimeDisconnected,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
@@ -562,6 +603,40 @@ mod tests {
         let report = runtime.ingest_available(&mut inputs, 1).unwrap();
         assert_eq!(report.disconnections, 1);
         assert!(!runtime.contains_connection(ConnectionId::new(11)));
+    }
+
+    #[test]
+    fn writer_endpoint_waits_for_queued_output() {
+        let (connector, mut runtime) = worker_channel::<(), &'static str>(non_zero(4));
+        let connection = ConnectionId::new(19);
+        let worker = connector.try_connect(connection, non_zero(2)).unwrap();
+        let (_input, output) = worker.split();
+        let mut inputs = BoundedInputQueue::try_new(2).unwrap();
+        runtime.ingest_available(&mut inputs, 1).unwrap();
+        runtime.try_send_output(connection, "ready").unwrap();
+        assert_eq!(output.recv_output().unwrap(), "ready");
+    }
+
+    #[test]
+    fn writer_endpoint_reports_timeout_and_disconnect_separately() {
+        let (connector, mut runtime) = worker_channel::<(), ()>(non_zero(4));
+        let worker = connector
+            .try_connect(ConnectionId::new(20), non_zero(1))
+            .unwrap();
+        let (_input, output) = worker.split();
+        let mut inputs = BoundedInputQueue::try_new(2).unwrap();
+        runtime.ingest_available(&mut inputs, 1).unwrap();
+        assert_eq!(
+            output
+                .recv_output_timeout(Duration::from_millis(1))
+                .unwrap_err(),
+            WorkerWaitError::Timeout
+        );
+        drop(runtime);
+        assert_eq!(
+            output.recv_output().unwrap_err(),
+            WorkerWaitError::RuntimeDisconnected
+        );
     }
 
     #[test]
