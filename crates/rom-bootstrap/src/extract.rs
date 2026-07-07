@@ -372,11 +372,8 @@ fn select_embedded_game_jar<R: Read + Seek>(
     match read_versions_list(archive) {
         Ok(Some(candidate)) => Ok(candidate),
         Ok(None) => find_single_embedded_jar(archive),
-        Err(list_error) => find_single_embedded_jar(archive).with_context(|| {
-            format!(
-                "cannot parse META-INF/versions.list and cannot select an unambiguous embedded game JAR fallback: {list_error:#}"
-            )
-        }),
+        Err(list_error) => find_single_embedded_jar(archive)
+            .with_context(|| format!("invalid META-INF/versions.list: {list_error:#}")),
     }
 }
 
