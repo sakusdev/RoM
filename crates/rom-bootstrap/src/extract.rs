@@ -795,7 +795,10 @@ mod tests {
     fn falls_back_to_single_embedded_game_jar_when_versions_list_is_invalid() {
         let directory = tempdir().unwrap();
         let game_jar = build_game_jar();
-        let outer = build_outer_jar_with_versions_list(&game_jar, "not a valid versions.list row\n");
+        let outer = build_outer_jar_with_versions_list(
+            &game_jar,
+            "not a valid versions.list row\n",
+        );
         let path = directory.path().join("server.jar");
         fs::write(&path, outer).unwrap();
         let resolved = resolve_game_jar(&path).unwrap();
