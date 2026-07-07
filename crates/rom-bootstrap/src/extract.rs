@@ -344,7 +344,12 @@ fn resolve_game_jar(path: &Path) -> Result<ResolvedGameJar> {
     let mut archive = ZipArchive::new(Cursor::new(&outer_bytes))
         .context("official server artifact is not a valid ZIP/JAR")?;
     ensure_archive_entry_limit(&archive)?;
-    let candidate = select_embedded_game_jar(&mut archive)?;
+    let candidate = match read_versions_list(&mut archive) {
+        Ok(Some(candidate)) => candidate,
+        Ok(None) => find_single_embedded_jar(&mut archive)?,
+        Err(_) => find_single_embedded_jar(&mut archive)
+            .context("invalid META-INF/versions.list and no embedded game JAR fallback")?,
+    };
     let bytes = read_zip_entry(&mut archive, &candidate.path, MAX_GAME_JAR_BYTES)?;
     if let Some(expected_sha256) = candidate.sha256 {
         let actual = sha256_hex(&bytes);
@@ -364,17 +369,6 @@ fn resolve_game_jar(path: &Path) -> Result<ResolvedGameJar> {
 struct GameJarCandidate {
     path: String,
     sha256: Option<String>,
-}
-
-fn select_embedded_game_jar<R: Read + Seek>(
-    archive: &mut ZipArchive<R>,
-) -> Result<GameJarCandidate> {
-    match read_versions_list(archive) {
-        Ok(Some(candidate)) => Ok(candidate),
-        Ok(None) => find_single_embedded_jar(archive),
-        Err(list_error) => find_single_embedded_jar(archive)
-            .with_context(|| format!("invalid META-INF/versions.list: {list_error:#}")),
-    }
 }
 
 fn read_versions_list<R: Read + Seek>(
