@@ -344,10 +344,7 @@ fn resolve_game_jar(path: &Path) -> Result<ResolvedGameJar> {
     let mut archive = ZipArchive::new(Cursor::new(&outer_bytes))
         .context("official server artifact is not a valid ZIP/JAR")?;
     ensure_archive_entry_limit(&archive)?;
-    let listed = match read_versions_list(&mut archive) {
-        Ok(listed) => listed,
-        Err(_) => None,
-    };
+    let listed = read_versions_list(&mut archive).unwrap_or_default();
     let candidate = if let Some(candidate) = listed {
         candidate
     } else {
