@@ -18,12 +18,13 @@ jobs:
           fetch-depth: 0
       - name: Merge master and clean temporary diagnostics
         run: |
+          bash <<'SH' 2>&1 | tee fixup.log
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin master
           git merge --no-edit origin/master
-          python - <<'PY'
+          cat > /tmp/fixup.py <<'PY'
           from pathlib import Path
 
           anvil = Path("crates/ferrum-world/src/anvil.rs")
@@ -78,10 +79,18 @@ jobs:
           )
           Path(".github/workflows/branch-fixup.yml").unlink(missing_ok=True)
           PY
+          python /tmp/fixup.py
           git add .
           git status --short
           git commit -m "Merge master and fix CI [skip-branch-fixup]"
           git push origin HEAD:codex/bootstrap-versions-list-fallback
+          SH
+      - name: Upload branch fixup log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: branch-fixup-log
+          path: fixup.log
 
   test:
     strategy:
