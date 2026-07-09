@@ -344,11 +344,14 @@ fn resolve_game_jar(path: &Path) -> Result<ResolvedGameJar> {
     let mut archive = ZipArchive::new(Cursor::new(&outer_bytes))
         .context("official server artifact is not a valid ZIP/JAR")?;
     ensure_archive_entry_limit(&archive)?;
-    let candidate = match read_versions_list(&mut archive) {
-        Ok(Some(candidate)) => candidate,
-        Ok(None) => find_single_embedded_jar(&mut archive)?,
-        Err(_) => find_single_embedded_jar(&mut archive)
-            .context("invalid META-INF/versions.list and no embedded game JAR fallback")?,
+    let listed = match read_versions_list(&mut archive) {
+        Ok(listed) => listed,
+        Err(_) => None,
+    };
+    let candidate = if let Some(candidate) = listed {
+        candidate
+    } else {
+        find_single_embedded_jar(&mut archive)?
     };
     let bytes = read_zip_entry(&mut archive, &candidate.path, MAX_GAME_JAR_BYTES)?;
     if let Some(expected_sha256) = candidate.sha256 {
@@ -729,14 +732,31 @@ mod tests {
     }
 
     fn build_outer_jar(game_jar: &[u8]) -> Vec<u8> {
-        let digest = sha256_hex(game_jar);
-        build_outer_jar_with_versions_list(
-            game_jar,
-            &format!("{digest}\tserver-26.1.2\tMETA-INF/versions/26.1.2/server.jar\n"),
-        )
+        let mut cursor = Cursor::new(Vec::new());
+        {
+            let mut writer = ZipWriter::new(&mut cursor);
+            let options =
+                SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+            let digest = sha256_hex(game_jar);
+            writer
+                .start_file("META-INF/versions.list", options)
+                .unwrap();
+            writer
+                .write_all(
+                    format!("{digest}\tserver-26.1.2\tMETA-INF/versions/26.1.2/server.jar\n")
+                        .as_bytes(),
+                )
+                .unwrap();
+            writer
+                .start_file("META-INF/versions/26.1.2/server.jar", options)
+                .unwrap();
+            writer.write_all(game_jar).unwrap();
+            writer.finish().unwrap();
+        }
+        cursor.into_inner()
     }
 
-    fn build_outer_jar_with_versions_list(game_jar: &[u8], versions_list: &str) -> Vec<u8> {
+    fn build_outer_jar_with_invalid_versions_list(game_jar: &[u8]) -> Vec<u8> {
         let mut cursor = Cursor::new(Vec::new());
         {
             let mut writer = ZipWriter::new(&mut cursor);
@@ -745,7 +765,9 @@ mod tests {
             writer
                 .start_file("META-INF/versions.list", options)
                 .unwrap();
-            writer.write_all(versions_list.as_bytes()).unwrap();
+            writer
+                .write_all(b"not a valid versions.list row\n")
+                .unwrap();
             writer
                 .start_file("META-INF/versions/26.1.2/server.jar", options)
                 .unwrap();
@@ -786,10 +808,7 @@ mod tests {
     fn falls_back_to_single_embedded_game_jar_when_versions_list_is_invalid() {
         let directory = tempdir().unwrap();
         let game_jar = build_game_jar();
-        let outer = build_outer_jar_with_versions_list(
-            &game_jar,
-            "not a valid versions.list row\n",
-        );
+        let outer = build_outer_jar_with_invalid_versions_list(&game_jar);
         let path = directory.path().join("server.jar");
         fs::write(&path, outer).unwrap();
         let resolved = resolve_game_jar(&path).unwrap();
