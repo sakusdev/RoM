@@ -7,6 +7,8 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+ferrum-nbt = { path = "../ferrum-nbt" }
+flate2.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

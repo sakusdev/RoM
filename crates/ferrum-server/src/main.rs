@@ -33,7 +33,9 @@ use ferrum_server::{
 };
 use ferrum_version_26_1_2 as version_26_1_2;
 #[cfg(test)]
-use ferrum_world::ChunkPos;
+use ferrum_world::{
+    BiomeId, BlockMutation, BlockPos, BlockStateId, ChunkPos, ChunkStore, StaticChunk,
+};
 use identity::offline_player_identity;
 use serde_json::{Map, Value, json};
 use std::{
@@ -200,6 +202,27 @@ impl ServerState {
         let center = play_runtime::spawn_chunk(&world);
         let shared_runtime_config = shared_play_runtime_config(&play_policy)?;
         let shared_world = play_runtime::SharedWorld::new_with_policy(center, world, play_policy)?;
+        let shared_play_runtime = spawn_shared_play_runtime(shared_runtime_config)?;
+        Ok(Self {
+            online_players: AtomicI32::new(initial_online_players),
+            next_connection_id: AtomicU64::new(1),
+            world: shared_world,
+            registry_payloads,
+            shared_play_runtime,
+        })
+    }
+
+    #[cfg(test)]
+    fn with_loaded_world_runtime(
+        initial_online_players: i32,
+        world: RomPackWorld,
+        store: ChunkStore,
+        registry_payloads: Vec<Vec<u8>>,
+        play_policy: PlayPolicy,
+    ) -> Result<Self> {
+        let shared_runtime_config = shared_play_runtime_config(&play_policy)?;
+        let shared_world =
+            play_runtime::SharedWorld::from_store_with_policy(store, world, play_policy)?;
         let shared_play_runtime = spawn_shared_play_runtime(shared_runtime_config)?;
         Ok(Self {
             online_players: AtomicI32::new(initial_online_players),
@@ -2147,6 +2170,48 @@ mod tests {
         let join = static_join_game(&config, &world);
         assert_eq!(join.chunk_radius, 4);
         assert_eq!(join.simulation_distance, 6);
+    }
+
+    #[test]
+    fn server_state_can_start_from_loaded_world_store() {
+        let world = play_runtime::builtin_world_profile();
+        let loaded_position = BlockPos { x: 1, y: 65, z: 1 };
+        let loaded_state = BlockStateId::new(world.block_states.stone);
+        let mut chunk = StaticChunk::new(
+            ChunkPos { x: 0, z: 0 },
+            world.overworld_min_section_y,
+            world.overworld_section_count,
+            BlockStateId::new(world.block_states.air),
+            BiomeId::new(world.biomes.plains),
+        )
+        .unwrap();
+        chunk
+            .apply_block_mutation(BlockMutation {
+                position: loaded_position,
+                state: loaded_state,
+            })
+            .unwrap();
+        let mut store = ChunkStore::new();
+        store.insert(chunk);
+
+        let state = ServerState::with_loaded_world_runtime(
+            0,
+            world,
+            store,
+            Vec::new(),
+            PlayPolicy::default(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            state
+                .world()
+                .chunk_snapshot(ChunkPos { x: 0, z: 0 })
+                .unwrap()
+                .world_block(loaded_position)
+                .unwrap(),
+            loaded_state
+        );
     }
 
     #[test]

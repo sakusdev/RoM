@@ -155,6 +155,23 @@ impl SharedWorld {
         })
     }
 
+    pub(super) fn from_store_with_policy(
+        store: ChunkStore,
+        profile: RomPackWorld,
+        play_policy: PlayPolicy,
+    ) -> Result<Self> {
+        let runtime = local_world_runtime_from_store(store);
+        Ok(Self {
+            profile,
+            play_policy,
+            inner: Mutex::new(SharedWorldInner {
+                runtime,
+                tick: Tick::ZERO,
+                subscribers: BTreeMap::new(),
+            }),
+        })
+    }
+
     #[cfg(test)]
     pub(super) fn static_flat() -> Self {
         let profile = builtin_world_profile();
@@ -541,11 +558,15 @@ fn new_local_world_runtime_with_radius(
 ) -> Result<LocalWorldRuntime> {
     let mut store = ChunkStore::new();
     seed_chunk_square(&mut store, center, chunk_radius, profile)?;
-    Ok(DeterministicRuntime::new(
+    Ok(local_world_runtime_from_store(store))
+}
+
+fn local_world_runtime_from_store(store: ChunkStore) -> LocalWorldRuntime {
+    DeterministicRuntime::new(
         store,
         non_zero_usize(LOCAL_WORLD_QUEUE_CAPACITY),
         non_zero_usize(LOCAL_WORLD_EVENTS_PER_TICK),
-    ))
+    )
 }
 
 fn non_zero_usize(value: usize) -> NonZeroUsize {
@@ -923,6 +944,69 @@ mod tests {
         assert_eq!(
             world.world_block(BlockPos { x: 0, y: 61, z: 0 }).unwrap(),
             BlockStateId::new(123)
+        );
+    }
+
+    #[test]
+    fn shared_world_can_start_from_loaded_chunk_store() {
+        let profile = builtin_world_profile();
+        let pos = ChunkPos { x: 0, z: 0 };
+        let custom_position = BlockPos { x: 1, y: 65, z: 1 };
+        let custom_state = BlockStateId::new(profile.block_states.stone);
+        let mut chunk = StaticChunk::new(
+            pos,
+            profile.overworld_min_section_y,
+            profile.overworld_section_count,
+            BlockStateId::new(profile.block_states.air),
+            BiomeId::new(profile.biomes.plains),
+        )
+        .unwrap();
+        chunk
+            .apply_block_mutation(BlockMutation {
+                position: custom_position,
+                state: custom_state,
+            })
+            .unwrap();
+        let mut store = ChunkStore::new();
+        store.insert(chunk);
+
+        let world =
+            SharedWorld::from_store_with_policy(store, profile.clone(), PlayPolicy::default())
+                .unwrap();
+
+        assert_eq!(world.world_block(custom_position).unwrap(), custom_state);
+        assert_eq!(
+            world
+                .chunk_snapshot(pos)
+                .unwrap()
+                .world_block(custom_position)
+                .unwrap(),
+            custom_state
+        );
+    }
+
+    #[test]
+    fn loaded_chunk_store_still_generates_missing_chunks_on_demand() {
+        let profile = builtin_world_profile();
+        let store = ChunkStore::new();
+        let world =
+            SharedWorld::from_store_with_policy(store, profile.clone(), PlayPolicy::default())
+                .unwrap();
+        let missing = ChunkPos { x: 1, z: 0 };
+
+        world.ensure_chunks_loaded(&[missing]).unwrap();
+
+        assert_eq!(
+            world
+                .chunk_snapshot(missing)
+                .unwrap()
+                .world_block(BlockPos {
+                    x: 16,
+                    y: profile.floor_y,
+                    z: 0,
+                })
+                .unwrap(),
+            BlockStateId::new(profile.block_states.grass)
         );
     }
 
