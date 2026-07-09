@@ -2,7 +2,7 @@ use super::{
     MAX_IGNORED_PLAY_PACKETS, PlayPolicy, is_connection_eof, is_transient_read_timeout,
     version_26_1_2, write_play_payload,
 };
-use crate::codec::{PacketReader, read_packet};
+use crate::codec::{PacketReader, build_packet, read_packet};
 use anyhow::{Context, Result, bail};
 use ferrum_play::{
     BlockPosition, PlayerMovement, PlayerState, decode_player_action, decode_use_item_on_block,
@@ -17,7 +17,8 @@ use ferrum_protocol::{
 use ferrum_rompack::{RomPackBiomes, RomPackBlockStates, RomPackWorld};
 use ferrum_runtime::{ConnectionId, DeterministicRuntime, Tick};
 use ferrum_server::{
-    authoritative_runtime::PlayInput, play_connection::PlayReaderEndpoint,
+    authoritative_runtime::{PlayInput, PlayOutput},
+    play_connection::PlayReaderEndpoint,
     play_input::decode_play_input,
 };
 use ferrum_world::{
@@ -384,7 +385,14 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
     if play_round_limit.is_none() {
         let initial_delta = view.synchronize()?;
         shared_world.ensure_chunks_loaded(&initial_delta.newly_visible)?;
-        send_chunk_view_delta(writer, profile, shared_world, view.center(), &initial_delta)?;
+        send_chunk_view_delta(
+            writer,
+            profile,
+            shared_world,
+            view.center(),
+            &initial_delta,
+            play_reader,
+        )?;
     }
 
     let tick_interval = keep_alive_tick_interval(play_policy)?;
@@ -393,14 +401,17 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
     let mut ignored_packets = 0_usize;
 
     loop {
-        write_play_payload(
+        write_or_route_play_payload(
             writer,
             profile,
             PacketKind::KeepAliveRequest,
             &encode_keep_alive(keep_alive_id),
+            play_reader,
         )?;
         session.keep_alive_sent(keep_alive_id)?;
-        writer.flush()?;
+        if play_reader.is_none() {
+            writer.flush()?;
+        }
 
         let mut keep_alive_acknowledged = false;
         let mut ticks_since_request = 0_usize;
@@ -417,6 +428,7 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
                         profile,
                         shared_world,
                         connection,
+                        play_reader,
                     )?;
                     continue;
                 }
@@ -478,6 +490,7 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
                                     shared_world,
                                     current_chunk,
                                     &delta,
+                                    play_reader,
                                 )?;
                             }
                         }
@@ -497,9 +510,9 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
                         && is_break_target_mutable(shared_world, event)?
                     {
                         let applied = shared_world.apply_event(connection, event)?;
-                        send_world_updates(writer, profile, &applied)?;
+                        send_world_updates(writer, profile, &applied, play_reader)?;
                     }
-                    send_block_changed_ack(writer, profile, sequence)?;
+                    send_block_changed_ack(writer, profile, sequence, play_reader)?;
                 }
                 Some(PacketKind::UseItemOn) => {
                     let interaction = decode_use_item_on_block(packet_reader.take_remaining())?;
@@ -512,9 +525,9 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
                         && is_placement_target_air(shared_world, event)?
                     {
                         let applied = shared_world.apply_event(connection, event)?;
-                        send_world_updates(writer, profile, &applied)?;
+                        send_world_updates(writer, profile, &applied, play_reader)?;
                     }
-                    send_block_changed_ack(writer, profile, sequence)?;
+                    send_block_changed_ack(writer, profile, sequence, play_reader)?;
                 }
                 _ => {
                     ignored_packets = ignored_packets
@@ -526,7 +539,13 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
                 }
             }
 
-            drain_and_send_pending_world_updates(writer, profile, shared_world, connection)?;
+            drain_and_send_pending_world_updates(
+                writer,
+                profile,
+                shared_world,
+                connection,
+                play_reader,
+            )?;
 
             if keep_alive_acknowledged && ticks_since_request >= tick_interval {
                 break;
@@ -664,14 +683,18 @@ fn send_block_changed_ack<W: Write>(
     writer: &mut W,
     profile: &ProtocolProfile,
     sequence: i32,
+    play_reader: Option<&PlayReaderEndpoint>,
 ) -> Result<()> {
-    write_play_payload(
+    write_or_route_play_payload(
         writer,
         profile,
         PacketKind::BlockChangedAck,
         &encode_block_changed_ack(sequence)?,
+        play_reader,
     )?;
-    writer.flush()?;
+    if play_reader.is_none() {
+        writer.flush()?;
+    }
     Ok(())
 }
 
@@ -679,6 +702,7 @@ fn send_world_updates<W: Write>(
     writer: &mut W,
     profile: &ProtocolProfile,
     applied_events: &[AppliedWorldEvent],
+    play_reader: Option<&PlayReaderEndpoint>,
 ) -> Result<()> {
     if applied_events.is_empty() {
         return Ok(());
@@ -689,7 +713,7 @@ fn send_world_updates<W: Write>(
 
     for event in applied_events {
         let AppliedWorldEvent::BlockMutation(mutation) = event;
-        write_play_payload(
+        write_or_route_play_payload(
             writer,
             profile,
             PacketKind::BlockUpdate,
@@ -697,9 +721,12 @@ fn send_world_updates<W: Write>(
                 block_position_from_world(mutation.position),
                 mutation.current,
             )?,
+            play_reader,
         )?;
     }
-    writer.flush()?;
+    if play_reader.is_none() {
+        writer.flush()?;
+    }
     Ok(())
 }
 
@@ -708,9 +735,31 @@ fn drain_and_send_pending_world_updates<W: Write>(
     profile: &ProtocolProfile,
     shared_world: &SharedWorld,
     connection: ConnectionId,
+    play_reader: Option<&PlayReaderEndpoint>,
 ) -> Result<()> {
     let pending_updates = shared_world.drain_updates(connection, MAX_WORLD_UPDATES_PER_DRAIN)?;
-    send_world_updates(writer, profile, &pending_updates)
+    send_world_updates(writer, profile, &pending_updates, play_reader)
+}
+
+fn write_or_route_play_payload<W: Write>(
+    writer: &mut W,
+    profile: &ProtocolProfile,
+    kind: PacketKind,
+    payload: &[u8],
+    play_reader: Option<&PlayReaderEndpoint>,
+) -> Result<()> {
+    if let Some(play_reader) = play_reader {
+        let packet_id = profile.packets().require(kind)?;
+        let packet = build_packet(packet_id, |body| {
+            body.extend_from_slice(payload);
+            Ok(())
+        })?;
+        play_reader
+            .try_submit_output(PlayOutput::Packet(packet))
+            .with_context(|| format!("cannot route {kind:?} packet to Play writer"))?;
+        return Ok(());
+    }
+    write_play_payload(writer, profile, kind, payload)
 }
 
 fn applied_world_event_position(event: &AppliedWorldEvent) -> BlockPos {
@@ -817,51 +866,59 @@ fn send_chunk_view_delta<W: Write>(
     shared_world: &SharedWorld,
     center: ChunkPos,
     delta: &ChunkViewDelta,
+    play_reader: Option<&PlayReaderEndpoint>,
 ) -> Result<()> {
     if delta.center_changed {
-        write_play_payload(
+        write_or_route_play_payload(
             writer,
             profile,
             PacketKind::SetChunkCacheCenter,
             &encode_set_chunk_cache_center(center.x, center.z),
+            play_reader,
         )?;
     }
 
     for pos in &delta.no_longer_visible {
-        write_play_payload(
+        write_or_route_play_payload(
             writer,
             profile,
             PacketKind::ForgetLevelChunk,
             &encode_forget_level_chunk(*pos),
+            play_reader,
         )?;
     }
 
     if !delta.newly_visible.is_empty() {
-        write_play_payload(
+        write_or_route_play_payload(
             writer,
             profile,
             PacketKind::ChunkBatchStart,
             &encode_chunk_batch_start(),
+            play_reader,
         )?;
         for pos in &delta.newly_visible {
             let chunk = shared_world.chunk_snapshot(*pos)?;
-            write_play_payload(
+            write_or_route_play_payload(
                 writer,
                 profile,
                 PacketKind::LevelChunkWithLight,
                 &encode_level_chunk_with_light(&chunk)?,
+                play_reader,
             )?;
         }
         let batch_size =
             i32::try_from(delta.newly_visible.len()).context("visible chunk batch exceeds i32")?;
-        write_play_payload(
+        write_or_route_play_payload(
             writer,
             profile,
             PacketKind::ChunkBatchFinished,
             &encode_chunk_batch_finished(batch_size)?,
+            play_reader,
         )?;
     }
-    writer.flush()?;
+    if play_reader.is_none() {
+        writer.flush()?;
+    }
     Ok(())
 }
 
@@ -902,8 +959,13 @@ mod tests {
     use super::*;
     use crate::codec::{build_packet, write_packet, write_varint_vec};
     use ferrum_protocol::PacketTable;
+    use ferrum_runtime::{BoundedInputQueue, worker_channel};
+    use ferrum_server::play_connection::register_play_connection;
     use ferrum_world::{BlockMutation, BlockPos};
-    use std::io::{self, Cursor, Read};
+    use std::{
+        io::{self, Cursor, Read},
+        num::NonZeroUsize,
+    };
 
     #[test]
     fn movement_packet_classifier_is_phase_and_direction_aware() {
@@ -1046,7 +1108,7 @@ mod tests {
         .unwrap();
         let mut output = Vec::new();
 
-        send_world_updates(&mut output, &profile, &applied).unwrap();
+        send_world_updates(&mut output, &profile, &applied, None).unwrap();
 
         let mut expected = vec![10, 0x22];
         expected.extend_from_slice(
@@ -1059,12 +1121,161 @@ mod tests {
     }
 
     #[test]
+    fn routes_block_updates_to_play_writer_endpoint_when_bridged() {
+        let mut packets = PacketTable::new();
+        packets.insert(PacketKind::BlockUpdate, 0x22).unwrap();
+        let profile = ProtocolProfile::new("Test", 1, packets).unwrap();
+        let mut runtime =
+            new_local_world_runtime(ChunkPos { x: 0, z: 0 }, &builtin_world_profile()).unwrap();
+        let position = BlockPos { x: 1, y: 65, z: -2 };
+        let state = BlockStateId::new(1);
+        let applied = apply_local_world_event(
+            &mut runtime,
+            Tick::new(1),
+            WorldEvent::BlockMutation(BlockMutation { position, state }),
+        )
+        .unwrap();
+        let (connector, mut workers) = worker_channel(NonZeroUsize::new(4).unwrap());
+        let (reader, writer) = register_play_connection(
+            &connector,
+            ConnectionId::new(12),
+            NonZeroUsize::new(2).unwrap(),
+        )
+        .unwrap();
+        let mut inputs = BoundedInputQueue::<PlayInput>::try_new(4).unwrap();
+        workers.ingest_available(&mut inputs, 1).unwrap();
+        let mut direct_output = Vec::new();
+
+        send_world_updates(&mut direct_output, &profile, &applied, Some(&reader)).unwrap();
+        let report = workers.ingest_available(&mut inputs, 1).unwrap();
+
+        let mut expected_packet = vec![0x22];
+        expected_packet.extend_from_slice(
+            &BlockPosition { x: 1, y: 65, z: -2 }
+                .pack_for_test()
+                .to_be_bytes(),
+        );
+        expected_packet.push(1);
+        assert!(direct_output.is_empty());
+        assert_eq!(report.accepted_outputs, 1);
+        assert_eq!(
+            writer.try_recv_output().unwrap(),
+            PlayOutput::Packet(expected_packet)
+        );
+    }
+
+    #[test]
+    fn bridged_play_loop_routes_keep_alive_to_writer_endpoint() {
+        let mut packets = PacketTable::new();
+        packets.insert(PacketKind::KeepAliveRequest, 0x2c).unwrap();
+        packets.insert(PacketKind::KeepAliveResponse, 0x1c).unwrap();
+        let profile = ProtocolProfile::new("Test", 1, packets).unwrap();
+        let world = SharedWorld::static_flat();
+        let connection = ConnectionId::new(13);
+        let _subscription = world.subscribe(connection).unwrap();
+        let (connector, mut workers) = worker_channel(NonZeroUsize::new(4).unwrap());
+        let (reader, writer) =
+            register_play_connection(&connector, connection, NonZeroUsize::new(2).unwrap())
+                .unwrap();
+        let mut queued_inputs = BoundedInputQueue::<PlayInput>::try_new(4).unwrap();
+        workers.ingest_available(&mut queued_inputs, 1).unwrap();
+        let mut input = Vec::new();
+        write_packet(
+            &mut input,
+            &build_packet(0x1c, |body| {
+                body.extend_from_slice(&1_i64.to_be_bytes());
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let mut direct_output = Vec::new();
+        let mut session = play_session();
+
+        run_play_loop_with_bridge(
+            &mut Cursor::new(input),
+            &mut direct_output,
+            &profile,
+            &mut session,
+            &world,
+            connection,
+            Some(&reader),
+            Some(1),
+        )
+        .unwrap();
+        let report = workers.ingest_available(&mut queued_inputs, 2).unwrap();
+
+        let keep_alive = writer.try_recv_output().unwrap();
+        assert!(direct_output.is_empty());
+        assert_eq!(report.accepted_outputs, 1);
+        assert_eq!(report.accepted_inputs, 1);
+        assert_eq!(
+            keep_alive,
+            PlayOutput::Packet(vec![0x2c, 0, 0, 0, 0, 0, 0, 0, 1])
+        );
+    }
+
+    #[test]
+    fn routes_chunk_view_delta_to_play_writer_endpoint_when_bridged() {
+        let mut packets = PacketTable::new();
+        packets
+            .insert(PacketKind::SetChunkCacheCenter, 0x58)
+            .unwrap();
+        packets.insert(PacketKind::ForgetLevelChunk, 0x23).unwrap();
+        packets.insert(PacketKind::ChunkBatchStart, 0x0c).unwrap();
+        packets
+            .insert(PacketKind::LevelChunkWithLight, 0x27)
+            .unwrap();
+        packets
+            .insert(PacketKind::ChunkBatchFinished, 0x0d)
+            .unwrap();
+        let profile = ProtocolProfile::new("Test", 1, packets).unwrap();
+        let world = SharedWorld::static_flat();
+        let (connector, mut workers) = worker_channel(NonZeroUsize::new(8).unwrap());
+        let (reader, writer) = register_play_connection(
+            &connector,
+            ConnectionId::new(14),
+            NonZeroUsize::new(8).unwrap(),
+        )
+        .unwrap();
+        let mut inputs = BoundedInputQueue::<PlayInput>::try_new(4).unwrap();
+        workers.ingest_available(&mut inputs, 1).unwrap();
+        let delta = ChunkViewDelta {
+            center_changed: true,
+            newly_visible: vec![ChunkPos { x: 0, z: 0 }],
+            no_longer_visible: vec![ChunkPos { x: -1, z: 0 }],
+        };
+        let mut direct_output = Vec::new();
+
+        send_chunk_view_delta(
+            &mut direct_output,
+            &profile,
+            &world,
+            ChunkPos { x: 0, z: 0 },
+            &delta,
+            Some(&reader),
+        )
+        .unwrap();
+        let report = workers.ingest_available(&mut inputs, 5).unwrap();
+
+        assert!(direct_output.is_empty());
+        assert_eq!(report.accepted_outputs, 5);
+        let packet_ids = (0..5)
+            .map(|_| match writer.try_recv_output().unwrap() {
+                PlayOutput::Packet(packet) => PacketReader::new(&packet).read_varint().unwrap(),
+                other => panic!("unexpected output: {other:?}"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(packet_ids, vec![0x58, 0x23, 0x0c, 0x27, 0x0d]);
+    }
+
+    #[test]
     fn sends_block_change_prediction_acknowledgement() {
         let mut packets = PacketTable::new();
         packets.insert(PacketKind::BlockChangedAck, 0x04).unwrap();
         let profile = ProtocolProfile::new("Test", 1, packets).unwrap();
         let mut output = Vec::new();
-        send_block_changed_ack(&mut output, &profile, 300).unwrap();
+        send_block_changed_ack(&mut output, &profile, 300, None).unwrap();
         assert_eq!(output, [3, 0x04, 0xac, 0x02]);
     }
 

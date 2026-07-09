@@ -36,6 +36,10 @@ enum WorkerCommand<I, O> {
         connection: ConnectionId,
         payload: I,
     },
+    Output {
+        connection: ConnectionId,
+        output: O,
+    },
     Disconnect {
         connection: ConnectionId,
     },
@@ -132,6 +136,24 @@ impl<I, O> ConnectionWorker<I, O> {
         }
     }
 
+    pub fn try_send_output(&self, output: O) -> Result<(), WorkerInputError<O>> {
+        match self.commands.try_send(WorkerCommand::Output {
+            connection: self.connection,
+            output,
+        }) {
+            Ok(()) => Ok(()),
+            Err(TrySendError::Full(WorkerCommand::Output { output, .. })) => {
+                Err(WorkerInputError::Full(output))
+            }
+            Err(TrySendError::Disconnected(WorkerCommand::Output { output, .. })) => {
+                Err(WorkerInputError::RuntimeDisconnected(output))
+            }
+            Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => {
+                unreachable!("try_send_output only submits output commands")
+            }
+        }
+    }
+
     pub fn try_disconnect(&self) -> Result<(), WorkerControlError> {
         match self.commands.try_send(WorkerCommand::Disconnect {
             connection: self.connection,
@@ -195,6 +217,24 @@ impl<I, O> ConnectionInput<I, O> {
             }
             Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => {
                 unreachable!("try_send_input only submits input commands")
+            }
+        }
+    }
+
+    pub fn try_send_output(&self, output: O) -> Result<(), WorkerInputError<O>> {
+        match self.commands.try_send(WorkerCommand::Output {
+            connection: self.connection,
+            output,
+        }) {
+            Ok(()) => Ok(()),
+            Err(TrySendError::Full(WorkerCommand::Output { output, .. })) => {
+                Err(WorkerInputError::Full(output))
+            }
+            Err(TrySendError::Disconnected(WorkerCommand::Output { output, .. })) => {
+                Err(WorkerInputError::RuntimeDisconnected(output))
+            }
+            Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => {
+                unreachable!("try_send_output only submits output commands")
             }
         }
     }
@@ -331,6 +371,10 @@ pub struct WorkerIngressReport {
     pub accepted_inputs: usize,
     pub dropped_inputs: usize,
     pub orphaned_inputs: usize,
+    pub accepted_outputs: usize,
+    pub full_outputs: usize,
+    pub disconnected_outputs: usize,
+    pub orphaned_outputs: usize,
     pub disconnections: usize,
     pub removed_inputs: usize,
     pub command_channel_disconnected: bool,
@@ -397,6 +441,20 @@ impl<I, O> WorkerRuntime<I, O> {
                         Ok(_) => report.accepted_inputs += 1,
                         Err(QueueError::Full { .. }) => report.dropped_inputs += 1,
                         Err(error) => return Err(error),
+                    }
+                }
+                WorkerCommand::Output { connection, output } => {
+                    let Some(sender) = self.outputs.get(&connection).cloned() else {
+                        report.orphaned_outputs += 1;
+                        continue;
+                    };
+                    match sender.try_send(output) {
+                        Ok(()) => report.accepted_outputs += 1,
+                        Err(TrySendError::Full(_)) => report.full_outputs += 1,
+                        Err(TrySendError::Disconnected(_)) => {
+                            self.outputs.remove(&connection);
+                            report.disconnected_outputs += 1;
+                        }
                     }
                 }
                 WorkerCommand::Disconnect { connection } => {

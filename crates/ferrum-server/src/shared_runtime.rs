@@ -48,6 +48,10 @@ pub struct SharedPlayRuntimeExit {
     pub accepted_inputs: u64,
     pub dropped_inputs: u64,
     pub orphaned_inputs: u64,
+    pub routed_outputs: u64,
+    pub full_routed_outputs: u64,
+    pub disconnected_routed_outputs: u64,
+    pub orphaned_routed_outputs: u64,
     pub removed_connections: u64,
     pub executed_ticks: u64,
     pub dropped_ticks: u64,
@@ -79,6 +83,18 @@ impl SharedPlayRuntimeExit {
         self.orphaned_inputs = self
             .orphaned_inputs
             .saturating_add(report.ingress.orphaned_inputs as u64);
+        self.routed_outputs = self
+            .routed_outputs
+            .saturating_add(report.ingress.accepted_outputs as u64);
+        self.full_routed_outputs = self
+            .full_routed_outputs
+            .saturating_add(report.ingress.full_outputs as u64);
+        self.disconnected_routed_outputs = self
+            .disconnected_routed_outputs
+            .saturating_add(report.ingress.disconnected_outputs as u64);
+        self.orphaned_routed_outputs = self
+            .orphaned_routed_outputs
+            .saturating_add(report.ingress.orphaned_outputs as u64);
         self.removed_connections = self
             .removed_connections
             .saturating_add(report.removed_connections as u64);
@@ -204,7 +220,10 @@ fn non_zero_usize(value: usize) -> NonZeroUsize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{authoritative_runtime::PlayInput, play_connection::register_play_connection};
+    use crate::{
+        authoritative_runtime::{PlayInput, PlayOutput},
+        play_connection::register_play_connection,
+    };
     use ferrum_protocol::PacketKind;
     use ferrum_runtime::ConnectionId;
 
@@ -273,6 +292,30 @@ mod tests {
         );
         let exit = service.shutdown().unwrap();
         assert!(exit.sent_outputs >= 1);
+    }
+
+    #[test]
+    fn shared_runtime_routes_connection_output_commands() {
+        let service = spawn_shared_play_runtime(SharedPlayRuntimeConfig::default()).unwrap();
+        let connector = service.connector();
+        let (reader, writer) = register_play_connection(
+            &connector,
+            ConnectionId::new(71),
+            NonZeroUsize::new(4).unwrap(),
+        )
+        .unwrap();
+
+        reader
+            .try_submit_output(PlayOutput::Packet(vec![1, 2, 3]))
+            .unwrap();
+
+        let exit = service.shutdown().unwrap();
+        assert_eq!(exit.registrations, 1);
+        assert_eq!(exit.routed_outputs, 1);
+        assert_eq!(
+            writer.try_recv_output().unwrap(),
+            PlayOutput::Packet(vec![1, 2, 3])
+        );
     }
 
     #[test]

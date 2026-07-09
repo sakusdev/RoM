@@ -1026,6 +1026,9 @@ impl ServerConfig {
         if config.world.region_file.is_some() && config.world.region_dir.is_some() {
             bail!("world.region_file and world.region_dir cannot both be set");
         }
+        if config.world.region_x.is_some() != config.world.region_z.is_some() {
+            bail!("world.region_x and world.region_z must be set together");
+        }
         if config.world.region_dir.is_some()
             && (config.world.region_x.is_some() || config.world.region_z.is_some())
         {
@@ -1751,6 +1754,7 @@ fn handle_play_protocol<R: Read, W: Write>(
         )?),
         None => None,
     };
+    let play_reader = writer_worker.as_ref().map(|_| online_player.play_reader());
     let result = run_static_play_session_with_bridge(
         reader,
         writer,
@@ -1761,7 +1765,7 @@ fn handle_play_protocol<R: Read, W: Write>(
             shared_world: context.state.world(),
             connection: online_player.connection_id(),
         },
-        Some(online_player.play_reader()),
+        play_reader,
         play_round_limit,
     );
     let writer_result = shutdown_live_play_writer(writer_worker);
@@ -1893,57 +1897,67 @@ fn run_static_play_session_with_bridge<R: Read, W: Write>(
     let center = play_runtime::spawn_chunk(world_profile);
     let chunk = world.shared_world.chunk_snapshot(center)?;
 
-    write_play_payload(
+    write_or_route_play_payload(
         writer,
         profile,
         PacketKind::PlayLogin,
         &encode_join_game(&static_join_game(config, world_profile))?,
+        play_reader,
     )?;
-    write_play_payload(
+    write_or_route_play_payload(
         writer,
         profile,
         PacketKind::DefaultSpawnPosition,
         &encode_default_spawn_position(&static_default_spawn_position(world_profile)?)?,
+        play_reader,
     )?;
-    write_play_payload(
+    write_or_route_play_payload(
         writer,
         profile,
         PacketKind::SetChunkCacheCenter,
         &encode_set_chunk_cache_center(center.x, center.z),
+        play_reader,
     )?;
-    write_play_payload(
+    write_or_route_play_payload(
         writer,
         profile,
         PacketKind::ChunkBatchStart,
         &encode_chunk_batch_start(),
+        play_reader,
     )?;
-    write_play_payload(
+    write_or_route_play_payload(
         writer,
         profile,
         PacketKind::LevelChunkWithLight,
         &encode_level_chunk_with_light(&chunk)?,
+        play_reader,
     )?;
-    write_play_payload(
+    write_or_route_play_payload(
         writer,
         profile,
         PacketKind::ChunkBatchFinished,
         &encode_chunk_batch_finished(1)?,
+        play_reader,
     )?;
     if !config.play_policy.welcome_message.is_empty() {
-        write_play_payload(
+        write_or_route_play_payload(
             writer,
             profile,
             PacketKind::SystemChat,
             &encode_system_chat(&config.play_policy.welcome_message, false)?,
+            play_reader,
         )?;
     }
-    write_play_payload(
+    write_or_route_play_payload(
         writer,
         profile,
         PacketKind::PlayerPosition,
         &encode_player_position(&static_player_position(world_profile))?,
+        play_reader,
     )?;
-    writer.flush()?;
+    if play_reader.is_none() {
+        writer.flush()?;
+    }
 
     wait_for_play_bootstrap_acknowledgements_with_bridge(
         reader,
@@ -1960,6 +1974,27 @@ fn run_static_play_session_with_bridge<R: Read, W: Write>(
         play_reader,
         play_round_limit,
     )
+}
+
+fn write_or_route_play_payload<W: Write>(
+    writer: &mut W,
+    profile: &ProtocolProfile,
+    kind: PacketKind,
+    payload: &[u8],
+    play_reader: Option<&PlayReaderEndpoint>,
+) -> Result<()> {
+    if let Some(play_reader) = play_reader {
+        let packet_id = profile.packets().require(kind)?;
+        let packet = build_packet(packet_id, |body| {
+            body.extend_from_slice(payload);
+            Ok(())
+        })?;
+        play_reader
+            .try_submit_output(PlayOutput::Packet(packet))
+            .with_context(|| format!("cannot route {kind:?} packet to Play writer"))?;
+        return Ok(());
+    }
+    write_play_payload(writer, profile, kind, payload)
 }
 
 fn static_join_game(config: &ServerConfig, world: &RomPackWorld) -> JoinGame {
@@ -2610,6 +2645,61 @@ mod tests {
         );
 
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn configured_anvil_region_file_infers_position_from_name() {
+        let world = play_runtime::builtin_world_profile();
+        let dir = temp_region_dir("configured_anvil_region_file_infers_position_from_name");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let local_x = 0;
+        let local_z = 31;
+        let chunk_pos = ChunkPos { x: 64, z: -33 };
+        let section_y = i8::try_from(world.overworld_min_section_y).unwrap();
+        let path = dir.join("r.2.-2.mca");
+        fs::write(
+            &path,
+            test_region_with_chunk(
+                local_x,
+                local_z,
+                2,
+                1,
+                3,
+                &encode_named_root(&test_anvil_chunk_root(
+                    chunk_pos,
+                    section_y,
+                    "minecraft:dirt",
+                )),
+            ),
+        )
+        .unwrap();
+
+        let store = load_configured_world_chunks(
+            &WorldConfig {
+                region_file: Some(path),
+                region_dir: None,
+                region_x: None,
+                region_z: None,
+            },
+            &world,
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(
+            store
+                .world_block(BlockPos {
+                    x: chunk_pos.x * 16,
+                    y: i32::from(section_y) * 16,
+                    z: chunk_pos.z * 16,
+                })
+                .unwrap(),
+            BlockStateId::new(world.block_states.dirt)
+        );
+
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

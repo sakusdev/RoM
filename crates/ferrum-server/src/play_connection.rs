@@ -61,6 +61,16 @@ impl PlayReaderEndpoint {
         }
     }
 
+    pub fn try_submit_output(&self, output: PlayOutput) -> Result<(), PlayOutputSubmitError> {
+        match self.input.try_send_output(output) {
+            Ok(()) => Ok(()),
+            Err(WorkerInputError::Full(output)) => Err(PlayOutputSubmitError::Full(output)),
+            Err(WorkerInputError::RuntimeDisconnected(output)) => {
+                Err(PlayOutputSubmitError::RuntimeDisconnected(output))
+            }
+        }
+    }
+
     pub fn try_disconnect(&self) -> Result<(), WorkerControlError> {
         self.input.try_disconnect()
     }
@@ -108,6 +118,33 @@ impl Error for PlayPacketSubmitError {
         }
     }
 }
+
+#[derive(Debug)]
+pub enum PlayOutputSubmitError {
+    Full(PlayOutput),
+    RuntimeDisconnected(PlayOutput),
+}
+
+impl PlayOutputSubmitError {
+    pub fn into_output(self) -> PlayOutput {
+        match self {
+            Self::Full(output) | Self::RuntimeDisconnected(output) => output,
+        }
+    }
+}
+
+impl fmt::Display for PlayOutputSubmitError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Full(_) => formatter.write_str("worker command queue is full"),
+            Self::RuntimeDisconnected(_) => {
+                formatter.write_str("authoritative Play runtime is disconnected")
+            }
+        }
+    }
+}
+
+impl Error for PlayOutputSubmitError {}
 
 #[cfg(test)]
 mod tests {
@@ -202,5 +239,25 @@ mod tests {
         let report = runtime.ingest_available(&mut inputs, 1).unwrap();
         assert_eq!(report.disconnections, 1);
         assert!(!runtime.contains_connection(connection));
+    }
+
+    #[test]
+    fn output_commands_reach_the_writer_endpoint() {
+        let (connector, mut runtime) = worker_channel(non_zero(4));
+        let (reader, writer) =
+            register_play_connection(&connector, ConnectionId::new(9), non_zero(2)).unwrap();
+        let mut inputs = BoundedInputQueue::try_new(4).unwrap();
+        runtime.ingest_available(&mut inputs, 1).unwrap();
+
+        reader
+            .try_submit_output(PlayOutput::Packet(vec![1, 2, 3]))
+            .unwrap();
+        let report = runtime.ingest_available(&mut inputs, 1).unwrap();
+
+        assert_eq!(report.accepted_outputs, 1);
+        assert_eq!(
+            writer.try_recv_output().unwrap(),
+            PlayOutput::Packet(vec![1, 2, 3])
+        );
     }
 }
