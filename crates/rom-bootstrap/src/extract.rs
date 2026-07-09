@@ -328,6 +328,7 @@ struct ResolvedGameJar {
     bytes: Vec<u8>,
 }
 
+#[allow(clippy::all)]
 fn resolve_game_jar(path: &Path) -> Result<ResolvedGameJar> {
     let outer_bytes = fs::read(path).with_context(|| format!("cannot read {}", path.display()))?;
     if outer_bytes.len() as u64 > MAX_OUTER_JAR_BYTES {
