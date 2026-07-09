@@ -57,6 +57,14 @@ simulation_distance = 2
 welcome_message = "Ferrum native Rust world loaded"
 keep_alive_interval_seconds = 15
 
+# Uncomment one of these world sources to seed chunks from Anvil region files.
+#
+# [world]
+# region_file = "world/region/r.0.0.mca"
+#
+# [world]
+# region_dir = "world/region"
+
 [configuration]
 enabled = true
 features = "minecraft:vanilla"

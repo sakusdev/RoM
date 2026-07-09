@@ -4,6 +4,7 @@
 //! protocol serialization remains in `ferrum-play`, while version-specific
 //! numeric IDs remain in version crates.
 
+pub mod anvil;
 mod chunk_view;
 
 pub use chunk_view::{ChunkView, ChunkViewDelta, ChunkViewError};

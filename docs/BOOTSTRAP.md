@@ -150,6 +150,33 @@ keep_alive_interval_seconds = 15
 
 The chunk radius controls both initial in-memory chunk seeding and each player's visible chunk view. Existing instance configurations remain valid because the native server supplies the same defaults when `[play]` is absent.
 
+## Runtime world source
+
+By default, Ferrum starts from the deterministic in-memory flat world. To seed chunks from a Minecraft Anvil region file, configure one source in `server.toml`:
+
+```toml
+[world]
+region_file = "world/region/r.0.0.mca"
+```
+
+The region coordinates are inferred from `r.X.Z.mca`. If the file name is not in that form, set both coordinates explicitly:
+
+```toml
+[world]
+region_file = "world/custom/spawn.mca"
+region_x = 0
+region_z = 0
+```
+
+To load every region file in a directory, use `region_dir` instead:
+
+```toml
+[world]
+region_dir = "world/region"
+```
+
+`region_file` and `region_dir` are mutually exclusive. `region_x` and `region_z` must be set together, and they are only valid with `region_file`. Bad chunks are skipped with startup warnings; bad files in a region directory are skipped if at least one region file loads successfully. Unknown block states currently fall back to stone and unknown biomes fall back to plains while registry-complete conversion remains in progress.
+
 ## Public server warning
 
 RoM currently defaults to a loopback bind and offline-mode development login. That is suitable for local protocol testing, but it is not a substitute for Microsoft account authentication. Do not expose an offline-mode development instance to the public internet.

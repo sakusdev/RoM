@@ -32,8 +32,15 @@ use ferrum_server::{
     shared_writer::SharedWriter,
 };
 use ferrum_version_26_1_2 as version_26_1_2;
+use ferrum_world::{
+    BiomeId, BlockStateId, ChunkStore,
+    anvil::{
+        AnvilChunkConversionProfile, AnvilDecodeLimits, RegionHeader, RegionPos,
+        load_chunk_store_from_region_lenient,
+    },
+};
 #[cfg(test)]
-use ferrum_world::ChunkPos;
+use ferrum_world::{BlockMutation, BlockPos, ChunkPos, StaticChunk};
 use identity::offline_player_identity;
 use serde_json::{Map, Value, json};
 use std::{
@@ -105,9 +112,18 @@ struct ServerConfig {
     previews_chat: bool,
     server_icon: Option<String>,
     sample_players: Vec<SamplePlayer>,
+    world: WorldConfig,
     play_policy: PlayPolicy,
     packets: PacketIds,
     runtime_profile: Option<ProtocolProfile>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct WorldConfig {
+    region_file: Option<PathBuf>,
+    region_dir: Option<PathBuf>,
+    region_x: Option<i32>,
+    region_z: Option<i32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -187,6 +203,7 @@ impl ServerState {
             play_runtime::builtin_world_profile(),
             registry_payloads,
             config.play_policy.clone(),
+            None,
         )
         .expect("built-in world profile must initialize")
     }
@@ -196,10 +213,16 @@ impl ServerState {
         world: RomPackWorld,
         registry_payloads: Vec<Vec<u8>>,
         play_policy: PlayPolicy,
+        loaded_chunks: Option<ChunkStore>,
     ) -> Result<Self> {
         let center = play_runtime::spawn_chunk(&world);
         let shared_runtime_config = shared_play_runtime_config(&play_policy)?;
-        let shared_world = play_runtime::SharedWorld::new_with_policy(center, world, play_policy)?;
+        let shared_world = match loaded_chunks {
+            Some(store) => {
+                play_runtime::SharedWorld::from_store_with_policy(store, world, play_policy)?
+            }
+            None => play_runtime::SharedWorld::new_with_policy(center, world, play_policy)?,
+        };
         let shared_play_runtime = spawn_shared_play_runtime(shared_runtime_config)?;
         Ok(Self {
             online_players: AtomicI32::new(initial_online_players),
@@ -208,6 +231,22 @@ impl ServerState {
             registry_payloads,
             shared_play_runtime,
         })
+    }
+
+    fn with_loaded_world_runtime(
+        initial_online_players: i32,
+        world: RomPackWorld,
+        store: ChunkStore,
+        registry_payloads: Vec<Vec<u8>>,
+        play_policy: PlayPolicy,
+    ) -> Result<Self> {
+        Self::with_runtime(
+            initial_online_players,
+            world,
+            registry_payloads,
+            play_policy,
+            Some(store),
+        )
     }
 
     fn online_players(&self) -> i32 {
@@ -344,11 +383,13 @@ fn run(cli: Cli) -> Result<()> {
             )
         };
     config.runtime_profile = Some(runtime_profile);
+    let loaded_chunks = load_configured_world_chunks(&config.world, &world_profile)?;
     let state = Arc::new(ServerState::with_runtime(
         config.online_players,
         world_profile,
         registry_payloads,
         config.play_policy.clone(),
+        loaded_chunks,
     )?);
     let listener = TcpListener::bind(&config.bind)
         .with_context(|| format!("cannot bind Minecraft status listener on {}", config.bind))?;
@@ -480,6 +521,209 @@ fn validate_world_profile(world: &RomPackWorld) -> Result<()> {
     Ok(())
 }
 
+fn load_configured_world_chunks(
+    config: &WorldConfig,
+    world: &RomPackWorld,
+) -> Result<Option<ChunkStore>> {
+    let profile = anvil_conversion_profile(world);
+    if let Some(region_file) = &config.region_file {
+        let region = configured_region_file_pos(config, region_file)?;
+        let report = load_anvil_region_file(region_file, region, &profile)?;
+        return Ok(Some(report.store));
+    }
+    if let Some(region_dir) = &config.region_dir {
+        let store = load_anvil_region_directory(region_dir, &profile)?;
+        return Ok(Some(store));
+    }
+    Ok(None)
+}
+
+fn configured_region_file_pos(config: &WorldConfig, region_file: &Path) -> Result<RegionPos> {
+    match (config.region_x, config.region_z) {
+        (Some(x), Some(z)) => Ok(RegionPos { x, z }),
+        (None, None) => region_pos_from_file_name(region_file)?
+            .with_context(|| format!("world.region_file {} must be named r.X.Z.mca when world.region_x and world.region_z are omitted", region_file.display())),
+        _ => bail!("world.region_x and world.region_z must be set together"),
+    }
+}
+
+fn anvil_conversion_profile(world: &RomPackWorld) -> AnvilChunkConversionProfile {
+    let mut profile = AnvilChunkConversionProfile::new(
+        BlockStateId::new(world.block_states.air),
+        BiomeId::new(world.biomes.plains),
+    )
+    .with_block_state("minecraft:air", BlockStateId::new(world.block_states.air))
+    .with_block_state(
+        "minecraft:stone",
+        BlockStateId::new(world.block_states.stone),
+    )
+    .with_block_state(
+        "minecraft:grass_block",
+        BlockStateId::new(world.block_states.grass),
+    )
+    .with_block_state("minecraft:dirt", BlockStateId::new(world.block_states.dirt))
+    .with_block_state(
+        "minecraft:bedrock",
+        BlockStateId::new(world.block_states.bedrock),
+    )
+    .with_unknown_block_state(BlockStateId::new(world.block_states.stone))
+    .with_unknown_biome(BiomeId::new(world.biomes.plains));
+
+    for (index, biome) in builtin_biome_registry_entries(world)
+        .into_iter()
+        .enumerate()
+    {
+        profile = profile.with_biome(biome, BiomeId::new(index as u32));
+    }
+    profile
+}
+
+fn builtin_biome_registry_entries(world: &RomPackWorld) -> Vec<&'static str> {
+    if world.data_version == version_26_1_2::WORLD_VERSION
+        && world.biomes.plains == version_26_1_2::PLAINS_BIOME_ID
+    {
+        return version_26_1_2::SYNCHRONIZED_REGISTRIES
+            .iter()
+            .find(|registry| registry.id == "minecraft:worldgen/biome")
+            .map(|registry| registry.entries.to_vec())
+            .unwrap_or_default();
+    }
+    Vec::new()
+}
+
+fn load_anvil_region_directory(
+    region_dir: &Path,
+    profile: &AnvilChunkConversionProfile,
+) -> Result<ChunkStore> {
+    let mut store = ChunkStore::new();
+    let mut loaded_regions = 0_usize;
+    let mut skipped_regions = 0_usize;
+    let entries = fs::read_dir(region_dir).with_context(|| {
+        format!(
+            "cannot read Anvil region directory {}",
+            region_dir.display()
+        )
+    })?;
+    for entry in entries {
+        let entry = entry.with_context(|| {
+            format!(
+                "cannot read an entry in Anvil region directory {}",
+                region_dir.display()
+            )
+        })?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(region) = region_pos_from_file_name(&path)? else {
+            continue;
+        };
+        let region_store = match load_anvil_region_file(&path, region, profile) {
+            Ok(region_store) => region_store,
+            Err(error) => {
+                skipped_regions += 1;
+                eprintln!("skipped Anvil region {}: {error:#}", path.display());
+                continue;
+            }
+        };
+        for (_, chunk) in region_store.store.iter() {
+            store.insert(chunk.clone());
+        }
+        loaded_regions += 1;
+    }
+    if loaded_regions == 0 {
+        bail!(
+            "Anvil region directory {} did not contain any r.X.Z.mca files",
+            region_dir.display()
+        );
+    }
+    println!(
+        "loaded {loaded_regions} Anvil region file(s) from {}",
+        region_dir.display()
+    );
+    if skipped_regions > 0 {
+        eprintln!(
+            "skipped {skipped_regions} Anvil region file(s) while loading {}",
+            region_dir.display()
+        );
+    }
+    Ok(store)
+}
+
+fn load_anvil_region_file(
+    region_file: &Path,
+    region: RegionPos,
+    profile: &AnvilChunkConversionProfile,
+) -> Result<ferrum_world::anvil::AnvilRegionLoadReport> {
+    let mut file = fs::File::open(region_file)
+        .with_context(|| format!("cannot open Anvil region file {}", region_file.display()))?;
+    let header = RegionHeader::read(&mut file)
+        .with_context(|| format!("cannot read Anvil region header {}", region_file.display()))?;
+    let report = load_chunk_store_from_region_lenient(
+        &mut file,
+        &header,
+        region,
+        profile,
+        AnvilDecodeLimits::default(),
+    )
+    .with_context(|| {
+        format!(
+            "cannot load Anvil region {} as ({}, {})",
+            region_file.display(),
+            region.x,
+            region.z
+        )
+    })?;
+    if !report.skipped_chunks.is_empty() {
+        eprintln!(
+            "skipped {} chunk(s) while loading Anvil region {}",
+            report.skipped_chunks.len(),
+            region_file.display()
+        );
+        for skipped in &report.skipped_chunks {
+            eprintln!(
+                "skipped chunk ({}, {}) in {}: {}",
+                skipped.position.x,
+                skipped.position.z,
+                region_file.display(),
+                skipped.error
+            );
+        }
+    }
+    println!(
+        "loaded Anvil region {} as ({}, {}) with {} chunk(s)",
+        region_file.display(),
+        region.x,
+        region.z,
+        report.loaded_chunks
+    );
+    Ok(report)
+}
+
+fn region_pos_from_file_name(path: &Path) -> Result<Option<RegionPos>> {
+    let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+        return Ok(None);
+    };
+    let Some(stem) = file_name
+        .strip_prefix("r.")
+        .and_then(|name| name.strip_suffix(".mca"))
+    else {
+        return Ok(None);
+    };
+    let Some((x, z)) = stem.split_once('.') else {
+        bail!("invalid Anvil region file name {}", path.display());
+    };
+    if z.contains('.') {
+        bail!("invalid Anvil region file name {}", path.display());
+    }
+    Ok(Some(RegionPos {
+        x: x.parse()
+            .with_context(|| format!("invalid Anvil region X coordinate in {}", path.display()))?,
+        z: z.parse()
+            .with_context(|| format!("invalid Anvil region Z coordinate in {}", path.display()))?,
+    }))
+}
+
 fn protocol_profile_from_packets(
     version_name: &str,
     protocol: i32,
@@ -566,6 +810,7 @@ impl Default for ServerConfig {
             previews_chat: false,
             server_icon: None,
             sample_players: Vec::new(),
+            world: WorldConfig::default(),
             play_policy: PlayPolicy::default(),
             packets: PacketIds::default(),
             runtime_profile: None,
@@ -661,6 +906,22 @@ impl ServerConfig {
                 ("play", "keep_alive_interval_seconds") => {
                     config.play_policy.keep_alive_interval_seconds =
                         parse_u64(value, line_index + 1)?
+                }
+                ("world", "region_file") => {
+                    let path = parse_string(value);
+                    config.world.region_file =
+                        Some(resolve_config_path(&path, base_dir, line_index + 1)?);
+                }
+                ("world", "region_dir") => {
+                    let path = parse_string(value);
+                    config.world.region_dir =
+                        Some(resolve_config_path(&path, base_dir, line_index + 1)?);
+                }
+                ("world", "region_x") => {
+                    config.world.region_x = Some(parse_i32(value, line_index + 1)?)
+                }
+                ("world", "region_z") => {
+                    config.world.region_z = Some(parse_i32(value, line_index + 1)?)
                 }
                 ("configuration", "enabled") => {
                     config.configuration_enabled = parse_bool(value, line_index + 1)?
@@ -761,6 +1022,23 @@ impl ServerConfig {
         }
         if config.online_players > config.max_players {
             bail!("online_players cannot exceed max_players");
+        }
+        if config.world.region_file.is_some() && config.world.region_dir.is_some() {
+            bail!("world.region_file and world.region_dir cannot both be set");
+        }
+        if config.world.region_x.is_some() != config.world.region_z.is_some() {
+            bail!("world.region_x and world.region_z must be set together");
+        }
+        if config.world.region_dir.is_some()
+            && (config.world.region_x.is_some() || config.world.region_z.is_some())
+        {
+            bail!("world.region_x and world.region_z cannot be used with world.region_dir");
+        }
+        if config.world.region_file.is_none()
+            && config.world.region_dir.is_none()
+            && (config.world.region_x.is_some() || config.world.region_z.is_some())
+        {
+            bail!("world.region_x and world.region_z require world.region_file");
         }
         if !(0..=MAX_CONFIGURED_CHUNK_RADIUS).contains(&config.play_policy.chunk_radius) {
             bail!("play.chunk_radius must be between 0 and {MAX_CONFIGURED_CHUNK_RADIUS}");
@@ -1074,18 +1352,25 @@ fn parse_sample_players(value: &str) -> Result<Vec<SamplePlayer>> {
         .collect()
 }
 
-fn load_server_icon(value: &str, base_dir: Option<&PathBuf>, line: usize) -> Result<String> {
-    if value.starts_with("data:image/png;base64,") {
-        return Ok(value.to_owned());
+fn resolve_config_path(value: &str, base_dir: Option<&PathBuf>, line: usize) -> Result<PathBuf> {
+    if value.trim().is_empty() {
+        bail!("line {line}: path must not be empty");
     }
     let path = PathBuf::from(value);
-    let path = if path.is_absolute() {
+    Ok(if path.is_absolute() {
         path
     } else if let Some(base_dir) = base_dir {
         base_dir.join(path)
     } else {
         path
-    };
+    })
+}
+
+fn load_server_icon(value: &str, base_dir: Option<&PathBuf>, line: usize) -> Result<String> {
+    if value.starts_with("data:image/png;base64,") {
+        return Ok(value.to_owned());
+    }
+    let path = resolve_config_path(value, base_dir, line)?;
     let bytes =
         fs::read(&path).with_context(|| format!("line {line}: cannot read {}", path.display()))?;
     if !bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]) {
@@ -1469,6 +1754,7 @@ fn handle_play_protocol<R: Read, W: Write>(
         )?),
         None => None,
     };
+    let play_reader = writer_worker.as_ref().map(|_| online_player.play_reader());
     let result = run_static_play_session_with_bridge(
         reader,
         writer,
@@ -1479,7 +1765,7 @@ fn handle_play_protocol<R: Read, W: Write>(
             shared_world: context.state.world(),
             connection: online_player.connection_id(),
         },
-        Some(online_player.play_reader()),
+        play_reader,
         play_round_limit,
     );
     let writer_result = shutdown_live_play_writer(writer_worker);
@@ -1611,57 +1897,67 @@ fn run_static_play_session_with_bridge<R: Read, W: Write>(
     let center = play_runtime::spawn_chunk(world_profile);
     let chunk = world.shared_world.chunk_snapshot(center)?;
 
-    write_play_payload(
+    write_or_route_play_payload(
         writer,
         profile,
         PacketKind::PlayLogin,
         &encode_join_game(&static_join_game(config, world_profile))?,
+        play_reader,
     )?;
-    write_play_payload(
+    write_or_route_play_payload(
         writer,
         profile,
         PacketKind::DefaultSpawnPosition,
         &encode_default_spawn_position(&static_default_spawn_position(world_profile)?)?,
+        play_reader,
     )?;
-    write_play_payload(
+    write_or_route_play_payload(
         writer,
         profile,
         PacketKind::SetChunkCacheCenter,
         &encode_set_chunk_cache_center(center.x, center.z),
+        play_reader,
     )?;
-    write_play_payload(
+    write_or_route_play_payload(
         writer,
         profile,
         PacketKind::ChunkBatchStart,
         &encode_chunk_batch_start(),
+        play_reader,
     )?;
-    write_play_payload(
+    write_or_route_play_payload(
         writer,
         profile,
         PacketKind::LevelChunkWithLight,
         &encode_level_chunk_with_light(&chunk)?,
+        play_reader,
     )?;
-    write_play_payload(
+    write_or_route_play_payload(
         writer,
         profile,
         PacketKind::ChunkBatchFinished,
         &encode_chunk_batch_finished(1)?,
+        play_reader,
     )?;
     if !config.play_policy.welcome_message.is_empty() {
-        write_play_payload(
+        write_or_route_play_payload(
             writer,
             profile,
             PacketKind::SystemChat,
             &encode_system_chat(&config.play_policy.welcome_message, false)?,
+            play_reader,
         )?;
     }
-    write_play_payload(
+    write_or_route_play_payload(
         writer,
         profile,
         PacketKind::PlayerPosition,
         &encode_player_position(&static_player_position(world_profile))?,
+        play_reader,
     )?;
-    writer.flush()?;
+    if play_reader.is_none() {
+        writer.flush()?;
+    }
 
     wait_for_play_bootstrap_acknowledgements_with_bridge(
         reader,
@@ -1678,6 +1974,27 @@ fn run_static_play_session_with_bridge<R: Read, W: Write>(
         play_reader,
         play_round_limit,
     )
+}
+
+fn write_or_route_play_payload<W: Write>(
+    writer: &mut W,
+    profile: &ProtocolProfile,
+    kind: PacketKind,
+    payload: &[u8],
+    play_reader: Option<&PlayReaderEndpoint>,
+) -> Result<()> {
+    if let Some(play_reader) = play_reader {
+        let packet_id = profile.packets().require(kind)?;
+        let packet = build_packet(packet_id, |body| {
+            body.extend_from_slice(payload);
+            Ok(())
+        })?;
+        play_reader
+            .try_submit_output(PlayOutput::Packet(packet))
+            .with_context(|| format!("cannot route {kind:?} packet to Play writer"))?;
+        return Ok(());
+    }
+    write_play_payload(writer, profile, kind, payload)
 }
 
 fn static_join_game(config: &ServerConfig, world: &RomPackWorld) -> JoinGame {
@@ -2046,6 +2363,8 @@ fn parse_handshake_packet(packet: &[u8], packets: &PacketTable) -> Result<Handsh
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ferrum_nbt::{NamedTag, TagType, encode_named};
+    use ferrum_world::anvil::{HEADER_BYTES, REGION_EDGE_CHUNKS, SECTOR_BYTES};
     use std::io::Cursor;
 
     #[test]
@@ -2147,6 +2466,345 @@ mod tests {
         let join = static_join_game(&config, &world);
         assert_eq!(join.chunk_radius, 4);
         assert_eq!(join.simulation_distance, 6);
+    }
+
+    #[test]
+    fn server_state_can_start_from_loaded_world_store() {
+        let world = play_runtime::builtin_world_profile();
+        let loaded_position = BlockPos { x: 1, y: 65, z: 1 };
+        let loaded_state = BlockStateId::new(world.block_states.stone);
+        let mut chunk = StaticChunk::new(
+            ChunkPos { x: 0, z: 0 },
+            world.overworld_min_section_y,
+            world.overworld_section_count,
+            BlockStateId::new(world.block_states.air),
+            BiomeId::new(world.biomes.plains),
+        )
+        .unwrap();
+        chunk
+            .apply_block_mutation(BlockMutation {
+                position: loaded_position,
+                state: loaded_state,
+            })
+            .unwrap();
+        let mut store = ChunkStore::new();
+        store.insert(chunk);
+
+        let state = ServerState::with_loaded_world_runtime(
+            0,
+            world,
+            store,
+            Vec::new(),
+            PlayPolicy::default(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            state
+                .world()
+                .chunk_snapshot(ChunkPos { x: 0, z: 0 })
+                .unwrap()
+                .world_block(loaded_position)
+                .unwrap(),
+            loaded_state
+        );
+    }
+
+    #[test]
+    fn parses_world_region_file_configuration() {
+        let base_dir = PathBuf::from("C:/ferrum/config");
+        let config = ServerConfig::from_toml_like_with_base(
+            r#"
+            [world]
+            region_file = "world/region/r.1.-1.mca"
+            region_dir = "world/region"
+            region_x = 1
+            region_z = -1
+            "#,
+            Some(&base_dir),
+        )
+        .unwrap_err();
+        assert!(
+            config
+                .to_string()
+                .contains("world.region_file and world.region_dir cannot both be set")
+        );
+
+        let config = ServerConfig::from_toml_like_with_base(
+            r#"
+            [world]
+            region_file = "world/region/r.1.-1.mca"
+            region_x = 1
+            region_z = -1
+            "#,
+            Some(&base_dir),
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.world.region_file.as_deref(),
+            Some(base_dir.join("world/region/r.1.-1.mca").as_path())
+        );
+        assert_eq!(config.world.region_dir, None);
+        assert_eq!(config.world.region_x, Some(1));
+        assert_eq!(config.world.region_z, Some(-1));
+
+        let config = ServerConfig::from_toml_like_with_base(
+            r#"
+            [world]
+            region_dir = "world/region"
+            "#,
+            Some(&base_dir),
+        )
+        .unwrap();
+        assert_eq!(
+            config.world.region_dir.as_deref(),
+            Some(base_dir.join("world/region").as_path())
+        );
+
+        let inferred = ServerConfig::from_toml_like_with_base(
+            r#"
+            [world]
+            region_file = "world/region/r.-2.3.mca"
+            "#,
+            Some(&base_dir),
+        )
+        .unwrap();
+        assert_eq!(
+            configured_region_file_pos(
+                &inferred.world,
+                inferred.world.region_file.as_deref().unwrap()
+            )
+            .unwrap(),
+            RegionPos { x: -2, z: 3 }
+        );
+
+        for invalid in [
+            "[world]\nregion_file = \"world/region/r.0.0.mca\"\nregion_x = 0",
+            "[world]\nregion_dir = \"world/region\"\nregion_x = 0\nregion_z = 0",
+            "[world]\nregion_x = 0\nregion_z = 0",
+        ] {
+            assert!(ServerConfig::from_toml_like_with_base(invalid, Some(&base_dir)).is_err());
+        }
+    }
+
+    #[test]
+    fn configured_anvil_region_can_seed_server_state() {
+        let world = play_runtime::builtin_world_profile();
+        let region = RegionPos { x: 1, z: -1 };
+        let local_x = 1;
+        let local_z = 2;
+        let chunk_pos = ChunkPos { x: 33, z: -30 };
+        let section_y = i8::try_from(world.overworld_min_section_y).unwrap();
+        let region_bytes = test_region_with_chunk(
+            local_x,
+            local_z,
+            2,
+            1,
+            3,
+            &encode_named_root(&test_anvil_chunk_root(
+                chunk_pos,
+                section_y,
+                "minecraft:diamond_block",
+            )),
+        );
+        let path = temp_region_file("configured_anvil_region_can_seed_server_state.mca");
+        fs::write(&path, region_bytes).unwrap();
+
+        let world_config = WorldConfig {
+            region_file: Some(path.clone()),
+            region_dir: None,
+            region_x: Some(region.x),
+            region_z: Some(region.z),
+        };
+        let store = load_configured_world_chunks(&world_config, &world)
+            .unwrap()
+            .unwrap();
+        let state = ServerState::with_loaded_world_runtime(
+            0,
+            world.clone(),
+            store,
+            Vec::new(),
+            PlayPolicy::default(),
+        )
+        .unwrap();
+        let position = BlockPos {
+            x: chunk_pos.x * 16,
+            y: i32::from(section_y) * 16,
+            z: chunk_pos.z * 16,
+        };
+
+        assert_eq!(
+            state
+                .world()
+                .chunk_snapshot(chunk_pos)
+                .unwrap()
+                .world_block(position)
+                .unwrap(),
+            BlockStateId::new(world.block_states.stone)
+        );
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn configured_anvil_region_file_infers_position_from_name() {
+        let world = play_runtime::builtin_world_profile();
+        let dir = temp_region_dir("configured_anvil_region_file_infers_position_from_name");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let local_x = 0;
+        let local_z = 31;
+        let chunk_pos = ChunkPos { x: 64, z: -33 };
+        let section_y = i8::try_from(world.overworld_min_section_y).unwrap();
+        let path = dir.join("r.2.-2.mca");
+        fs::write(
+            &path,
+            test_region_with_chunk(
+                local_x,
+                local_z,
+                2,
+                1,
+                3,
+                &encode_named_root(&test_anvil_chunk_root(
+                    chunk_pos,
+                    section_y,
+                    "minecraft:dirt",
+                )),
+            ),
+        )
+        .unwrap();
+
+        let store = load_configured_world_chunks(
+            &WorldConfig {
+                region_file: Some(path),
+                region_dir: None,
+                region_x: None,
+                region_z: None,
+            },
+            &world,
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(
+            store
+                .world_block(BlockPos {
+                    x: chunk_pos.x * 16,
+                    y: i32::from(section_y) * 16,
+                    z: chunk_pos.z * 16,
+                })
+                .unwrap(),
+            BlockStateId::new(world.block_states.dirt)
+        );
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn configured_anvil_region_directory_loads_all_region_files() {
+        let world = play_runtime::builtin_world_profile();
+        let dir = temp_region_dir("configured_anvil_region_directory_loads_all_region_files");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+
+        let first_chunk = ChunkPos { x: 0, z: 0 };
+        let second_chunk = ChunkPos { x: 33, z: -30 };
+        let section_y = i8::try_from(world.overworld_min_section_y).unwrap();
+        fs::write(
+            dir.join("r.0.0.mca"),
+            test_region_with_chunk(
+                0,
+                0,
+                2,
+                1,
+                3,
+                &encode_named_root(&test_anvil_chunk_root(
+                    first_chunk,
+                    section_y,
+                    "minecraft:stone",
+                )),
+            ),
+        )
+        .unwrap();
+        fs::write(
+            dir.join("r.1.-1.mca"),
+            test_region_with_chunk(
+                1,
+                2,
+                2,
+                1,
+                3,
+                &encode_named_root(&test_anvil_chunk_root(
+                    second_chunk,
+                    section_y,
+                    "minecraft:dirt",
+                )),
+            ),
+        )
+        .unwrap();
+        fs::write(dir.join("r.2.0.mca"), b"truncated").unwrap();
+        fs::write(dir.join("notes.txt"), b"ignored").unwrap();
+
+        let store = load_configured_world_chunks(
+            &WorldConfig {
+                region_file: None,
+                region_dir: Some(dir.clone()),
+                region_x: None,
+                region_z: None,
+            },
+            &world,
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(store.len(), 2);
+        assert_eq!(
+            store
+                .world_block(BlockPos {
+                    x: 0,
+                    y: i32::from(section_y) * 16,
+                    z: 0,
+                })
+                .unwrap(),
+            BlockStateId::new(world.block_states.stone)
+        );
+        assert_eq!(
+            store
+                .world_block(BlockPos {
+                    x: second_chunk.x * 16,
+                    y: i32::from(section_y) * 16,
+                    z: second_chunk.z * 16,
+                })
+                .unwrap(),
+            BlockStateId::new(world.block_states.dirt)
+        );
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn anvil_conversion_profile_registers_builtin_biomes() {
+        let world = play_runtime::builtin_world_profile();
+        let profile = anvil_conversion_profile(&world);
+
+        assert_eq!(
+            profile.biomes.get("minecraft:badlands").copied(),
+            Some(BiomeId::new(0))
+        );
+        assert_eq!(
+            profile.biomes.get("minecraft:plains").copied(),
+            Some(BiomeId::new(world.biomes.plains))
+        );
+        assert_eq!(
+            profile.unknown_block_state,
+            Some(BlockStateId::new(world.block_states.stone))
+        );
+        assert_eq!(
+            profile.unknown_biome,
+            Some(BiomeId::new(world.biomes.plains))
+        );
     }
 
     #[test]
@@ -3168,5 +3826,111 @@ mod tests {
         let mut login_cursor = Cursor::new(login_output);
         let disconnect = read_packet(&mut login_cursor).unwrap();
         assert_eq!(PacketReader::new(&disconnect).read_varint().unwrap(), 14);
+    }
+
+    fn test_anvil_chunk_root(pos: ChunkPos, section_y: i8, block_state: &str) -> NamedTag {
+        let mut root = BTreeMap::new();
+        root.insert("DataVersion".to_owned(), Tag::Int(4444));
+        root.insert("xPos".to_owned(), Tag::Int(pos.x));
+        root.insert("zPos".to_owned(), Tag::Int(pos.z));
+        root.insert(
+            "sections".to_owned(),
+            Tag::List {
+                element_type: TagType::Compound,
+                elements: vec![test_anvil_section(section_y, block_state)],
+            },
+        );
+        NamedTag::new("", Tag::Compound(root))
+    }
+
+    fn test_anvil_section(section_y: i8, block_state: &str) -> Tag {
+        let mut section = BTreeMap::new();
+        section.insert("Y".to_owned(), Tag::Byte(section_y));
+        section.insert(
+            "block_states".to_owned(),
+            Tag::Compound(test_block_states(block_state)),
+        );
+        section.insert("biomes".to_owned(), Tag::Compound(test_biomes()));
+        Tag::Compound(section)
+    }
+
+    fn test_block_states(block_state: &str) -> BTreeMap<String, Tag> {
+        let mut container = BTreeMap::new();
+        let mut entry = BTreeMap::new();
+        entry.insert("Name".to_owned(), Tag::String(block_state.to_owned()));
+        container.insert(
+            "palette".to_owned(),
+            Tag::List {
+                element_type: TagType::Compound,
+                elements: vec![Tag::Compound(entry)],
+            },
+        );
+        container
+    }
+
+    fn test_biomes() -> BTreeMap<String, Tag> {
+        let mut container = BTreeMap::new();
+        container.insert(
+            "palette".to_owned(),
+            Tag::List {
+                element_type: TagType::String,
+                elements: vec![Tag::String("minecraft:plains".to_owned())],
+            },
+        );
+        container
+    }
+
+    fn encode_named_root(root: &NamedTag) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        encode_named(&mut bytes, root).unwrap();
+        bytes
+    }
+
+    fn test_region_with_chunk(
+        local_x: usize,
+        local_z: usize,
+        sector_offset: u32,
+        sector_count: u8,
+        compression: u8,
+        payload: &[u8],
+    ) -> Vec<u8> {
+        let mut region =
+            vec![0_u8; (sector_offset as usize + sector_count as usize) * SECTOR_BYTES];
+        write_region_location(
+            &mut region[..HEADER_BYTES],
+            local_x,
+            local_z,
+            sector_offset,
+            sector_count,
+        );
+        let start = sector_offset as usize * SECTOR_BYTES;
+        let declared_len = u32::try_from(payload.len() + 1).unwrap();
+        region[start..start + 4].copy_from_slice(&declared_len.to_be_bytes());
+        region[start + 4] = compression;
+        region[start + 5..start + 5 + payload.len()].copy_from_slice(payload);
+        region
+    }
+
+    fn write_region_location(
+        header: &mut [u8],
+        local_x: usize,
+        local_z: usize,
+        sector_offset: u32,
+        sector_count: u8,
+    ) {
+        let index = local_x + local_z * REGION_EDGE_CHUNKS;
+        let bytes = sector_offset.to_be_bytes();
+        header[index * 4..index * 4 + 3].copy_from_slice(&bytes[1..]);
+        header[index * 4 + 3] = sector_count;
+    }
+
+    fn temp_region_file(name: &str) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        path.push(format!("ferrum-server-{}-{name}", std::process::id()));
+        path
+    }
+
+    fn temp_region_dir(name: &str) -> PathBuf {
+        temp_region_file(name)
     }
 }
