@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   branch-fixup:
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/codex/bootstrap-versions-list-fallback' && !contains(github.event.head_commit.message, '[skip-branch-fixup]') }}
+    if: ${{ (github.ref == 'refs/heads/codex/bootstrap-versions-list-fallback' || github.head_ref == 'codex/bootstrap-versions-list-fallback') && !contains(github.event.head_commit.message, '[skip-branch-fixup]') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
