@@ -163,12 +163,27 @@ pub struct AnvilChunkSummary {
     pub section_count: usize,
 }
 
+#[derive(Debug)]
+pub struct AnvilRegionLoadReport {
+    pub store: ChunkStore,
+    pub loaded_chunks: usize,
+    pub skipped_chunks: Vec<AnvilSkippedChunk>,
+}
+
+#[derive(Debug)]
+pub struct AnvilSkippedChunk {
+    pub position: ChunkPos,
+    pub error: AnvilError,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AnvilChunkConversionProfile {
     pub air: BlockStateId,
     pub default_biome: BiomeId,
     pub block_states: BTreeMap<String, BlockStateId>,
     pub biomes: BTreeMap<String, BiomeId>,
+    pub unknown_block_state: Option<BlockStateId>,
+    pub unknown_biome: Option<BiomeId>,
 }
 
 impl AnvilChunkConversionProfile {
@@ -179,6 +194,8 @@ impl AnvilChunkConversionProfile {
             default_biome,
             block_states: BTreeMap::new(),
             biomes: BTreeMap::new(),
+            unknown_block_state: None,
+            unknown_biome: None,
         }
     }
 
@@ -191,6 +208,18 @@ impl AnvilChunkConversionProfile {
     #[must_use]
     pub fn with_biome(mut self, name: impl Into<String>, id: BiomeId) -> Self {
         self.biomes.insert(name.into(), id);
+        self
+    }
+
+    #[must_use]
+    pub const fn with_unknown_block_state(mut self, id: BlockStateId) -> Self {
+        self.unknown_block_state = Some(id);
+        self
+    }
+
+    #[must_use]
+    pub const fn with_unknown_biome(mut self, id: BiomeId) -> Self {
+        self.unknown_biome = Some(id);
         self
     }
 }
@@ -406,6 +435,37 @@ pub fn load_chunk_store_from_region(
         }
     }
     Ok(store)
+}
+
+pub fn load_chunk_store_from_region_lenient(
+    reader: &mut (impl Read + Seek),
+    header: &RegionHeader,
+    region: RegionPos,
+    profile: &AnvilChunkConversionProfile,
+    limits: AnvilDecodeLimits,
+) -> Result<AnvilRegionLoadReport, AnvilError> {
+    let mut store = ChunkStore::new();
+    let mut loaded_chunks = 0_usize;
+    let mut skipped_chunks = Vec::new();
+    for (local_x, local_z, _) in header.iter() {
+        let chunk_pos = region_chunk_pos(region, local_x, local_z)?;
+        match load_chunk_from_region(reader, header, chunk_pos, profile, limits) {
+            Ok(Some(chunk)) => {
+                store.insert(chunk);
+                loaded_chunks += 1;
+            }
+            Ok(None) => {}
+            Err(error) => skipped_chunks.push(AnvilSkippedChunk {
+                position: chunk_pos,
+                error,
+            }),
+        }
+    }
+    Ok(AnvilRegionLoadReport {
+        store,
+        loaded_chunks,
+        skipped_chunks,
+    })
 }
 
 fn decode_chunk_sector(
@@ -646,6 +706,7 @@ fn block_state_palette_entry(
         .block_states
         .get(name)
         .copied()
+        .or(profile.unknown_block_state)
         .ok_or_else(|| AnvilError::UnknownBlockState { name: name.clone() })
 }
 
@@ -662,6 +723,7 @@ fn biome_palette_entry(
         .biomes
         .get(name)
         .copied()
+        .or(profile.unknown_biome)
         .ok_or_else(|| AnvilError::UnknownBiome { name: name.clone() })
 }
 
@@ -943,6 +1005,7 @@ pub enum AnvilError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::BlockPos;
     use std::collections::BTreeMap;
 
     use ferrum_nbt::{NamedTag, Tag, encode_named};
@@ -1312,6 +1375,49 @@ mod tests {
     }
 
     #[test]
+    fn lenient_region_loading_skips_bad_chunks() {
+        let root = chunk_root(
+            ChunkPos { x: 0, z: 0 },
+            vec![section_with_palettes(
+                0,
+                block_states_container(vec![block_state_entry("minecraft:stone")], None),
+                biome_container(vec![Tag::String("minecraft:plains".to_owned())], None),
+            )],
+        );
+        let payload = encode_root(&root);
+        let mut region = vec![0_u8; HEADER_BYTES + SECTOR_BYTES * 2];
+        write_location(&mut region[..HEADER_BYTES], 0, 0, 2, 1);
+        write_location(&mut region[..HEADER_BYTES], 1, 0, 3, 1);
+        let good_start = HEADER_BYTES;
+        let good_len = u32::try_from(payload.len() + 1).unwrap();
+        region[good_start..good_start + 4].copy_from_slice(&good_len.to_be_bytes());
+        region[good_start + 4] = 3;
+        region[good_start + 5..good_start + 5 + payload.len()].copy_from_slice(&payload);
+        let bad_start = HEADER_BYTES + SECTOR_BYTES;
+        region[bad_start..bad_start + 4].copy_from_slice(&4097_u32.to_be_bytes());
+        region[bad_start + 4] = 3;
+        let header = RegionHeader::read(Cursor::new(&region)).unwrap();
+
+        let report = load_chunk_store_from_region_lenient(
+            &mut Cursor::new(&region),
+            &header,
+            RegionPos { x: 0, z: 0 },
+            &conversion_profile(),
+            AnvilDecodeLimits::default(),
+        )
+        .unwrap();
+
+        assert_eq!(report.loaded_chunks, 1);
+        assert!(report.store.chunk(ChunkPos { x: 0, z: 0 }).is_some());
+        assert_eq!(report.skipped_chunks.len(), 1);
+        assert_eq!(report.skipped_chunks[0].position, ChunkPos { x: 1, z: 0 });
+        assert!(matches!(
+            report.skipped_chunks[0].error,
+            AnvilError::ChunkPayloadTooLarge { .. }
+        ));
+    }
+
+    #[test]
     fn rejects_region_chunk_position_mismatch() {
         let root = chunk_root(
             ChunkPos { x: 3, z: -3 },
@@ -1353,6 +1459,35 @@ mod tests {
             chunk_from_anvil_nbt(&root, &conversion_profile()).unwrap_err(),
             AnvilError::UnknownBlockState { name } if name == "minecraft:diamond_block"
         ));
+    }
+
+    #[test]
+    fn conversion_profile_can_fallback_unknown_palettes() {
+        let root = chunk_root_with_sections(vec![section_with_palettes(
+            0,
+            block_states_container(vec![block_state_entry("minecraft:diamond_block")], None),
+            biome_container(
+                vec![Tag::String("minecraft:unknown_biome".to_owned())],
+                None,
+            ),
+        )]);
+        let profile = conversion_profile()
+            .with_unknown_block_state(STONE)
+            .with_unknown_biome(PLAINS);
+
+        let chunk = chunk_from_anvil_nbt(&root, &profile).unwrap();
+
+        assert_eq!(
+            chunk
+                .world_block(BlockPos {
+                    x: 32,
+                    y: 0,
+                    z: -48
+                })
+                .unwrap(),
+            STONE
+        );
+        assert_eq!(chunk.sections()[0].biome(0, 0, 0).unwrap(), PLAINS);
     }
 
     #[test]

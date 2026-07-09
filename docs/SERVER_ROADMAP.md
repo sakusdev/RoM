@@ -231,7 +231,7 @@ Completed foundation:
 - Serialize bootstrap and dynamically streamed chunks from shared-world snapshots so accepted mutations survive new connections and chunk re-entry.
 - Broadcast accepted block mutations through bounded per-connection queues with same-position coalescing.
 - Drain queued peer block updates during inbound Play handling and transient read timeouts without treating those timeouts as disconnects.
-- Add Anvil region-file header parsing, bounded compressed chunk-NBT decoding, global chunk-to-region coordinate mapping, chunk metadata summaries, modern section-palette conversion into version-neutral chunks, seekable region reads, and region-to-`ChunkStore` loading as the persistence-read foundation.
+- Add Anvil region-file header parsing, bounded compressed chunk-NBT decoding, global chunk-to-region coordinate mapping, chunk metadata summaries, modern section-palette conversion into version-neutral chunks, configurable unknown-palette fallbacks, seekable region reads, strict and lenient region-to-`ChunkStore` loading with skipped-chunk reports, and `[world]` config wiring for boot-time loading of one `.mca` region or a region directory with bad region-file skipping as the persistence-read foundation.
 - Keep protocol serialization and version-specific numeric IDs outside the world crate.
 
 Remaining:
@@ -240,7 +240,7 @@ Remaining:
 - Replace the current shared mutex world path with dedicated bounded network-worker queues and one authoritative tick owner.
 - Move outbound block updates from client-traffic-driven draining to dedicated non-blocking writer workers.
 - Wire live network workers into the shared authoritative world runtime.
-- Expand Anvil conversion coverage for additional historical chunk shapes and full production world-loading integration.
+- Expand Anvil conversion coverage for additional historical chunk shapes, exact registry-complete block-state mapping, and save/write integration.
 - Add safe asynchronous loading and saving.
 - Preserve deterministic world mutation through the authoritative tick loop.
 
