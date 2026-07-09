@@ -85,6 +85,7 @@ jobs:
           git commit -m "Merge master and fix CI [skip-branch-fixup]"
           git push origin HEAD:codex/bootstrap-versions-list-fallback
           SH
+          exit ${PIPESTATUS[0]}
       - name: Upload branch fixup log
         if: failure()
         uses: actions/upload-artifact@v4
