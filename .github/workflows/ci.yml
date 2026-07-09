@@ -4,72 +4,7 @@ on:
   push:
   pull_request:
 
-permissions:
-  contents: write
-
 jobs:
-  branch-fixup:
-    if: ${{ (github.ref == 'refs/heads/codex/bootstrap-versions-list-fallback' || github.head_ref == 'codex/bootstrap-versions-list-fallback') && !contains(github.event.head_commit.message, '[skip-branch-fixup]') }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: codex/bootstrap-versions-list-fallback
-          fetch-depth: 0
-      - name: Merge master and patch source files
-        run: |
-          bash <<'SH' 2>&1 | tee fixup.log
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch origin master
-          git merge --no-edit origin/master
-          cat > /tmp/fixup.py <<'PY'
-          from pathlib import Path
-
-          anvil = Path("crates/ferrum-world/src/anvil.rs")
-          text = anvil.read_text(encoding="utf-8")
-          text = text.replace(
-              "        for index in 0..REGION_CHUNK_COUNT {\n            let base = index * 4;",
-              "        for (index, location) in locations.iter_mut().enumerate() {\n            let base = index * 4;",
-              1,
-          )
-          text = text.replace(
-              "            locations[index] = Some(RegionChunkLocation {",
-              "            *location = Some(RegionChunkLocation {",
-              1,
-          )
-          anvil.write_text(text, encoding="utf-8")
-
-          extract = Path("crates/rom-bootstrap/src/extract.rs")
-          text = extract.read_text(encoding="utf-8")
-          text = text.replace("#[allow(clippy::all)]\nfn resolve_game_jar", "fn resolve_game_jar", 1)
-          text = text.replace(
-              "    #[allow(clippy::all)]\n    fn build_outer_jar_with_invalid_versions_list",
-              "    fn build_outer_jar_with_invalid_versions_list",
-              1,
-          )
-          text = text.replace(
-              "    #[allow(clippy::all)]\n    #[test]\n    fn falls_back_to_single_embedded_game_jar_when_versions_list_is_invalid",
-              "    #[test]\n    fn falls_back_to_single_embedded_game_jar_when_versions_list_is_invalid",
-              1,
-          )
-          extract.write_text(text, encoding="utf-8")
-          PY
-          python /tmp/fixup.py
-          git add crates/ferrum-world/src/anvil.rs crates/rom-bootstrap/src/extract.rs
-          git status --short
-          git commit -m "Merge master and fix CI [skip-branch-fixup]"
-          git push origin HEAD:codex/bootstrap-versions-list-fallback
-          SH
-          exit ${PIPESTATUS[0]}
-      - name: Upload branch fixup log
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: branch-fixup-log
-          path: fixup.log
-
   test:
     strategy:
       matrix:
@@ -81,12 +16,5 @@ jobs:
         with:
           components: rustfmt, clippy
       - run: cargo fmt --all --check
-      - name: Run cargo clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tee clippy.log
-      - name: Upload clippy log
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: clippy-log-${{ matrix.os }}
-          path: clippy.log
+      - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
