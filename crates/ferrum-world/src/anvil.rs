@@ -58,7 +58,7 @@ impl RegionHeader {
 
     pub fn from_bytes(bytes: [u8; HEADER_BYTES]) -> Result<Self, AnvilError> {
         let mut locations = [None; REGION_CHUNK_COUNT];
-        for index in 0..REGION_CHUNK_COUNT {
+        for (index, location) in locations.iter_mut().enumerate() {
             let base = index * 4;
             let sector_offset =
                 u32::from_be_bytes([0, bytes[base], bytes[base + 1], bytes[base + 2]]);
@@ -87,7 +87,7 @@ impl RegionHeader {
                     sector_offset,
                 });
             }
-            locations[index] = Some(RegionChunkLocation {
+            *location = Some(RegionChunkLocation {
                 sector_offset,
                 sector_count,
                 timestamp,

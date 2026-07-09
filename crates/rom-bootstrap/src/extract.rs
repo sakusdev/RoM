@@ -328,7 +328,6 @@ struct ResolvedGameJar {
     bytes: Vec<u8>,
 }
 
-#[allow(clippy::all)]
 fn resolve_game_jar(path: &Path) -> Result<ResolvedGameJar> {
     let outer_bytes = fs::read(path).with_context(|| format!("cannot read {}", path.display()))?;
     if outer_bytes.len() as u64 > MAX_OUTER_JAR_BYTES {
@@ -752,7 +751,6 @@ mod tests {
         cursor.into_inner()
     }
 
-    #[allow(clippy::all)]
     fn build_outer_jar_with_invalid_versions_list(game_jar: &[u8]) -> Vec<u8> {
         let mut cursor = Cursor::new(Vec::new());
         {
@@ -801,7 +799,6 @@ mod tests {
         assert_eq!(resolved.bytes, game_jar);
     }
 
-    #[allow(clippy::all)]
     #[test]
     fn falls_back_to_single_embedded_game_jar_when_versions_list_is_invalid() {
         let directory = tempdir().unwrap();
