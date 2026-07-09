@@ -16,7 +16,7 @@ jobs:
         with:
           ref: codex/bootstrap-versions-list-fallback
           fetch-depth: 0
-      - name: Merge master and clean temporary diagnostics
+      - name: Merge master and patch source files
         run: |
           bash <<'SH' 2>&1 | tee fixup.log
           set -euo pipefail
@@ -55,32 +55,9 @@ jobs:
               1,
           )
           extract.write_text(text, encoding="utf-8")
-
-          Path(".github/workflows/ci.yml").write_text(
-              "name: CI\n\n"
-              "on:\n"
-              "  push:\n"
-              "  pull_request:\n\n"
-              "jobs:\n"
-              "  test:\n"
-              "    strategy:\n"
-              "      matrix:\n"
-              "        os: [ubuntu-latest, windows-latest, macos-latest]\n"
-              "    runs-on: ${{ matrix.os }}\n"
-              "    steps:\n"
-              "      - uses: actions/checkout@v4\n"
-              "      - uses: dtolnay/rust-toolchain@stable\n"
-              "        with:\n"
-              "          components: rustfmt, clippy\n"
-              "      - run: cargo fmt --all --check\n"
-              "      - run: cargo clippy --workspace --all-targets -- -D warnings\n"
-              "      - run: cargo test --workspace\n",
-              encoding="utf-8",
-          )
-          Path(".github/workflows/branch-fixup.yml").unlink(missing_ok=True)
           PY
           python /tmp/fixup.py
-          git add .
+          git add crates/ferrum-world/src/anvil.rs crates/rom-bootstrap/src/extract.rs
           git status --short
           git commit -m "Merge master and fix CI [skip-branch-fixup]"
           git push origin HEAD:codex/bootstrap-versions-list-fallback
