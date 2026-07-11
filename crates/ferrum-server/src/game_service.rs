@@ -191,7 +191,10 @@ fn validate_config(config: &GameServiceConfig) -> Result<()> {
     if config.poll_interval.is_zero() {
         bail!("game service poll interval must be greater than zero");
     }
-    if config.autosave_interval.is_some_and(Duration::is_zero) {
+    if config
+        .autosave_interval
+        .is_some_and(|interval| interval.is_zero())
+    {
         bail!("game autosave interval must be greater than zero");
     }
     if config.autosave_interval.is_some() && config.snapshot_path.is_none() {
