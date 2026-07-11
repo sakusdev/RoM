@@ -65,6 +65,7 @@ pub enum GameCommand {
         target: Option<String>,
     },
     SaveAll,
+    Stop,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -72,6 +73,7 @@ pub struct CommandOutcome {
     pub feedback: String,
     pub events: Vec<GameEvent>,
     pub save_requested: bool,
+    pub shutdown_requested: bool,
 }
 
 pub fn parse_command(input: &str) -> Result<GameCommand, CommandError> {
@@ -126,6 +128,7 @@ pub fn parse_command(input: &str) -> Result<GameCommand, CommandError> {
             target: Some((*target).to_owned()),
         }),
         ["save-all"] | ["save-all", "flush"] => Ok(GameCommand::SaveAll),
+        ["stop"] => Ok(GameCommand::Stop),
         _ => Err(CommandError::InvalidSyntax {
             input: input.to_owned(),
         }),
@@ -163,6 +166,7 @@ pub fn execute_parsed_command(
                 ),
                 events: Vec::new(),
                 save_requested: false,
+                shutdown_requested: false,
             })
         }
         GameCommand::Say { message } => {
@@ -172,6 +176,7 @@ pub fn execute_parsed_command(
                 feedback: rendered.clone(),
                 events: vec![GameEvent::Broadcast { message: rendered }],
                 save_requested: false,
+                shutdown_requested: false,
             })
         }
         GameCommand::GameMode { mode, target } => {
@@ -187,6 +192,7 @@ pub fn execute_parsed_command(
                 feedback: format!("Set {name}'s game mode to {mode:?}"),
                 events,
                 save_requested: false,
+                shutdown_requested: false,
             })
         }
         GameCommand::Teleport { target, position } => {
@@ -207,6 +213,7 @@ pub fn execute_parsed_command(
                 ),
                 events,
                 save_requested: false,
+                shutdown_requested: false,
             })
         }
         GameCommand::Give {
@@ -244,6 +251,7 @@ pub fn execute_parsed_command(
                 feedback: format!("Gave {inserted} {item} to {name}"),
                 events,
                 save_requested: false,
+                shutdown_requested: false,
             })
         }
         GameCommand::TimeSet { day_time } => {
@@ -253,6 +261,7 @@ pub fn execute_parsed_command(
                 feedback: format!("Set the time to {day_time}"),
                 events,
                 save_requested: false,
+                shutdown_requested: false,
             })
         }
         GameCommand::Difficulty { difficulty } => {
@@ -262,6 +271,7 @@ pub fn execute_parsed_command(
                 feedback: format!("Set difficulty to {difficulty:?}"),
                 events: Vec::new(),
                 save_requested: false,
+                shutdown_requested: false,
             })
         }
         GameCommand::GameRule { name, value } => {
@@ -271,6 +281,7 @@ pub fn execute_parsed_command(
                 feedback: format!("Set game rule {name} to {value:?}"),
                 events: Vec::new(),
                 save_requested: false,
+                shutdown_requested: false,
             })
         }
         GameCommand::Kill { target } => {
@@ -286,6 +297,7 @@ pub fn execute_parsed_command(
                 feedback: format!("Killed {name}"),
                 events,
                 save_requested: false,
+                shutdown_requested: false,
             })
         }
         GameCommand::SaveAll => {
@@ -294,6 +306,16 @@ pub fn execute_parsed_command(
                 feedback: "Saved the game".to_owned(),
                 events: vec![GameEvent::SaveRequested],
                 save_requested: true,
+                shutdown_requested: false,
+            })
+        }
+        GameCommand::Stop => {
+            require_permission(source, 4)?;
+            Ok(CommandOutcome {
+                feedback: "Stopping the server".to_owned(),
+                events: vec![GameEvent::ShutdownRequested],
+                save_requested: true,
+                shutdown_requested: true,
             })
         }
     }
@@ -484,6 +506,16 @@ mod tests {
         let mut state = GameState::default();
         let outcome = execute_command(&mut state, &CommandSource::console(), "/save-all").unwrap();
         assert!(outcome.save_requested);
+        assert!(!outcome.shutdown_requested);
         assert_eq!(outcome.events, [GameEvent::SaveRequested]);
+    }
+
+    #[test]
+    fn stop_requests_save_and_shutdown() {
+        let mut state = GameState::default();
+        let outcome = execute_command(&mut state, &CommandSource::console(), "/stop").unwrap();
+        assert!(outcome.save_requested);
+        assert!(outcome.shutdown_requested);
+        assert_eq!(outcome.events, [GameEvent::ShutdownRequested]);
     }
 }
