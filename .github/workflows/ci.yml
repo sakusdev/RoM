@@ -4,34 +4,7 @@ on:
   push:
   pull_request:
 
-permissions:
-  contents: write
-
 jobs:
-  source-fixup:
-    if: ${{ github.head_ref == 'feature/bootstrap-complete' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: feature/bootstrap-complete
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - name: Format Bootstrap source
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          cargo fmt --all
-          git add crates/rom-bootstrap/src/setup.rs
-          if git diff --cached --quiet; then
-            echo "Bootstrap source is already formatted"
-            exit 0
-          fi
-          git commit -m "Format Bootstrap idempotence changes"
-          git push origin HEAD:feature/bootstrap-complete
-
   test:
     strategy:
       matrix:
