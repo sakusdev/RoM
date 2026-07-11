@@ -1230,6 +1230,7 @@ mod tests {
             &world,
             connection,
             Some(&reader),
+            None,
             Some(1),
         )
         .unwrap();

@@ -279,7 +279,7 @@ impl ServerState {
             Ok(endpoints) => endpoints,
             Err(error) => {
                 let _ = self.game_runtime.disconnect_player(player_uuid);
-                return Err(error);
+                return Err(error.into());
             }
         };
         self.online_players.fetch_add(1, Ordering::Relaxed);
