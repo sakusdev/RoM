@@ -1,11 +1,13 @@
 use crate::{
-    GenerateOptions, GenerateReport, InstallLocalOptions, PrepareOptions, PrepareReport,
-    StatusReport, generate_version_pack, install_local_server, prepare_instance, status_instance,
+    BootstrapManifest, BootstrapStage, GenerateOptions, GenerateReport, InstallLocalOptions,
+    PrepareOptions, PrepareReport, StatusReport, absolute_path, generate_version_pack,
+    install_local_server, prepare_instance, status_instance, write_json,
 };
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use std::{
-    env,
+    env, fs,
+    io::ErrorKind,
     path::{Path, PathBuf},
 };
 
@@ -39,12 +41,15 @@ pub struct DoctorReport {
 }
 
 pub fn setup_instance(options: &SetupOptions) -> Result<SetupReport> {
+    let existing_manifest = read_existing_manifest(&options.instance)?;
     let prepare = prepare_instance(&PrepareOptions {
         instance: options.instance.clone(),
         version: options.version.clone(),
         accept_minecraft_eula: options.accept_minecraft_eula,
         force_download: options.force_download,
     })?;
+    restore_compatible_pack_record(&prepare.instance, existing_manifest)?;
+
     let generate = generate_version_pack(&GenerateOptions {
         instance: options.instance.clone(),
         force: options.force_generate,
@@ -105,6 +110,55 @@ pub fn doctor_instance(instance: impl AsRef<Path>) -> Result<DoctorReport> {
     })
 }
 
+fn read_existing_manifest(instance: &Path) -> Result<Option<BootstrapManifest>> {
+    let manifest_path = absolute_path(instance)?.join("rom-bootstrap.json");
+    let bytes = match fs::read(&manifest_path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("cannot read {}", manifest_path.display()));
+        }
+    };
+    Ok(serde_json::from_slice(&bytes).ok())
+}
+
+fn restore_compatible_pack_record(
+    instance: &Path,
+    existing: Option<BootstrapManifest>,
+) -> Result<()> {
+    let Some(mut existing) = existing else {
+        return Ok(());
+    };
+    let Some(pack) = existing.pack.take() else {
+        return Ok(());
+    };
+
+    let manifest_path = instance.join("rom-bootstrap.json");
+    let bytes = fs::read(&manifest_path)
+        .with_context(|| format!("cannot read {}", manifest_path.display()))?;
+    let mut prepared: BootstrapManifest = serde_json::from_slice(&bytes)
+        .with_context(|| format!("cannot parse {}", manifest_path.display()))?;
+    if !manifests_share_source(&existing, &prepared) {
+        return Ok(());
+    }
+
+    prepared.stage = BootstrapStage::VersionPackGenerated;
+    prepared.pack = Some(pack);
+    write_json(manifest_path, &prepared)
+}
+
+fn manifests_share_source(left: &BootstrapManifest, right: &BootstrapManifest) -> bool {
+    left.schema_version == right.schema_version
+        && left.minecraft_version == right.minecraft_version
+        && left.protocol == right.protocol
+        && left.patch_set == right.patch_set
+        && left.source.kind == right.source.kind
+        && left.source.sha1.eq_ignore_ascii_case(&right.source.sha1)
+        && left.source.size == right.source.size
+        && left.source.local_path == right.source.local_path
+}
+
 fn adjacent_native_server_binary() -> Option<PathBuf> {
     let directory = env::current_exe().ok()?.parent()?.to_path_buf();
     let candidate = directory.join(if cfg!(windows) {
@@ -118,6 +172,7 @@ fn adjacent_native_server_binary() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{SourceRecord, extract::PackRecord};
     use tempfile::tempdir;
 
     #[test]
@@ -138,5 +193,81 @@ mod tests {
                 .iter()
                 .any(|problem| problem.contains("server.toml"))
         );
+    }
+
+    #[test]
+    fn compatible_prepare_manifest_keeps_generated_pack_provenance() {
+        let directory = tempdir().unwrap();
+        let instance = directory.path();
+        let existing = manifest(Some(PackRecord {
+            local_path: "versions/26.1.2/26.1.2.rompack".to_owned(),
+            sha256: "00".repeat(32),
+            size: 1,
+            packet_count: 1,
+            registry_count: 1,
+            registry_entry_count: 1,
+            resource_count: 1,
+        }));
+        write_json(instance.join("rom-bootstrap.json"), &manifest(None)).unwrap();
+
+        restore_compatible_pack_record(instance, Some(existing)).unwrap();
+
+        let restored: BootstrapManifest = serde_json::from_slice(
+            &fs::read(instance.join("rom-bootstrap.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(restored.stage, BootstrapStage::VersionPackGenerated);
+        assert_eq!(
+            restored.pack.unwrap().local_path,
+            "versions/26.1.2/26.1.2.rompack"
+        );
+    }
+
+    #[test]
+    fn changed_source_does_not_restore_generated_pack_provenance() {
+        let directory = tempdir().unwrap();
+        let instance = directory.path();
+        let mut existing = manifest(Some(PackRecord {
+            local_path: "versions/26.1.2/26.1.2.rompack".to_owned(),
+            sha256: "00".repeat(32),
+            size: 1,
+            packet_count: 1,
+            registry_count: 1,
+            registry_entry_count: 1,
+            resource_count: 1,
+        }));
+        existing.source.sha1 = "11".repeat(20);
+        write_json(instance.join("rom-bootstrap.json"), &manifest(None)).unwrap();
+
+        restore_compatible_pack_record(instance, Some(existing)).unwrap();
+
+        let restored: BootstrapManifest = serde_json::from_slice(
+            &fs::read(instance.join("rom-bootstrap.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(restored.stage, BootstrapStage::OfficialSourceVerified);
+        assert!(restored.pack.is_none());
+    }
+
+    fn manifest(pack: Option<PackRecord>) -> BootstrapManifest {
+        BootstrapManifest {
+            schema_version: 1,
+            minecraft_version: "26.1.2".to_owned(),
+            protocol: 775,
+            patch_set: "builtin:26.1.2".to_owned(),
+            stage: if pack.is_some() {
+                BootstrapStage::VersionPackGenerated
+            } else {
+                BootstrapStage::OfficialSourceVerified
+            },
+            source: SourceRecord {
+                kind: "official_server_jar".to_owned(),
+                url: "https://piston-data.mojang.com/server.jar".to_owned(),
+                sha1: "00".repeat(20),
+                size: 4,
+                local_path: "cache/official/26.1.2/server.jar".to_owned(),
+            },
+            pack,
+        }
     }
 }
