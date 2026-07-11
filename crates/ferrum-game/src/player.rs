@@ -5,17 +5,27 @@ use crate::{EntityId, Inventory, validate_resource_location};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct PlayerUuid(u128);
+pub struct PlayerUuid([u8; 16]);
 
 impl PlayerUuid {
     #[must_use]
     pub const fn new(value: u128) -> Self {
+        Self(value.to_be_bytes())
+    }
+
+    #[must_use]
+    pub const fn from_bytes(value: [u8; 16]) -> Self {
         Self(value)
     }
 
     #[must_use]
     pub const fn get(self) -> u128 {
-        self.0
+        u128::from_be_bytes(self.0)
+    }
+
+    #[must_use]
+    pub const fn as_bytes(&self) -> &[u8; 16] {
+        &self.0
     }
 }
 
@@ -322,5 +332,14 @@ mod tests {
         player.reconnect(EntityId::new(2).unwrap());
         assert!(player.connected);
         assert_eq!(player.entity_id, Some(EntityId::new(2).unwrap()));
+    }
+
+    #[test]
+    fn uuid_json_is_safe_for_full_128_bit_values() {
+        let uuid = PlayerUuid::new(u128::MAX);
+        let json = serde_json::to_string(&uuid).unwrap();
+        let decoded: PlayerUuid = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, uuid);
+        assert_eq!(decoded.as_bytes(), &[0xff; 16]);
     }
 }
