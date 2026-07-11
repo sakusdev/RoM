@@ -28,6 +28,10 @@ jobs:
           python scripts/apply_live_game_replication.py > replication-fixup.log 2>&1
           apply_status=$?
           if [ "$apply_status" -eq 0 ]; then
+            python scripts/fix_play_replication_format.py >> replication-fixup.log 2>&1
+            apply_status=$?
+          fi
+          if [ "$apply_status" -eq 0 ]; then
             cargo fmt --all > replication-format.log 2>&1
             format_status=$?
           else
