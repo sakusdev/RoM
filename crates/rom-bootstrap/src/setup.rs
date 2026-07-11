@@ -116,8 +116,7 @@ fn read_existing_manifest(instance: &Path) -> Result<Option<BootstrapManifest>> 
         Ok(bytes) => bytes,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
         Err(error) => {
-            return Err(error)
-                .with_context(|| format!("cannot read {}", manifest_path.display()));
+            return Err(error).with_context(|| format!("cannot read {}", manifest_path.display()));
         }
     };
     Ok(serde_json::from_slice(&bytes).ok())
@@ -212,10 +211,9 @@ mod tests {
 
         restore_compatible_pack_record(instance, Some(existing)).unwrap();
 
-        let restored: BootstrapManifest = serde_json::from_slice(
-            &fs::read(instance.join("rom-bootstrap.json")).unwrap(),
-        )
-        .unwrap();
+        let restored: BootstrapManifest =
+            serde_json::from_slice(&fs::read(instance.join("rom-bootstrap.json")).unwrap())
+                .unwrap();
         assert_eq!(restored.stage, BootstrapStage::VersionPackGenerated);
         assert_eq!(
             restored.pack.unwrap().local_path,
@@ -241,10 +239,9 @@ mod tests {
 
         restore_compatible_pack_record(instance, Some(existing)).unwrap();
 
-        let restored: BootstrapManifest = serde_json::from_slice(
-            &fs::read(instance.join("rom-bootstrap.json")).unwrap(),
-        )
-        .unwrap();
+        let restored: BootstrapManifest =
+            serde_json::from_slice(&fs::read(instance.join("rom-bootstrap.json")).unwrap())
+                .unwrap();
         assert_eq!(restored.stage, BootstrapStage::OfficialSourceVerified);
         assert!(restored.pack.is_none());
     }
