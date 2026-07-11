@@ -294,7 +294,8 @@ impl ServerState {
 
     #[cfg(test)]
     fn enter_play(&self) -> OnlinePlayerGuard<'_> {
-        let identity = offline_player_identity("TestPlayer");
+        let connection_number = self.next_connection_id.load(Ordering::Relaxed);
+        let identity = offline_player_identity(&format!("Test{connection_number}"));
         let transform = game_spawn_transform(self.world.world_profile())
             .expect("test spawn transform must be valid");
         self.try_enter_play(&identity, transform)
