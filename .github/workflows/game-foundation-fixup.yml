@@ -1,0 +1,89 @@
+name: Gameplay foundation fixup
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  fixup:
+    if: ${{ github.head_ref == 'feature/vanilla-parity-foundation' && !contains(github.event.pull_request.head.sha, '[skip-game-fixup]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/vanilla-parity-foundation
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Apply source invariants and formatting
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python - <<'PY'
+          from pathlib import Path
+
+          state = Path("crates/ferrum-game/src/state.rs")
+          text = state.read_text(encoding="utf-8")
+          old = '''    pub fn set_day_time(&mut self, day_time: i64) -> Vec<GameEvent> {
+              self.time.day_time = day_time;
+              vec![GameEvent::TimeChanged { day_time }]
+          }
+
+          pub fn set_game_rule(&mut self, name: impl Into<String>, value: GameRuleValue) {
+              let name = name.into();
+              if name == "doDaylightCycle" {
+                  if let GameRuleValue::Boolean(enabled) = value {
+                      self.time.daylight_cycle = enabled;
+                      self.game_rules
+                          .insert(name, GameRuleValue::Boolean(enabled));
+                      return;
+                  }
+              }
+              self.game_rules.insert(name, value);
+          }
+          '''
+          new = '''    pub fn set_day_time(&mut self, day_time: i64) -> Vec<GameEvent> {
+              self.time.day_time = day_time;
+              vec![GameEvent::TimeChanged { day_time }]
+          }
+
+          pub fn set_difficulty(&mut self, difficulty: Difficulty) -> Difficulty {
+              std::mem::replace(&mut self.difficulty, difficulty)
+          }
+
+          pub fn set_game_rule(&mut self, name: impl Into<String>, value: GameRuleValue) {
+              let name = name.into();
+              if name == "doDaylightCycle" {
+                  if let GameRuleValue::Boolean(enabled) = &value {
+                      self.time.daylight_cycle = *enabled;
+                  }
+              }
+              self.game_rules.insert(name, value);
+          }
+          '''
+          if old not in text:
+              raise SystemExit("state.rs replacement target not found")
+          state.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          inventory = Path("crates/ferrum-game/src/inventory.rs")
+          text = inventory.read_text(encoding="utf-8")
+          text = text.replace(
+              "if amount == 0 || amount > self.count {",
+              "if amount == 0 || amount >= self.count {",
+              1,
+          )
+          inventory.write_text(text, encoding="utf-8")
+          PY
+          cargo fmt --all
+          cargo generate-lockfile
+          git add Cargo.lock crates/ferrum-game crates/ferrum-server Cargo.toml
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "Finalize gameplay foundation invariants [skip-game-fixup]"
+          git push origin HEAD:feature/vanilla-parity-foundation
