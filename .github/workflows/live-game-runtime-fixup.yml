@@ -21,73 +21,73 @@ jobs:
           components: rustfmt
       - name: Connect login identity to gameplay state
         run: |
+          bash <<'SH' 2>&1 | tee live-fixup.log
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           python - <<'PY'
           from pathlib import Path
+          import re
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              if old not in text:
+                  raise SystemExit(f"replacement target not found: {label}")
+              return text.replace(old, new, 1)
 
           entity = Path("crates/ferrum-game/src/entity.rs")
           text = entity.read_text(encoding="utf-8")
-          text = text.replace(
+          text = replace_once(
+              text,
               "    #[must_use]\n    pub fn iter(&self) -> impl Iterator<Item = (&EntityId, &Entity)> {",
               "    pub fn iter(&self) -> impl Iterator<Item = (&EntityId, &Entity)> {",
-              1,
+              "entity iter double must_use",
           )
           entity.write_text(text, encoding="utf-8")
 
           main = Path("crates/ferrum-server/src/main.rs")
           text = main.read_text(encoding="utf-8")
-          text = text.replace(
+          text = replace_once(
+              text,
               "use ferrum_nbt::{Tag, encode_anonymous};",
               "use ferrum_game::{GameState, PlayerUuid as GamePlayerUuid, Transform};\nuse ferrum_nbt::{Tag, encode_anonymous};",
-              1,
+              "game imports",
           )
-          text = text.replace(
+          text = replace_once(
+              text,
               "    authoritative_runtime::{PlayInput, PlayOutput},\n",
               "    authoritative_runtime::{PlayInput, PlayOutput},\n    game_runtime::SharedGameRuntime,\n",
-              1,
+              "shared game runtime import",
           )
-          text = text.replace(
+          text = replace_once(
+              text,
               "use identity::offline_player_identity;",
               "use identity::{PlayerIdentity, offline_player_identity};",
-              1,
+              "identity import",
           )
-          text = text.replace(
+          text = replace_once(
+              text,
               "    shared_play_runtime: SharedPlayRuntime,\n}",
               "    shared_play_runtime: SharedPlayRuntime,\n    game_runtime: SharedGameRuntime,\n}",
-              1,
+              "server state field",
           )
-          text = text.replace(
+          text = replace_once(
+              text,
               "        let center = play_runtime::spawn_chunk(&world);\n        let shared_runtime_config = shared_play_runtime_config(&play_policy)?;",
               "        let center = play_runtime::spawn_chunk(&world);\n        let game_runtime = SharedGameRuntime::new(GameState::new(world.dimension.clone())?);\n        let shared_runtime_config = shared_play_runtime_config(&play_policy)?;",
-              1,
+              "game runtime construction",
           )
-          text = text.replace(
+          text = replace_once(
+              text,
               "            shared_play_runtime,\n        })",
               "            shared_play_runtime,\n            game_runtime,\n        })",
-              1,
+              "game runtime initialization",
           )
 
-          old_try = '''    fn try_enter_play(&self) -> Result<OnlinePlayerGuard<'_>> {
-              let id = self.next_connection_id.fetch_add(1, Ordering::Relaxed);
-              let connection_id = ConnectionId::new(id);
-              let (play_reader, play_writer) = register_play_connection(
-                  &self.shared_play_runtime.connector(),
-                  connection_id,
-                  NonZeroUsize::new(PLAY_OUTPUT_QUEUE_CAPACITY)
-                      .expect("Play output queue capacity is non-zero"),
-              )?;
-              self.online_players.fetch_add(1, Ordering::Relaxed);
-              Ok(OnlinePlayerGuard {
-                  state: self,
-                  connection_id,
-                  play_reader,
-                  play_writer: Some(play_writer),
-              })
-          }
-          '''
-          new_try = '''    fn try_enter_play(
+          pattern = re.compile(
+              r"    fn try_enter_play\(&self\) -> Result<OnlinePlayerGuard<'_>> \{.*?\n    \}\n\n    #\[cfg\(test\)\]",
+              re.S,
+          )
+          replacement = '''    fn try_enter_play(
               &self,
               identity: &PlayerIdentity,
               transform: Transform,
@@ -119,19 +119,20 @@ jobs:
                   play_writer: Some(play_writer),
               })
           }
-          '''
-          if old_try not in text:
-              raise SystemExit("try_enter_play target not found")
-          text = text.replace(old_try, new_try, 1)
-          text = text.replace(
-              '''    #[cfg(test)]
-              fn enter_play(&self) -> OnlinePlayerGuard<'_> {
+
+          #[cfg(test)]'''
+          text, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise SystemExit("replacement target not found: try_enter_play function")
+
+          text = replace_once(
+              text,
+              '''    fn enter_play(&self) -> OnlinePlayerGuard<'_> {
                   self.try_enter_play()
                       .expect("test Play connection must register")
               }
               ''',
-              '''    #[cfg(test)]
-              fn enter_play(&self) -> OnlinePlayerGuard<'_> {
+              '''    fn enter_play(&self) -> OnlinePlayerGuard<'_> {
                   let identity = offline_player_identity("TestPlayer");
                   let transform = game_spawn_transform(self.world.world_profile())
                       .expect("test spawn transform must be valid");
@@ -139,45 +140,82 @@ jobs:
                       .expect("test Play connection must register")
               }
               ''',
-              1,
+              "test enter_play helper",
           )
-          text = text.replace(
+          text = replace_once(
+              text,
               "    connection_id: ConnectionId,\n    play_reader: PlayReaderEndpoint,",
               "    connection_id: ConnectionId,\n    player_uuid: GamePlayerUuid,\n    play_reader: PlayReaderEndpoint,",
-              1,
+              "online player UUID field",
           )
-          text = text.replace(
+          text = replace_once(
+              text,
               "        let _ = self.play_reader.try_disconnect();\n        self.state.online_players.fetch_sub(1, Ordering::Relaxed);",
               "        let _ = self.play_reader.try_disconnect();\n        let _ = self.state.game_runtime.disconnect_player(self.player_uuid);\n        self.state.online_players.fetch_sub(1, Ordering::Relaxed);",
-              1,
+              "disconnect cleanup",
           )
-
-          text = text.replace(
+          text = replace_once(
+              text,
               "                context,\n                profile,\n                session,",
               "                context,\n                &identity,\n                profile,\n                session,",
-              1,
+              "configuration identity argument",
           )
-          text = text.replace(
-              "    context: ServerContext<'_>,\n    profile: &ProtocolProfile,\n    session: &mut ProtocolSession,\n    play_round_limit: Option<usize>,\n) -> Result<()> {\n    let config = context.config;",
-              "    context: ServerContext<'_>,\n    identity: &PlayerIdentity,\n    profile: &ProtocolProfile,\n    session: &mut ProtocolSession,\n    play_round_limit: Option<usize>,\n) -> Result<()> {\n    let config = context.config;",
-              1,
+
+          config_signature = '''    context: ServerContext<'_>,
+              profile: &ProtocolProfile,
+              session: &mut ProtocolSession,
+              play_round_limit: Option<usize>,
+          ) -> Result<()> {
+              let config = context.config;'''
+          config_signature_with_identity = '''    context: ServerContext<'_>,
+              identity: &PlayerIdentity,
+              profile: &ProtocolProfile,
+              session: &mut ProtocolSession,
+              play_round_limit: Option<usize>,
+          ) -> Result<()> {
+              let config = context.config;'''
+          text = replace_once(
+              text,
+              config_signature,
+              config_signature_with_identity,
+              "configuration signature",
           )
-          text = text.replace(
+          text = replace_once(
+              text,
               "    handle_play_protocol(reader, writer, context, profile, session, play_round_limit)",
               "    handle_play_protocol(\n        reader,\n        writer,\n        context,\n        identity,\n        profile,\n        session,\n        play_round_limit,\n    )",
-              1,
+              "play call identity",
           )
-          text = text.replace(
-              "    context: ServerContext<'_>,\n    profile: &ProtocolProfile,\n    session: &mut ProtocolSession,\n    play_round_limit: Option<usize>,\n) -> Result<()> {\n    let config = context.config;\n    if config.profile_name.as_deref() != Some(version_26_1_2::PROFILE_NAME) {",
-              "    context: ServerContext<'_>,\n    identity: &PlayerIdentity,\n    profile: &ProtocolProfile,\n    session: &mut ProtocolSession,\n    play_round_limit: Option<usize>,\n) -> Result<()> {\n    let config = context.config;\n    if config.profile_name.as_deref() != Some(version_26_1_2::PROFILE_NAME) {",
-              1,
+
+          play_signature = '''    context: ServerContext<'_>,
+              profile: &ProtocolProfile,
+              session: &mut ProtocolSession,
+              play_round_limit: Option<usize>,
+          ) -> Result<()> {
+              let config = context.config;
+              if config.profile_name.as_deref() != Some(version_26_1_2::PROFILE_NAME) {'''
+          play_signature_with_identity = '''    context: ServerContext<'_>,
+              identity: &PlayerIdentity,
+              profile: &ProtocolProfile,
+              session: &mut ProtocolSession,
+              play_round_limit: Option<usize>,
+          ) -> Result<()> {
+              let config = context.config;
+              if config.profile_name.as_deref() != Some(version_26_1_2::PROFILE_NAME) {'''
+          text = replace_once(
+              text,
+              play_signature,
+              play_signature_with_identity,
+              "play signature",
           )
-          text = text.replace(
+          text = replace_once(
+              text,
               "    let mut online_player = context.state.try_enter_play()?;",
               "    let transform = game_spawn_transform(context.state.world().world_profile())?;\n    let mut online_player = context.state.try_enter_play(identity, transform)?;",
-              1,
+              "live gameplay registration",
           )
-          text = text.replace(
+          text = replace_once(
+              text,
               "fn static_player_position(world: &RomPackWorld) -> PlayerPosition {",
               '''fn game_spawn_transform(world: &RomPackWorld) -> Result<Transform> {
               Transform::new(
@@ -190,7 +228,7 @@ jobs:
           }
 
           fn static_player_position(world: &RomPackWorld) -> PlayerPosition {''',
-              1,
+              "spawn transform helper",
           )
           main.write_text(text, encoding="utf-8")
           PY
@@ -201,3 +239,11 @@ jobs:
           fi
           git commit -m "Connect live players to gameplay state"
           git push origin HEAD:feature/vanilla-parity-foundation
+          SH
+          exit ${PIPESTATUS[0]}
+      - name: Upload live integration diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-game-runtime-fixup
+          path: live-fixup.log
