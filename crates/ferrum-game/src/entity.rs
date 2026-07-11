@@ -29,17 +29,27 @@ impl EntityId {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct EntityUuid(u128);
+pub struct EntityUuid([u8; 16]);
 
 impl EntityUuid {
     #[must_use]
     pub const fn new(value: u128) -> Self {
+        Self(value.to_be_bytes())
+    }
+
+    #[must_use]
+    pub const fn from_bytes(value: [u8; 16]) -> Self {
         Self(value)
     }
 
     #[must_use]
     pub const fn get(self) -> u128 {
-        self.0
+        u128::from_be_bytes(self.0)
+    }
+
+    #[must_use]
+    pub const fn as_bytes(&self) -> &[u8; 16] {
+        &self.0
     }
 }
 
@@ -149,11 +159,17 @@ impl Entity {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct EntityStore {
     next_id: u32,
     entities: BTreeMap<EntityId, Entity>,
     uuids: BTreeMap<EntityUuid, EntityId>,
+}
+
+impl Default for EntityStore {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl EntityStore {
@@ -342,7 +358,10 @@ mod tests {
             .unwrap();
         assert_eq!(first.get(), 1);
         assert_eq!(second.get(), 2);
-        assert_eq!(store.iter().map(|(id, _)| id.get()).collect::<Vec<_>>(), [1, 2]);
+        assert_eq!(
+            store.iter().map(|(id, _)| id.get()).collect::<Vec<_>>(),
+            [1, 2]
+        );
     }
 
     #[test]
@@ -356,7 +375,15 @@ mod tests {
             Err(EntityError::DuplicateEntityUuid { .. })
         ));
         assert!(Transform::new([f64::NAN, 0.0, 0.0], 0.0, 0.0, false).is_err());
-        assert!(Transform::new([MAX_ENTITY_COORDINATE + 1.0, 0.0, 0.0], 0.0, 0.0, false).is_err());
+        assert!(
+            Transform::new(
+                [MAX_ENTITY_COORDINATE + 1.0, 0.0, 0.0],
+                0.0,
+                0.0,
+                false
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -395,5 +422,23 @@ mod tests {
             )
             .unwrap();
         assert_eq!(next.get(), 42);
+    }
+
+    #[test]
+    fn uuid_json_is_safe_for_full_128_bit_values() {
+        let uuid = EntityUuid::new(u128::MAX);
+        let json = serde_json::to_string(&uuid).unwrap();
+        let decoded: EntityUuid = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, uuid);
+        assert_eq!(decoded.as_bytes(), &[0xff; 16]);
+    }
+
+    #[test]
+    fn default_store_allocates_from_one() {
+        let mut store = EntityStore::default();
+        let id = store
+            .spawn(EntityUuid::new(1), player_type(), Transform::default())
+            .unwrap();
+        assert_eq!(id.get(), 1);
     }
 }
