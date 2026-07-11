@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   fixup:
-    if: ${{ github.head_ref == 'feature/vanilla-parity-foundation' && !contains(github.event.pull_request.head.sha, '[skip-game-fixup]') }}
+    if: ${{ github.head_ref == 'feature/vanilla-parity-foundation' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,46 +29,28 @@ jobs:
 
           state = Path("crates/ferrum-game/src/state.rs")
           text = state.read_text(encoding="utf-8")
-          old = '''    pub fn set_day_time(&mut self, day_time: i64) -> Vec<GameEvent> {
-              self.time.day_time = day_time;
-              vec![GameEvent::TimeChanged { day_time }]
-          }
-
-          pub fn set_game_rule(&mut self, name: impl Into<String>, value: GameRuleValue) {
-              let name = name.into();
-              if name == "doDaylightCycle" {
-                  if let GameRuleValue::Boolean(enabled) = value {
-                      self.time.daylight_cycle = enabled;
-                      self.game_rules
-                          .insert(name, GameRuleValue::Boolean(enabled));
-                      return;
-                  }
-              }
-              self.game_rules.insert(name, value);
-          }
-          '''
-          new = '''    pub fn set_day_time(&mut self, day_time: i64) -> Vec<GameEvent> {
-              self.time.day_time = day_time;
-              vec![GameEvent::TimeChanged { day_time }]
-          }
-
-          pub fn set_difficulty(&mut self, difficulty: Difficulty) -> Difficulty {
-              std::mem::replace(&mut self.difficulty, difficulty)
-          }
-
-          pub fn set_game_rule(&mut self, name: impl Into<String>, value: GameRuleValue) {
-              let name = name.into();
-              if name == "doDaylightCycle" {
-                  if let GameRuleValue::Boolean(enabled) = &value {
-                      self.time.daylight_cycle = *enabled;
-                  }
-              }
-              self.game_rules.insert(name, value);
-          }
-          '''
-          if old not in text:
-              raise SystemExit("state.rs replacement target not found")
-          state.write_text(text.replace(old, new, 1), encoding="utf-8")
+          if "pub fn set_difficulty" not in text:
+              text = text.replace(
+                  "    pub fn set_game_rule(&mut self, name: impl Into<String>, value: GameRuleValue) {",
+                  "    pub fn set_difficulty(&mut self, difficulty: Difficulty) -> Difficulty {\n        std::mem::replace(&mut self.difficulty, difficulty)\n    }\n\n    pub fn set_game_rule(&mut self, name: impl Into<String>, value: GameRuleValue) {",
+                  1,
+              )
+          text = text.replace(
+              "if let GameRuleValue::Boolean(enabled) = value {",
+              "if let GameRuleValue::Boolean(enabled) = &value {",
+              1,
+          )
+          text = text.replace(
+              "self.time.daylight_cycle = enabled;",
+              "self.time.daylight_cycle = *enabled;",
+              1,
+          )
+          text = text.replace(
+              "                self.game_rules\n                    .insert(name, GameRuleValue::Boolean(enabled));\n                return;\n",
+              "",
+              1,
+          )
+          state.write_text(text, encoding="utf-8")
 
           inventory = Path("crates/ferrum-game/src/inventory.rs")
           text = inventory.read_text(encoding="utf-8")
@@ -80,10 +62,9 @@ jobs:
           inventory.write_text(text, encoding="utf-8")
           PY
           cargo fmt --all
-          cargo generate-lockfile
-          git add Cargo.lock crates/ferrum-game crates/ferrum-server Cargo.toml
+          git add crates/ferrum-game crates/ferrum-server Cargo.toml
           if git diff --cached --quiet; then
             exit 0
           fi
-          git commit -m "Finalize gameplay foundation invariants [skip-game-fixup]"
+          git commit -m "Finalize gameplay foundation invariants"
           git push origin HEAD:feature/vanilla-parity-foundation
