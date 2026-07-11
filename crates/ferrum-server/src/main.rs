@@ -2018,8 +2018,10 @@ fn run_static_play_session_with_bridge<R: Read, W: Write>(
         profile,
         session,
         world,
-        play_reader,
-        gameplay,
+        PlayLoopBridge {
+            play_reader,
+            gameplay,
+        },
         play_round_limit,
     )
 }
@@ -2212,10 +2214,15 @@ fn run_keep_alive_loop<R: Read, W: Write>(
         profile,
         session,
         world,
-        None,
-        None,
+        PlayLoopBridge::default(),
         play_round_limit,
     )
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct PlayLoopBridge<'a> {
+    play_reader: Option<&'a PlayReaderEndpoint>,
+    gameplay: Option<play_runtime::GameplaySync<'a>>,
 }
 
 fn run_keep_alive_loop_with_bridge<R: Read, W: Write>(
@@ -2224,8 +2231,7 @@ fn run_keep_alive_loop_with_bridge<R: Read, W: Write>(
     profile: &ProtocolProfile,
     session: &mut ProtocolSession,
     world: PlayWorldContext<'_>,
-    play_reader: Option<&PlayReaderEndpoint>,
-    gameplay: Option<play_runtime::GameplaySync<'_>>,
+    bridge: PlayLoopBridge<'_>,
     play_round_limit: Option<usize>,
 ) -> Result<()> {
     play_runtime::run_play_loop_with_bridge(
@@ -2235,8 +2241,8 @@ fn run_keep_alive_loop_with_bridge<R: Read, W: Write>(
         session,
         world.shared_world,
         world.connection,
-        play_reader,
-        gameplay,
+        bridge.play_reader,
+        bridge.gameplay,
         play_round_limit,
     )
 }
