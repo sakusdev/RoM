@@ -339,6 +339,10 @@ impl OnlinePlayerGuard<'_> {
         self.connection_id
     }
 
+    fn player_uuid(&self) -> GamePlayerUuid {
+        self.player_uuid
+    }
+
     fn play_reader(&self) -> &PlayReaderEndpoint {
         &self.play_reader
     }
@@ -1793,6 +1797,8 @@ fn handle_play_protocol<R: Read, W: Write>(
         None => None,
     };
     let play_reader = writer_worker.as_ref().map(|_| online_player.play_reader());
+    let gameplay =
+        play_runtime::GameplaySync::new(&context.state.game_runtime, online_player.player_uuid());
     let result = run_static_play_session_with_bridge(
         reader,
         writer,
@@ -1804,6 +1810,7 @@ fn handle_play_protocol<R: Read, W: Write>(
             connection: online_player.connection_id(),
         },
         play_reader,
+        Some(gameplay),
         play_round_limit,
     );
     let writer_result = shutdown_live_play_writer(writer_worker);
@@ -1912,6 +1919,7 @@ fn run_static_play_session<R: Read, W: Write>(
         session,
         world,
         None,
+        None,
         play_round_limit,
     )
 }
@@ -1928,6 +1936,7 @@ fn run_static_play_session_with_bridge<R: Read, W: Write>(
     session: &mut ProtocolSession,
     world: PlayWorldContext<'_>,
     play_reader: Option<&PlayReaderEndpoint>,
+    gameplay: Option<play_runtime::GameplaySync<'_>>,
     play_round_limit: Option<usize>,
 ) -> Result<()> {
     let _world_subscription = world.shared_world.subscribe(world.connection)?;
@@ -2010,6 +2019,7 @@ fn run_static_play_session_with_bridge<R: Read, W: Write>(
         session,
         world,
         play_reader,
+        gameplay,
         play_round_limit,
     )
 }
@@ -2203,6 +2213,7 @@ fn run_keep_alive_loop<R: Read, W: Write>(
         session,
         world,
         None,
+        None,
         play_round_limit,
     )
 }
@@ -2214,6 +2225,7 @@ fn run_keep_alive_loop_with_bridge<R: Read, W: Write>(
     session: &mut ProtocolSession,
     world: PlayWorldContext<'_>,
     play_reader: Option<&PlayReaderEndpoint>,
+    gameplay: Option<play_runtime::GameplaySync<'_>>,
     play_round_limit: Option<usize>,
 ) -> Result<()> {
     play_runtime::run_play_loop_with_bridge(
@@ -2224,6 +2236,7 @@ fn run_keep_alive_loop_with_bridge<R: Read, W: Write>(
         world.shared_world,
         world.connection,
         play_reader,
+        gameplay,
         play_round_limit,
     )
 }

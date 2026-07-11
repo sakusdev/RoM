@@ -4,6 +4,7 @@ use super::{
 };
 use crate::codec::{PacketReader, build_packet, read_packet};
 use anyhow::{Context, Result, bail};
+use ferrum_game::{PlayerUuid as GamePlayerUuid, Transform};
 use ferrum_play::{
     BlockPosition, PlayerMovement, PlayerState, decode_player_action, decode_use_item_on_block,
     encode_block_changed_ack, encode_block_update, encode_chunk_batch_finished,
@@ -18,6 +19,7 @@ use ferrum_rompack::{RomPackBiomes, RomPackBlockStates, RomPackWorld};
 use ferrum_runtime::{ConnectionId, DeterministicRuntime, Tick};
 use ferrum_server::{
     authoritative_runtime::{PlayInput, PlayOutput},
+    game_runtime::SharedGameRuntime,
     play_connection::PlayReaderEndpoint,
     play_input::decode_play_input,
 };
@@ -47,6 +49,29 @@ const MAX_BLOCK_INTERACTION_REACH_SQUARED: f64 =
     MAX_BLOCK_INTERACTION_REACH * MAX_BLOCK_INTERACTION_REACH;
 
 type LocalWorldRuntime = DeterministicRuntime<ChunkStore, WorldEvent>;
+
+#[derive(Debug, Clone, Copy)]
+pub(super) struct GameplaySync<'a> {
+    runtime: &'a SharedGameRuntime,
+    player_uuid: GamePlayerUuid,
+}
+
+impl<'a> GameplaySync<'a> {
+    #[must_use]
+    pub(super) const fn new(runtime: &'a SharedGameRuntime, player_uuid: GamePlayerUuid) -> Self {
+        Self {
+            runtime,
+            player_uuid,
+        }
+    }
+
+    fn synchronize(self, player: &PlayerState) -> Result<()> {
+        let transform =
+            Transform::new(player.position, player.yaw, player.pitch, player.on_ground)?;
+        self.runtime.move_player(self.player_uuid, transform)?;
+        Ok(())
+    }
+}
 
 #[derive(Debug)]
 pub(super) struct SharedWorld {
@@ -354,6 +379,7 @@ pub(super) fn run_play_loop<R: Read, W: Write>(
         shared_world,
         connection,
         None,
+        None,
         play_round_limit,
     )
 }
@@ -370,6 +396,7 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
     shared_world: &SharedWorld,
     connection: ConnectionId,
     play_reader: Option<&PlayReaderEndpoint>,
+    gameplay: Option<GameplaySync<'_>>,
     play_round_limit: Option<usize>,
 ) -> Result<()> {
     if play_round_limit == Some(0) {
@@ -480,6 +507,9 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
                             validate_movement_floor(movement, world_profile.floor_y)?;
                             let previous_chunk = player.chunk_pos();
                             player.apply(movement);
+                            if let Some(gameplay) = gameplay {
+                                gameplay.synchronize(&player)?;
+                            }
                             let current_chunk = player.chunk_pos();
                             if current_chunk != previous_chunk {
                                 let delta = view.recenter(current_chunk)?;
