@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    Difficulty, Entity, EntityError, EntityStore, GameRuleValue, GameState, GameStateError, GameTime,
-    PlayerError, PlayerState, PlayerUuid, GAME_SNAPSHOT_SCHEMA_VERSION,
+    Difficulty, Entity, EntityError, EntityStore, GAME_SNAPSHOT_SCHEMA_VERSION, GameRuleValue,
+    GameState, GameStateError, GameTime, PlayerError, PlayerState, PlayerUuid,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -29,7 +29,11 @@ impl GameSnapshot {
             difficulty: state.difficulty,
             game_rules: state.game_rules.clone(),
             players: state.players.values().cloned().collect(),
-            entities: state.entities.iter().map(|(_, entity)| entity.clone()).collect(),
+            entities: state
+                .entities
+                .iter()
+                .map(|(_, entity)| entity.clone())
+                .collect(),
         }
     }
 

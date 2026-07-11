@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    Difficulty, EntityError, EntityId, EntityStore, EntityType, EntityUuid, GameMode, InventoryError,
-    ItemStack, PlayerError, PlayerState, PlayerUuid, Transform,
+    Difficulty, EntityError, EntityId, EntityStore, EntityType, EntityUuid, GameMode,
+    InventoryError, ItemStack, PlayerError, PlayerState, PlayerUuid, Transform,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -89,8 +89,7 @@ pub struct GameState {
 
 impl Default for GameState {
     fn default() -> Self {
-        Self::new("minecraft:overworld")
-            .expect("the built-in overworld resource location is valid")
+        Self::new("minecraft:overworld").expect("the built-in overworld resource location is valid")
     }
 }
 
@@ -165,7 +164,11 @@ impl GameState {
             }
         }
 
-        if self.players.get(&uuid).is_some_and(|player| player.connected) {
+        if self
+            .players
+            .get(&uuid)
+            .is_some_and(|player| player.connected)
+        {
             return Err(GameStateError::PlayerAlreadyConnected { uuid });
         }
 
@@ -184,12 +187,7 @@ impl GameState {
             player.dimension.clone_from(&self.dimension);
             player.reconnect(entity_id);
         } else {
-            let player = PlayerState::new(
-                uuid,
-                name.clone(),
-                entity_id,
-                self.dimension.clone(),
-            )?;
+            let player = PlayerState::new(uuid, name.clone(), entity_id, self.dimension.clone())?;
             self.players.insert(uuid, player);
         }
         self.player_names.insert(normalized, uuid);
@@ -307,14 +305,15 @@ impl GameState {
         vec![GameEvent::TimeChanged { day_time }]
     }
 
+    pub fn set_difficulty(&mut self, difficulty: Difficulty) -> Difficulty {
+        std::mem::replace(&mut self.difficulty, difficulty)
+    }
+
     pub fn set_game_rule(&mut self, name: impl Into<String>, value: GameRuleValue) {
         let name = name.into();
         if name == "doDaylightCycle" {
-            if let GameRuleValue::Boolean(enabled) = value {
-                self.time.daylight_cycle = enabled;
-                self.game_rules
-                    .insert(name, GameRuleValue::Boolean(enabled));
-                return;
+            if let GameRuleValue::Boolean(enabled) = &value {
+                self.time.daylight_cycle = *enabled;
             }
         }
         self.game_rules.insert(name, value);
@@ -344,7 +343,10 @@ impl GameState {
 
     #[must_use]
     pub fn online_player_count(&self) -> usize {
-        self.players.values().filter(|player| player.connected).count()
+        self.players
+            .values()
+            .filter(|player| player.connected)
+            .count()
     }
 
     fn connected_entity_id(&self, uuid: PlayerUuid) -> Result<EntityId, GameStateError> {
@@ -436,7 +438,10 @@ mod tests {
             .give_item(uuid, ItemStack::new("minecraft:stone", 64).unwrap())
             .unwrap();
         assert_eq!(remainder, None);
-        assert!(matches!(events[0], GameEvent::InventoryChanged { inserted: 64, .. }));
+        assert!(matches!(
+            events[0],
+            GameEvent::InventoryChanged { inserted: 64, .. }
+        ));
         state.set_game_mode(uuid, GameMode::Creative).unwrap();
         assert_eq!(state.player(uuid).unwrap().game_mode, GameMode::Creative);
         state.tick();

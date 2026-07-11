@@ -119,7 +119,7 @@ impl ItemStack {
     }
 
     pub fn split(&mut self, amount: u32) -> Result<Self, InventoryError> {
-        if amount == 0 || amount > self.count {
+        if amount == 0 || amount >= self.count {
             return Err(InventoryError::InvalidSplitAmount {
                 amount,
                 available: self.count,
@@ -323,8 +323,7 @@ mod tests {
             .unwrap()
             .with_component("minecraft:custom_name", json!({"text": "Named"}));
         inventory.set_slot(9, Some(named)).unwrap();
-        inventory
-            .insert(ItemStack::new("minecraft:stone", 1).unwrap());
+        inventory.insert(ItemStack::new("minecraft:stone", 1).unwrap());
         assert_eq!(inventory.occupied_slots(), 2);
     }
 
@@ -339,7 +338,10 @@ mod tests {
             .set_slot(45, Some(ItemStack::new("minecraft:shield", 1).unwrap()))
             .unwrap();
 
-        assert_eq!(inventory.selected_stack().unwrap().item(), "minecraft:stone");
+        assert_eq!(
+            inventory.selected_stack().unwrap().item(),
+            "minecraft:stone"
+        );
         assert_eq!(
             inventory.equipment(EquipmentSlot::OffHand).unwrap().item(),
             "minecraft:shield"
@@ -349,8 +351,7 @@ mod tests {
     #[test]
     fn inventory_round_trips_through_json() {
         let mut inventory = Inventory::new();
-        inventory
-            .insert(ItemStack::new("minecraft:oak_log", 32).unwrap());
+        inventory.insert(ItemStack::new("minecraft:oak_log", 32).unwrap());
         inventory.select_hotbar(2).unwrap();
         let json = serde_json::to_string(&inventory).unwrap();
         let decoded: Inventory = serde_json::from_str(&json).unwrap();

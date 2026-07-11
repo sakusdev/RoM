@@ -375,15 +375,7 @@ mod tests {
             Err(EntityError::DuplicateEntityUuid { .. })
         ));
         assert!(Transform::new([f64::NAN, 0.0, 0.0], 0.0, 0.0, false).is_err());
-        assert!(
-            Transform::new(
-                [MAX_ENTITY_COORDINATE + 1.0, 0.0, 0.0],
-                0.0,
-                0.0,
-                false
-            )
-            .is_err()
-        );
+        assert!(Transform::new([MAX_ENTITY_COORDINATE + 1.0, 0.0, 0.0], 0.0, 0.0, false).is_err());
     }
 
     #[test]

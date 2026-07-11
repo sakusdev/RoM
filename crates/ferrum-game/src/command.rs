@@ -35,8 +35,13 @@ impl CommandSource {
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameCommand {
     List,
-    Say { message: String },
-    GameMode { mode: GameMode, target: Option<String> },
+    Say {
+        message: String,
+    },
+    GameMode {
+        mode: GameMode,
+        target: Option<String>,
+    },
     Teleport {
         target: Option<String>,
         position: [f64; 3],
@@ -46,10 +51,19 @@ pub enum GameCommand {
         item: String,
         count: u32,
     },
-    TimeSet { day_time: i64 },
-    Difficulty { difficulty: Difficulty },
-    GameRule { name: String, value: GameRuleValue },
-    Kill { target: Option<String> },
+    TimeSet {
+        day_time: i64,
+    },
+    Difficulty {
+        difficulty: Difficulty,
+    },
+    GameRule {
+        name: String,
+        value: GameRuleValue,
+    },
+    Kill {
+        target: Option<String>,
+    },
     SaveAll,
 }
 
@@ -164,7 +178,11 @@ pub fn execute_parsed_command(
             require_permission(source, 2)?;
             let target = resolve_target(state, source, target.as_deref())?;
             let events = state.set_game_mode(target, mode)?;
-            let name = state.player(target).expect("resolved player exists").name.clone();
+            let name = state
+                .player(target)
+                .expect("resolved player exists")
+                .name
+                .clone();
             Ok(CommandOutcome {
                 feedback: format!("Set {name}'s game mode to {mode:?}"),
                 events,
@@ -177,7 +195,11 @@ pub fn execute_parsed_command(
             let current = player_transform(state, target)?;
             let transform = Transform::new(position, current.yaw, current.pitch, false)?;
             let events = state.teleport_player(target, transform)?;
-            let name = state.player(target).expect("resolved player exists").name.clone();
+            let name = state
+                .player(target)
+                .expect("resolved player exists")
+                .name
+                .clone();
             Ok(CommandOutcome {
                 feedback: format!(
                     "Teleported {name} to {:.3} {:.3} {:.3}",
@@ -255,7 +277,11 @@ pub fn execute_parsed_command(
             require_permission(source, 2)?;
             let target = resolve_target(state, source, target.as_deref())?;
             let events = state.kill_player(target)?;
-            let name = state.player(target).expect("resolved player exists").name.clone();
+            let name = state
+                .player(target)
+                .expect("resolved player exists")
+                .name
+                .clone();
             Ok(CommandOutcome {
                 feedback: format!("Killed {name}"),
                 events,

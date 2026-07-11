@@ -1,8 +1,8 @@
 use std::sync::{Arc, RwLock};
 
 use ferrum_game::{
-    CommandError, CommandOutcome, CommandSource, GameEvent, GameSnapshot, GameState, GameStateError,
-    PersistenceError, PlayerUuid, Transform, execute_command,
+    CommandError, CommandOutcome, CommandSource, GameEvent, GameSnapshot, GameState,
+    GameStateError, PersistenceError, PlayerUuid, Transform, execute_command,
 };
 use thiserror::Error;
 
@@ -30,13 +30,12 @@ impl SharedGameRuntime {
         name: impl Into<String>,
         transform: Transform,
     ) -> Result<Vec<GameEvent>, GameRuntimeError> {
-        self.write()?.connect_player(uuid, name, transform).map_err(Into::into)
+        self.write()?
+            .connect_player(uuid, name, transform)
+            .map_err(Into::into)
     }
 
-    pub fn disconnect_player(
-        &self,
-        uuid: PlayerUuid,
-    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+    pub fn disconnect_player(&self, uuid: PlayerUuid) -> Result<Vec<GameEvent>, GameRuntimeError> {
         self.write()?.disconnect_player(uuid).map_err(Into::into)
     }
 
@@ -45,7 +44,9 @@ impl SharedGameRuntime {
         uuid: PlayerUuid,
         transform: Transform,
     ) -> Result<Vec<GameEvent>, GameRuntimeError> {
-        self.write()?.move_player(uuid, transform).map_err(Into::into)
+        self.write()?
+            .move_player(uuid, transform)
+            .map_err(Into::into)
     }
 
     pub fn execute_command(
@@ -65,10 +66,7 @@ impl SharedGameRuntime {
         Ok(self.read()?.snapshot())
     }
 
-    pub fn replace_from_snapshot(
-        &self,
-        snapshot: GameSnapshot,
-    ) -> Result<(), GameRuntimeError> {
+    pub fn replace_from_snapshot(&self, snapshot: GameSnapshot) -> Result<(), GameRuntimeError> {
         let restored = GameState::restore(snapshot)?;
         *self.write()? = restored;
         Ok(())
@@ -127,17 +125,18 @@ mod tests {
         let clone = runtime.clone();
         thread::spawn(move || {
             clone
-                .execute_command(
-                    &CommandSource::console(),
-                    "/gamemode creative Steve",
-                )
+                .execute_command(&CommandSource::console(), "/gamemode creative Steve")
                 .unwrap();
         })
         .join()
         .unwrap();
 
         let game_mode = runtime
-            .with_state(|state| state.player(uuid).map(|player: &PlayerState| player.game_mode))
+            .with_state(|state| {
+                state
+                    .player(uuid)
+                    .map(|player: &PlayerState| player.game_mode)
+            })
             .unwrap();
         assert_eq!(game_mode, Some(GameMode::Creative));
     }
@@ -150,8 +149,14 @@ mod tests {
         let snapshot = runtime.snapshot().unwrap();
 
         runtime.disconnect_player(uuid).unwrap();
-        assert_eq!(runtime.with_state(GameState::online_player_count).unwrap(), 0);
+        assert_eq!(
+            runtime.with_state(GameState::online_player_count).unwrap(),
+            0
+        );
         runtime.replace_from_snapshot(snapshot).unwrap();
-        assert_eq!(runtime.with_state(GameState::online_player_count).unwrap(), 1);
+        assert_eq!(
+            runtime.with_state(GameState::online_player_count).unwrap(),
+            1
+        );
     }
 }
