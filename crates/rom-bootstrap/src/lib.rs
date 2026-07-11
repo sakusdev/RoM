@@ -1,6 +1,8 @@
 mod extract;
+mod setup;
 
 pub use extract::{GenerateOptions, GenerateReport, generate_version_pack};
+pub use setup::{DoctorReport, SetupOptions, SetupReport, doctor_instance, setup_instance};
 
 use anyhow::{Context, Result, bail};
 use reqwest::{Url, blocking::Client, redirect::Policy};

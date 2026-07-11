@@ -1,8 +1,9 @@
 use anyhow::{Result, bail};
 use clap::{Parser, Subcommand};
 use rom_bootstrap::{
-    GenerateOptions, InstallLocalOptions, PrepareOptions, generate_version_pack,
-    install_local_server, prepare_instance, run_instance, status_instance,
+    DoctorReport, GenerateOptions, InstallLocalOptions, PrepareOptions, SetupOptions,
+    doctor_instance, generate_version_pack, install_local_server, prepare_instance, run_instance,
+    setup_instance, status_instance,
 };
 use std::{ffi::OsString, path::PathBuf};
 
@@ -19,6 +20,41 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Complete prepare, version-pack generation, native installation, and readiness checks.
+    Setup {
+        /// Instance directory to create or update.
+        #[arg(long, default_value = "rom-instance")]
+        instance: PathBuf,
+
+        /// Supported Minecraft Java Edition version.
+        #[arg(long, default_value = "26.1.2")]
+        version: String,
+
+        /// Confirm that you reviewed and accept the Minecraft EULA.
+        #[arg(long)]
+        accept_minecraft_eula: bool,
+
+        /// Redownload the official artifact even when the local verified cache exists.
+        #[arg(long)]
+        force_download: bool,
+
+        /// Regenerate the pack even when the recorded pack is already valid.
+        #[arg(long)]
+        force_generate: bool,
+
+        /// RoM workspace to build when no server binary is supplied or found beside rom-bootstrap.
+        #[arg(long, default_value = ".")]
+        workspace: PathBuf,
+
+        /// Existing ferrum-server binary to install. A sibling release binary is detected automatically.
+        #[arg(long)]
+        server_binary: Option<PathBuf>,
+
+        /// Print the result as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Download and verify the official server JAR, then create a local RoM instance.
     Prepare {
         /// Instance directory to create or update.
@@ -83,6 +119,17 @@ enum Command {
         json: bool,
     },
 
+    /// Diagnose whether an instance is ready to run and report every missing component.
+    Doctor {
+        /// RoM instance directory.
+        #[arg(long, default_value = "rom-instance")]
+        instance: PathBuf,
+
+        /// Print the result as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Run the native RoM server from a prepared instance.
     Run {
         /// RoM instance directory.
@@ -97,6 +144,44 @@ enum Command {
 
 fn main() -> Result<()> {
     match Cli::parse().command {
+        Command::Setup {
+            instance,
+            version,
+            accept_minecraft_eula,
+            force_download,
+            force_generate,
+            workspace,
+            server_binary,
+            json,
+        } => {
+            let report = setup_instance(&SetupOptions {
+                instance,
+                version,
+                accept_minecraft_eula,
+                force_download,
+                force_generate,
+                workspace,
+                server_binary,
+            })?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                println!(
+                    "RoM instance is ready: {}",
+                    report.doctor.instance.display()
+                );
+                println!(
+                    "Minecraft: {} / protocol {}",
+                    report.prepare.minecraft_version, report.prepare.protocol
+                );
+                println!("Version pack: {}", report.generate.version_pack.display());
+                println!("Native server: {}", report.installed_server.display());
+                println!(
+                    "Run: rom-bootstrap run --instance {}",
+                    report.doctor.instance.display()
+                );
+            }
+        }
         Command::Prepare {
             instance,
             version,
@@ -226,6 +311,17 @@ fn main() -> Result<()> {
                 );
             }
         }
+        Command::Doctor { instance, json } => {
+            let report = doctor_instance(instance)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                print_doctor(&report);
+            }
+            if !report.ready_to_run {
+                bail!("RoM instance is not ready to run");
+            }
+        }
         Command::Run {
             instance,
             server_args,
@@ -237,4 +333,33 @@ fn main() -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn print_doctor(report: &DoctorReport) {
+    println!("Instance: {}", report.instance.display());
+    println!("Ready to run: {}", report.ready_to_run);
+    println!("Prepared: {}", report.status.prepared);
+    println!(
+        "Minecraft EULA accepted: {}",
+        report.status.minecraft_eula_accepted
+    );
+    println!(
+        "Official source verified: {}",
+        report.status.official_source_verified
+    );
+    println!(
+        "Version pack verified: {}",
+        report.status.version_pack_verified
+    );
+    println!(
+        "Native server installed: {}",
+        report.status.native_server_installed
+    );
+    println!("Server config present: {}", report.server_config_present);
+    if !report.problems.is_empty() {
+        println!("Problems:");
+        for problem in &report.problems {
+            println!("- {problem}");
+        }
+    }
 }

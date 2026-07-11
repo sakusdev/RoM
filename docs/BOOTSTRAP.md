@@ -9,11 +9,11 @@
 - Every downloaded official artifact is checked against the SHA-1 and size in official version metadata.
 - The official server JAR remains in a local cache and is never bundled into RoM release archives.
 - The native Rust server remains the executable runtime; Java is not required to run RoM.
-- Future version-pack generation must happen locally and record the exact source hash and patch-set identity.
+- Every version pack is generated locally and records the exact source hash and patch-set identity.
 
-## Current bootstrap stage
+## Complete supported workflow
 
-The implementation supports `official_source_verified` and `version_pack_generated`:
+For Minecraft 26.1.2, Bootstrap supports the complete ready-to-run workflow:
 
 1. Resolve Minecraft Java Edition 26.1.2 from the official version manifest.
 2. Verify the version metadata SHA-1.
@@ -27,7 +27,9 @@ The implementation supports `official_source_verified` and `version_pack_generat
 10. Add the world data version, overworld section range, required flat-world block-state IDs, and plains biome ID.
 11. Add the dimension ID, dimension-type ID, sea level, flat floor, and deterministic spawn coordinates consumed by Play bootstrap.
 12. Write a deterministic schema-v4 `.rompack` with a container SHA-256 trailer and provenance metadata.
-13. Revalidate the pack before `rom-bootstrap run`; the native server then builds its `ProtocolProfile`, Configuration registry payloads, Join Game metadata, spawn packets, movement floor, and initial shared world from pack metadata.
+13. Install the native `ferrum-server` executable from a supplied binary, an adjacent release binary, or a local workspace build.
+14. Diagnose the manifest, EULA marker, source artifact, version pack, executable, and configuration before launch.
+15. Revalidate the pack before `rom-bootstrap run`; the native server then builds its `ProtocolProfile`, Configuration registry payloads, Join Game metadata, spawn packets, movement floor, and initial shared world from pack metadata.
 
 The extractor does **not** decompile, translate, execute, or bytecode-patch the official server JAR. The generated pack is local-only provenance and derived runtime metadata.
 
@@ -37,7 +39,41 @@ The extractor does **not** decompile, translate, execute, or bytecode-patch the 
 cargo build --locked --release -p rom-bootstrap -p ferrum-server
 ```
 
-## Prepare an instance
+## Complete an instance in one command
+
+From an extracted native release, the adjacent `ferrum-server` binary is detected automatically:
+
+```bash
+./rom-bootstrap setup \
+  --instance ./rom-instance \
+  --version 26.1.2 \
+  --accept-minecraft-eula
+```
+
+From a source checkout, build and install from the workspace:
+
+```bash
+cargo build --locked --release -p rom-bootstrap -p ferrum-server
+./target/release/rom-bootstrap setup \
+  --instance ./rom-instance \
+  --version 26.1.2 \
+  --accept-minecraft-eula \
+  --workspace .
+```
+
+`setup` executes `prepare`, `generate`, `install-local`, and the final readiness check. It reuses verified artifacts and valid packs by default. Use `--force-download` or `--force-generate` only when regeneration is intentional. An explicit `--server-binary` overrides adjacent-binary detection and workspace building.
+
+Machine-readable setup output:
+
+```bash
+./rom-bootstrap setup --instance ./rom-instance --accept-minecraft-eula --json
+```
+
+## Manual stages
+
+The individual commands remain available for troubleshooting, custom launchers, and controlled regeneration.
+
+### Prepare an instance
 
 Review the Minecraft EULA first, then explicitly acknowledge it:
 
@@ -50,7 +86,7 @@ Review the Minecraft EULA first, then explicitly acknowledge it:
 
 The command refuses unsupported Minecraft versions and download URLs outside official Mojang/Microsoft HTTPS hosts.
 
-## Generate the local version pack
+### Generate the local version pack
 
 ```bash
 ./target/release/rom-bootstrap generate \
@@ -59,7 +95,7 @@ The command refuses unsupported Minecraft versions and download URLs outside off
 
 Use `--force` to regenerate an already valid pack. Generation is deterministic for the same verified source JAR and extractor version. Schema-v1, schema-v2, and schema-v3 packs are intentionally rejected after the packet-table, world-metadata, and Play-bootstrap migrations and must be regenerated.
 
-## Install the local native server
+### Install the local native server
 
 Build `ferrum-server` from the current RoM checkout and copy it into the instance:
 
@@ -88,6 +124,14 @@ Machine-readable output:
 ```bash
 ./target/release/rom-bootstrap status --instance ./rom-instance --json
 ```
+
+## Diagnose readiness
+
+```bash
+./target/release/rom-bootstrap doctor --instance ./rom-instance
+```
+
+`doctor` checks the Bootstrap manifest, EULA marker, official source integrity, generated pack integrity, native executable, and `server.toml`. It lists every problem and returns a non-zero exit status until the instance is ready. Add `--json` for scripts and launchers.
 
 ## Run the native server
 
@@ -125,16 +169,15 @@ The file under `cache/official` is a user-local official artifact. Do not add in
 
 ## Native release archives
 
-Platform release archives contain both `rom-bootstrap` and `ferrum-server`. After extracting an archive, prepare and generate the local instance, then install the adjacent server binary:
+Platform release archives contain both `rom-bootstrap` and `ferrum-server`. After extracting an archive, the full first-run flow is:
 
 ```bash
-./rom-bootstrap prepare --instance ./rom-instance --version 26.1.2 --accept-minecraft-eula
-./rom-bootstrap generate --instance ./rom-instance
-./rom-bootstrap install-local --instance ./rom-instance --server-binary ./ferrum-server
+./rom-bootstrap setup --instance ./rom-instance --version 26.1.2 --accept-minecraft-eula
+./rom-bootstrap doctor --instance ./rom-instance
 ./rom-bootstrap run --instance ./rom-instance
 ```
 
-Existing development instances containing `bin/rom-server` remain readable, but new installations use `bin/ferrum-server`.
+The adjacent server executable is detected automatically. Existing development instances containing `bin/rom-server` remain readable, but new installations use `bin/ferrum-server`.
 
 ## Runtime Play policy
 
@@ -181,7 +224,6 @@ region_dir = "world/region"
 
 RoM currently defaults to a loopback bind and offline-mode development login. That is suitable for local protocol testing, but it is not a substitute for Microsoft account authentication. Do not expose an offline-mode development instance to the public internet.
 
-## Planned next stages
+## Completion boundary
 
-1. Add more independently testable extractors only when the server consumes their output.
-2. Preserve bounded decoding, deterministic ordering, source hashes, and local-only artifact boundaries for every new section.
+The Bootstrap workflow is complete for the supported Minecraft 26.1.2 profile: it can prepare, generate, install, diagnose, and run a local native instance without Java. New Minecraft versions remain separate profile work and must preserve bounded decoding, deterministic ordering, source hashes, and local-only artifact boundaries.
