@@ -42,6 +42,7 @@ pub enum GameEvent {
     },
     PlayerDisconnected {
         uuid: PlayerUuid,
+        name: String,
         entity_id: Option<EntityId>,
     },
     PlayerMoved {
@@ -211,12 +212,17 @@ impl GameState {
         if !player.connected {
             return Ok(Vec::new());
         }
+        let name = player.name.clone();
         let entity_id = player.entity_id;
         if let Some(id) = entity_id {
             self.entities.despawn(id);
         }
         player.disconnect();
-        Ok(vec![GameEvent::PlayerDisconnected { uuid, entity_id }])
+        Ok(vec![GameEvent::PlayerDisconnected {
+            uuid,
+            name,
+            entity_id,
+        }])
     }
 
     pub fn move_player(

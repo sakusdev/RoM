@@ -291,7 +291,9 @@ fn process_commands(
                 reply,
             } => {
                 let result = if connections.contains_key(&uuid) {
-                    Err(format!("player {uuid:?} is already registered for replication"))
+                    Err(format!(
+                        "player {uuid:?} is already registered for replication"
+                    ))
                 } else {
                     connections.insert(uuid, ReplicationConnection::new(endpoint, pending_limit));
                     Ok(())
@@ -359,20 +361,10 @@ fn dispatch_event(
             uuid,
             inserted,
             item,
-        } => target_chat(
-            connections,
-            uuid,
-            format!("+{inserted} {item}"),
-            true,
-            exit,
-        ),
-        GameEvent::PlayerKilled { uuid } => target_chat(
-            connections,
-            uuid,
-            "You died".to_owned(),
-            false,
-            exit,
-        ),
+        } => target_chat(connections, uuid, format!("+{inserted} {item}"), true, exit),
+        GameEvent::PlayerKilled { uuid } => {
+            target_chat(connections, uuid, "You died".to_owned(), false, exit)
+        }
         GameEvent::PlayerMoved { .. }
         | GameEvent::TimeChanged { .. }
         | GameEvent::SaveRequested
@@ -438,7 +430,10 @@ mod tests {
     }
 
     fn ingest(
-        workers: &mut ferrum_runtime::WorkerRuntime<crate::authoritative_runtime::PlayInput, PlayOutput>,
+        workers: &mut ferrum_runtime::WorkerRuntime<
+            crate::authoritative_runtime::PlayInput,
+            PlayOutput,
+        >,
         inputs: &mut BoundedInputQueue<crate::authoritative_runtime::PlayInput>,
     ) {
         workers.ingest_available(inputs, 64).unwrap();

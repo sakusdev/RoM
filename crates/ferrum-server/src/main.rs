@@ -27,6 +27,7 @@ use ferrum_rompack::{RomPack, RomPackPacket, RomPackRegistry, RomPackWorld, read
 use ferrum_runtime::ConnectionId;
 use ferrum_server::{
     authoritative_runtime::{PlayInput, PlayOutput},
+    game_replication::{GameReplicationConfig, GameReplicationService, spawn_game_replication},
     game_runtime::SharedGameRuntime,
     game_service::{
         GameService, GameServiceConfig, GameServiceControl, GameServiceExit, load_game_state,
@@ -209,6 +210,7 @@ struct ServerState {
     shared_play_runtime: SharedPlayRuntime,
     game_runtime: SharedGameRuntime,
     game_service: GameService,
+    game_replication: GameReplicationService,
     shutdown: Arc<AtomicBool>,
 }
 
@@ -266,6 +268,8 @@ impl ServerState {
             None => play_runtime::SharedWorld::new_with_policy(center, world, play_policy)?,
         };
         let shared_play_runtime = spawn_shared_play_runtime(shared_runtime_config)?;
+        let game_replication =
+            spawn_game_replication(&game_runtime, GameReplicationConfig::default())?;
         Ok(Self {
             online_players: AtomicI32::new(initial_online_players),
             next_connection_id: AtomicU64::new(1),
@@ -274,6 +278,7 @@ impl ServerState {
             shared_play_runtime,
             game_runtime,
             game_service,
+            game_replication,
             shutdown: Arc::new(AtomicBool::new(false)),
         })
     }
@@ -324,6 +329,15 @@ impl ServerState {
                 return Err(error.into());
             }
         };
+        if let Err(error) = self
+            .game_replication
+            .control()
+            .register(player_uuid, play_reader.clone())
+        {
+            let _ = play_reader.try_disconnect();
+            let _ = self.game_runtime.disconnect_player(player_uuid);
+            return Err(error.context("cannot register player for gameplay replication"));
+        }
         self.online_players.fetch_add(1, Ordering::Relaxed);
         Ok(OnlinePlayerGuard {
             state: self,
@@ -365,6 +379,14 @@ impl ServerState {
     }
 
     fn shutdown(self) -> Result<GameServiceExit> {
+        let replication = self.game_replication.shutdown()?;
+        println!(
+            "game replication stopped after {} events, {} outputs sent, {} deferred, {} dropped",
+            replication.events,
+            replication.sent_outputs,
+            replication.deferred_outputs,
+            replication.dropped_outputs
+        );
         self.game_service.shutdown()
     }
 }
@@ -415,6 +437,11 @@ impl OnlinePlayerGuard<'_> {
 
 impl Drop for OnlinePlayerGuard<'_> {
     fn drop(&mut self) {
+        let _ = self
+            .state
+            .game_replication
+            .control()
+            .unregister(self.player_uuid);
         let _ = self.play_reader.try_disconnect();
         let _ = self.state.game_runtime.disconnect_player(self.player_uuid);
         self.state.online_players.fetch_sub(1, Ordering::Relaxed);
@@ -2000,6 +2027,8 @@ fn handle_play_protocol<R: Read, W: Write>(
 struct PlayOutputPacketIds {
     keep_alive_request: i32,
     disconnect: i32,
+    system_chat: i32,
+    player_position: i32,
 }
 
 fn spawn_live_play_writer(
@@ -2010,6 +2039,8 @@ fn spawn_live_play_writer(
     let packet_ids = PlayOutputPacketIds {
         keep_alive_request: profile.packets().require(PacketKind::KeepAliveRequest)?,
         disconnect: profile.packets().require(PacketKind::PlayDisconnect)?,
+        system_chat: profile.packets().require(PacketKind::SystemChat)?,
+        player_position: profile.packets().require(PacketKind::PlayerPosition)?,
     };
     spawn_play_writer(
         endpoint,
@@ -2060,6 +2091,40 @@ fn write_live_play_output<W: Write>(
                 })?,
             )?;
             PlayWriterDirective::Stop
+        }
+        PlayOutput::SystemChat { message, overlay } => {
+            let payload = encode_system_chat(&message, overlay)?;
+            write_packet(
+                writer,
+                &build_packet(packet_ids.system_chat, |body| {
+                    body.extend_from_slice(&payload);
+                    Ok(())
+                })?,
+            )?;
+            PlayWriterDirective::Continue
+        }
+        PlayOutput::PlayerTeleport {
+            teleport_id,
+            transform,
+        } => {
+            let payload = encode_player_position(&PlayerPosition {
+                teleport_id,
+                change: PositionMoveRotation {
+                    position: transform.position,
+                    delta_movement: [0.0; 3],
+                    yaw: transform.yaw,
+                    pitch: transform.pitch,
+                },
+                relative_flags: 0,
+            })?;
+            write_packet(
+                writer,
+                &build_packet(packet_ids.player_position, |body| {
+                    body.extend_from_slice(&payload);
+                    Ok(())
+                })?,
+            )?;
+            PlayWriterDirective::Continue
         }
     };
     writer.flush()?;

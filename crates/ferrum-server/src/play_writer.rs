@@ -251,6 +251,7 @@ mod tests {
                 match output {
                     PlayOutput::Packet(bytes) => writer.write_all(&bytes)?,
                     PlayOutput::KeepAliveRequest(id) => writer.write_all(&id.to_be_bytes())?,
+                    PlayOutput::SystemChat { .. } | PlayOutput::PlayerTeleport { .. } => {}
                     PlayOutput::Disconnect(_) => return Ok(PlayWriterDirective::Stop),
                 }
                 Ok(PlayWriterDirective::Continue)
@@ -341,9 +342,10 @@ mod tests {
             Vec::<u8>::new(),
             Duration::from_millis(1),
             |_, output| match output {
-                PlayOutput::Packet(_) | PlayOutput::KeepAliveRequest(_) => {
-                    Ok(PlayWriterDirective::Continue)
-                }
+                PlayOutput::Packet(_)
+                | PlayOutput::KeepAliveRequest(_)
+                | PlayOutput::SystemChat { .. }
+                | PlayOutput::PlayerTeleport { .. } => Ok(PlayWriterDirective::Continue),
                 PlayOutput::Disconnect(reason) => {
                     assert_eq!(reason, "done");
                     Ok(PlayWriterDirective::Stop)
