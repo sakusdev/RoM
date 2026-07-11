@@ -234,7 +234,6 @@ impl ServerState {
     }
 
     #[allow(dead_code)]
-    #[allow(dead_code)]
     fn with_loaded_world_runtime(
         initial_online_players: i32,
         world: RomPackWorld,
