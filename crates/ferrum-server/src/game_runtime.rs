@@ -75,7 +75,10 @@ impl SharedGameRuntime {
         capacity: NonZeroUsize,
     ) -> Result<GameEventSubscription, GameRuntimeError> {
         let (sender, receiver) = sync_channel(capacity.get());
-        let id = self.inner.next_subscriber_id.fetch_add(1, Ordering::Relaxed);
+        let id = self
+            .inner
+            .next_subscriber_id
+            .fetch_add(1, Ordering::Relaxed);
         self.subscribers()?.insert(id, sender);
         Ok(GameEventSubscription { receiver })
     }

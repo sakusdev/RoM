@@ -3,9 +3,7 @@ use std::{
     io::Write,
     num::NonZeroUsize,
     path::{Path, PathBuf},
-    sync::mpsc::{
-        Receiver, RecvTimeoutError, SyncSender, TrySendError, sync_channel,
-    },
+    sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TrySendError, sync_channel},
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
@@ -209,7 +207,9 @@ fn run_game_service(
 ) -> Result<GameServiceExit> {
     let mut exit = GameServiceExit::default();
     let mut next_tick = Instant::now() + config.tick_interval;
-    let mut next_autosave = config.autosave_interval.map(|interval| Instant::now() + interval);
+    let mut next_autosave = config
+        .autosave_interval
+        .map(|interval| Instant::now() + interval);
 
     loop {
         let now = Instant::now();
@@ -243,7 +243,9 @@ fn run_game_service(
             Ok(GameServiceCommand::SaveNow { reply }) => {
                 exit.requested_saves = exit.requested_saves.saturating_add(1);
                 let result = match &config.snapshot_path {
-                    Some(path) => save_game_state(&runtime, path).map_err(|error| format!("{error:#}")),
+                    Some(path) => {
+                        save_game_state(&runtime, path).map_err(|error| format!("{error:#}"))
+                    }
                     None => Err("game snapshot path is not configured".to_owned()),
                 };
                 let _ = reply.send(result);
@@ -296,7 +298,19 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
 mod tests {
     use super::*;
     use ferrum_game::{PlayerUuid, Transform};
-    use tempfile::tempdir;
+
+    fn temporary_directory(name: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!(
+            "rom-game-service-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
 
     fn spawn() -> Transform {
         Transform::new([0.5, 65.0, 0.5], 0.0, 0.0, true).unwrap()
@@ -329,8 +343,8 @@ mod tests {
 
     #[test]
     fn saves_and_restores_disconnected_player_state() {
-        let directory = tempdir().unwrap();
-        let path = directory.path().join("game-state.json");
+        let directory = temporary_directory("restore");
+        let path = directory.join("game-state.json");
         let runtime = SharedGameRuntime::vanilla_overworld();
         let uuid = PlayerUuid::new(3);
         runtime.connect_player(uuid, "Notch", spawn()).unwrap();
@@ -345,8 +359,8 @@ mod tests {
 
     #[test]
     fn requested_save_writes_snapshot_immediately() {
-        let directory = tempdir().unwrap();
-        let path = directory.path().join("state.json");
+        let directory = temporary_directory("save-now");
+        let path = directory.join("state.json");
         let runtime = SharedGameRuntime::vanilla_overworld();
         let service = spawn_game_service(
             runtime,
@@ -364,8 +378,8 @@ mod tests {
 
     #[test]
     fn rejects_snapshot_dimension_mismatch() {
-        let directory = tempdir().unwrap();
-        let path = directory.path().join("state.json");
+        let directory = temporary_directory("dimension");
+        let path = directory.join("state.json");
         let runtime = SharedGameRuntime::vanilla_overworld();
         save_game_state(&runtime, &path).unwrap();
         assert!(load_game_state(&path, "minecraft:the_nether").is_err());

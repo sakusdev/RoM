@@ -71,6 +71,7 @@ pub enum GameEvent {
         day_time: i64,
     },
     SaveRequested,
+    ShutdownRequested,
     Broadcast {
         message: String,
     },
@@ -319,6 +320,25 @@ impl GameState {
         self.game_rules.insert(name, value);
     }
 
+    pub fn detach_all_connections(&mut self) -> usize {
+        let entity_ids = self
+            .players
+            .values_mut()
+            .filter_map(|player| {
+                if !player.connected {
+                    return None;
+                }
+                let entity_id = player.entity_id;
+                player.disconnect();
+                entity_id
+            })
+            .collect::<Vec<_>>();
+        for entity_id in &entity_ids {
+            self.entities.despawn(*entity_id);
+        }
+        entity_ids.len()
+    }
+
     pub fn tick(&mut self) {
         self.time.game_time = self.time.game_time.saturating_add(1);
         if self.time.daylight_cycle {
@@ -447,6 +467,26 @@ mod tests {
         state.tick();
         assert_eq!(state.time().game_time, 1);
         assert_eq!(state.time().day_time, 1);
+    }
+
+    #[test]
+    fn detaches_live_connections_for_restart() {
+        let mut state = GameState::default();
+        state
+            .connect_player(PlayerUuid::new(20), "Steve", spawn())
+            .unwrap();
+        state
+            .connect_player(PlayerUuid::new(21), "Alex", spawn())
+            .unwrap();
+        assert_eq!(state.detach_all_connections(), 2);
+        assert_eq!(state.online_player_count(), 0);
+        assert!(state.entities().is_empty());
+        assert!(
+            state
+                .players()
+                .values()
+                .all(|player| player.entity_id.is_none())
+        );
     }
 
     #[test]
