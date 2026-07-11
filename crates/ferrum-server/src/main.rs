@@ -13,6 +13,7 @@ use ferrum_configuration::{
     decode_known_packs, encode_feature_flags, encode_known_packs, encode_registry_data,
     encode_tags,
 };
+use ferrum_game::{GameState, PlayerUuid as GamePlayerUuid, Transform};
 use ferrum_nbt::{Tag, encode_anonymous};
 use ferrum_play::{
     BlockPosition, CommonPlayerSpawnInfo, DefaultSpawnPosition, GlobalPosition, JoinGame,
@@ -26,6 +27,7 @@ use ferrum_rompack::{RomPack, RomPackPacket, RomPackRegistry, RomPackWorld, read
 use ferrum_runtime::ConnectionId;
 use ferrum_server::{
     authoritative_runtime::{PlayInput, PlayOutput},
+    game_runtime::SharedGameRuntime,
     play_connection::{PlayReaderEndpoint, PlayWriterEndpoint, register_play_connection},
     play_writer::{PlayWriterDirective, PlayWriterWorker, spawn_play_writer},
     shared_runtime::{SharedPlayRuntime, SharedPlayRuntimeConfig, spawn_shared_play_runtime},
@@ -41,7 +43,7 @@ use ferrum_world::{
 };
 #[cfg(test)]
 use ferrum_world::{BlockMutation, BlockPos, ChunkPos, StaticChunk};
-use identity::offline_player_identity;
+use identity::{PlayerIdentity, offline_player_identity};
 use serde_json::{Map, Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -187,6 +189,7 @@ struct ServerState {
     world: play_runtime::SharedWorld,
     registry_payloads: Vec<Vec<u8>>,
     shared_play_runtime: SharedPlayRuntime,
+    game_runtime: SharedGameRuntime,
 }
 
 impl ServerState {
@@ -216,6 +219,7 @@ impl ServerState {
         loaded_chunks: Option<ChunkStore>,
     ) -> Result<Self> {
         let center = play_runtime::spawn_chunk(&world);
+        let game_runtime = SharedGameRuntime::new(GameState::new(world.dimension.clone())?);
         let shared_runtime_config = shared_play_runtime_config(&play_policy)?;
         let shared_world = match loaded_chunks {
             Some(store) => {
@@ -230,6 +234,7 @@ impl ServerState {
             world: shared_world,
             registry_payloads,
             shared_play_runtime,
+            game_runtime,
         })
     }
 
@@ -254,19 +259,34 @@ impl ServerState {
         self.online_players.load(Ordering::Relaxed)
     }
 
-    fn try_enter_play(&self) -> Result<OnlinePlayerGuard<'_>> {
+    fn try_enter_play(
+        &self,
+        identity: &PlayerIdentity,
+        transform: Transform,
+    ) -> Result<OnlinePlayerGuard<'_>> {
+        let player_uuid = GamePlayerUuid::from_bytes(*identity.uuid.as_bytes());
+        self.game_runtime
+            .connect_player(player_uuid, identity.username.clone(), transform)?;
         let id = self.next_connection_id.fetch_add(1, Ordering::Relaxed);
         let connection_id = ConnectionId::new(id);
-        let (play_reader, play_writer) = register_play_connection(
+        let endpoints = register_play_connection(
             &self.shared_play_runtime.connector(),
             connection_id,
             NonZeroUsize::new(PLAY_OUTPUT_QUEUE_CAPACITY)
                 .expect("Play output queue capacity is non-zero"),
-        )?;
+        );
+        let (play_reader, play_writer) = match endpoints {
+            Ok(endpoints) => endpoints,
+            Err(error) => {
+                let _ = self.game_runtime.disconnect_player(player_uuid);
+                return Err(error);
+            }
+        };
         self.online_players.fetch_add(1, Ordering::Relaxed);
         Ok(OnlinePlayerGuard {
             state: self,
             connection_id,
+            player_uuid,
             play_reader,
             play_writer: Some(play_writer),
         })
@@ -274,7 +294,10 @@ impl ServerState {
 
     #[cfg(test)]
     fn enter_play(&self) -> OnlinePlayerGuard<'_> {
-        self.try_enter_play()
+        let identity = offline_player_identity("TestPlayer");
+        let transform = game_spawn_transform(self.world.world_profile())
+            .expect("test spawn transform must be valid");
+        self.try_enter_play(&identity, transform)
             .expect("test Play connection must register")
     }
 
@@ -306,6 +329,7 @@ fn shared_play_runtime_config(play_policy: &PlayPolicy) -> Result<SharedPlayRunt
 struct OnlinePlayerGuard<'a> {
     state: &'a ServerState,
     connection_id: ConnectionId,
+    player_uuid: GamePlayerUuid,
     play_reader: PlayReaderEndpoint,
     play_writer: Option<PlayWriterEndpoint>,
 }
@@ -329,6 +353,7 @@ impl OnlinePlayerGuard<'_> {
 impl Drop for OnlinePlayerGuard<'_> {
     fn drop(&mut self) {
         let _ = self.play_reader.try_disconnect();
+        let _ = self.state.game_runtime.disconnect_player(self.player_uuid);
         self.state.online_players.fetch_sub(1, Ordering::Relaxed);
     }
 }
@@ -1629,6 +1654,7 @@ fn handle_login_protocol<R: Read, W: Write>(
                 &mut reader,
                 &mut writer,
                 context,
+                &identity,
                 profile,
                 session,
                 play_round_limit,
@@ -1652,6 +1678,7 @@ fn handle_configuration_protocol<R: Read, W: Write>(
     reader: &mut R,
     writer: &mut W,
     context: ServerContext<'_>,
+    identity: &PlayerIdentity,
     profile: &ProtocolProfile,
     session: &mut ProtocolSession,
     play_round_limit: Option<usize>,
@@ -1730,13 +1757,22 @@ fn handle_configuration_protocol<R: Read, W: Write>(
     }
     session.configuration_acknowledged()?;
     println!("configuration completed; connection entered Play state");
-    handle_play_protocol(reader, writer, context, profile, session, play_round_limit)
+    handle_play_protocol(
+        reader,
+        writer,
+        context,
+        identity,
+        profile,
+        session,
+        play_round_limit,
+    )
 }
 
 fn handle_play_protocol<R: Read, W: Write>(
     reader: &mut R,
     writer: &mut W,
     context: ServerContext<'_>,
+    identity: &PlayerIdentity,
     profile: &ProtocolProfile,
     session: &mut ProtocolSession,
     play_round_limit: Option<usize>,
@@ -1746,7 +1782,8 @@ fn handle_play_protocol<R: Read, W: Write>(
         return Ok(());
     }
 
-    let mut online_player = context.state.try_enter_play()?;
+    let transform = game_spawn_transform(context.state.world().world_profile())?;
+    let mut online_player = context.state.try_enter_play(identity, transform)?;
     let writer_worker = match take_live_play_writer() {
         Some(live_writer) => Some(spawn_live_play_writer(
             online_player.take_play_writer()?,
@@ -2041,6 +2078,11 @@ fn static_default_spawn_position(world: &RomPackWorld) -> Result<DefaultSpawnPos
         yaw: 0.0,
         pitch: 0.0,
     })
+}
+
+fn game_spawn_transform(world: &RomPackWorld) -> Result<Transform> {
+    Transform::new(play_runtime::player_spawn_position(world), 0.0, 0.0, false)
+        .context("generated player spawn transform is invalid")
 }
 
 fn static_player_position(world: &RomPackWorld) -> PlayerPosition {

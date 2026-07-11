@@ -251,7 +251,6 @@ impl EntityStore {
         self.uuids.get(&uuid).copied()
     }
 
-    #[must_use]
     pub fn iter(&self) -> impl Iterator<Item = (&EntityId, &Entity)> {
         self.entities.iter()
     }
