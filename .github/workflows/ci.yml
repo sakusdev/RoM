@@ -4,7 +4,48 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: write
+
 jobs:
+  source-fixup:
+    if: ${{ github.head_ref == 'feature/bootstrap-setup-doctor' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/bootstrap-setup-doctor
+      - name: Export Bootstrap setup API
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("crates/rom-bootstrap/src/lib.rs")
+          text = path.read_text(encoding="utf-8")
+          old = "mod extract;\n\npub use extract::{GenerateOptions, GenerateReport, generate_version_pack};\n"
+          new = (
+              "mod extract;\n"
+              "mod setup;\n\n"
+              "pub use extract::{GenerateOptions, GenerateReport, generate_version_pack};\n"
+              "pub use setup::{\n"
+              "    DoctorReport, SetupOptions, SetupReport, doctor_instance, setup_instance,\n"
+              "};\n"
+          )
+          if old not in text and "mod setup;" not in text:
+              raise SystemExit("unexpected rom-bootstrap lib.rs header")
+          if old in text:
+              path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+          git add crates/rom-bootstrap/src/lib.rs
+          if git diff --cached --quiet; then
+            echo "Bootstrap setup API already exported"
+            exit 0
+          fi
+          git commit -m "Export Bootstrap setup and doctor APIs"
+          git push origin HEAD:feature/bootstrap-setup-doctor
+
   test:
     strategy:
       matrix:
