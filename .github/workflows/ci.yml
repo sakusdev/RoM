@@ -4,7 +4,59 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: write
+
 jobs:
+  source-fixup:
+    if: ${{ (github.ref == 'refs/heads/codex/bootstrap-versions-list-fallback' || github.head_ref == 'codex/bootstrap-versions-list-fallback') && !contains(github.event.head_commit.message, '[skip-source-fixup]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/bootstrap-versions-list-fallback
+      - name: Clean fallback implementation
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python - <<'PY'
+          from pathlib import Path
+
+          extract = Path("crates/rom-bootstrap/src/extract.rs")
+          text = extract.read_text(encoding="utf-8")
+          text = text.replace("#[allow(clippy::all)]\nfn resolve_game_jar", "fn resolve_game_jar", 1)
+          old = '''    let candidate = match read_versions_list(&mut archive) {
+        Ok(Some(candidate)) => candidate,
+        Ok(None) | Err(_) => find_single_embedded_jar(&mut archive)?,
+    };
+'''
+          new = '''    let candidate = read_versions_list(&mut archive)
+        .ok()
+        .flatten()
+        .map_or_else(|| find_single_embedded_jar(&mut archive), Ok)?;
+'''
+          if old not in text:
+              raise SystemExit("expected bootstrap fallback block not found")
+          extract.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          main = Path("crates/ferrum-server/src/main.rs")
+          text = main.read_text(encoding="utf-8")
+          text = text.replace(
+              "    #[allow(dead_code)]\n    #[allow(dead_code)]\n    fn with_loaded_world_runtime",
+              "    #[allow(dead_code)]\n    fn with_loaded_world_runtime",
+              1,
+          )
+          main.write_text(text, encoding="utf-8")
+          PY
+          git add crates/rom-bootstrap/src/extract.rs crates/ferrum-server/src/main.rs
+          if git diff --cached --quiet; then
+            echo "No source fixup needed"
+            exit 0
+          fi
+          git commit -m "Clean bootstrap fallback lint handling [skip-source-fixup]"
+          git push origin HEAD:codex/bootstrap-versions-list-fallback
+
   test:
     strategy:
       matrix:
