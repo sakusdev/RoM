@@ -2,6 +2,7 @@
 
 pub mod authoritative_runtime;
 pub mod game_runtime;
+pub mod game_service;
 pub mod play_connection;
 pub mod play_input;
 pub mod play_writer;
