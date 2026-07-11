@@ -166,7 +166,10 @@ fn main() -> Result<()> {
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
-                println!("RoM instance is ready: {}", report.doctor.instance.display());
+                println!(
+                    "RoM instance is ready: {}",
+                    report.doctor.instance.display()
+                );
                 println!(
                     "Minecraft: {} / protocol {}",
                     report.prepare.minecraft_version, report.prepare.protocol
