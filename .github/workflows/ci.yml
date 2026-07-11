@@ -17,11 +17,4 @@ jobs:
           components: rustfmt, clippy
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Run workspace tests
-        run: cargo test --workspace 2>&1 | tee test.log
-      - name: Upload final gameplay test diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gameplay-test-final-${{ matrix.os }}
-          path: test.log
+      - run: cargo test --workspace
