@@ -24,4 +24,11 @@ jobs:
         with:
           name: live-game-clippy-${{ matrix.os }}
           path: clippy.log
-      - run: cargo test --workspace
+      - name: Run workspace tests
+        run: cargo test --workspace 2>&1 | tee test.log
+      - name: Upload live gameplay test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-game-tests-${{ matrix.os }}
+          path: test.log
