@@ -1,0 +1,203 @@
+name: Live gameplay runtime fixup
+
+on:
+  pull_request:
+    types: [synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    if: ${{ github.head_ref == 'feature/vanilla-parity-foundation' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/vanilla-parity-foundation
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Connect login identity to gameplay state
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python - <<'PY'
+          from pathlib import Path
+
+          entity = Path("crates/ferrum-game/src/entity.rs")
+          text = entity.read_text(encoding="utf-8")
+          text = text.replace(
+              "    #[must_use]\n    pub fn iter(&self) -> impl Iterator<Item = (&EntityId, &Entity)> {",
+              "    pub fn iter(&self) -> impl Iterator<Item = (&EntityId, &Entity)> {",
+              1,
+          )
+          entity.write_text(text, encoding="utf-8")
+
+          main = Path("crates/ferrum-server/src/main.rs")
+          text = main.read_text(encoding="utf-8")
+          text = text.replace(
+              "use ferrum_nbt::{Tag, encode_anonymous};",
+              "use ferrum_game::{GameState, PlayerUuid as GamePlayerUuid, Transform};\nuse ferrum_nbt::{Tag, encode_anonymous};",
+              1,
+          )
+          text = text.replace(
+              "    authoritative_runtime::{PlayInput, PlayOutput},\n",
+              "    authoritative_runtime::{PlayInput, PlayOutput},\n    game_runtime::SharedGameRuntime,\n",
+              1,
+          )
+          text = text.replace(
+              "use identity::offline_player_identity;",
+              "use identity::{PlayerIdentity, offline_player_identity};",
+              1,
+          )
+          text = text.replace(
+              "    shared_play_runtime: SharedPlayRuntime,\n}",
+              "    shared_play_runtime: SharedPlayRuntime,\n    game_runtime: SharedGameRuntime,\n}",
+              1,
+          )
+          text = text.replace(
+              "        let center = play_runtime::spawn_chunk(&world);\n        let shared_runtime_config = shared_play_runtime_config(&play_policy)?;",
+              "        let center = play_runtime::spawn_chunk(&world);\n        let game_runtime = SharedGameRuntime::new(GameState::new(world.dimension.clone())?);\n        let shared_runtime_config = shared_play_runtime_config(&play_policy)?;",
+              1,
+          )
+          text = text.replace(
+              "            shared_play_runtime,\n        })",
+              "            shared_play_runtime,\n            game_runtime,\n        })",
+              1,
+          )
+
+          old_try = '''    fn try_enter_play(&self) -> Result<OnlinePlayerGuard<'_>> {
+              let id = self.next_connection_id.fetch_add(1, Ordering::Relaxed);
+              let connection_id = ConnectionId::new(id);
+              let (play_reader, play_writer) = register_play_connection(
+                  &self.shared_play_runtime.connector(),
+                  connection_id,
+                  NonZeroUsize::new(PLAY_OUTPUT_QUEUE_CAPACITY)
+                      .expect("Play output queue capacity is non-zero"),
+              )?;
+              self.online_players.fetch_add(1, Ordering::Relaxed);
+              Ok(OnlinePlayerGuard {
+                  state: self,
+                  connection_id,
+                  play_reader,
+                  play_writer: Some(play_writer),
+              })
+          }
+          '''
+          new_try = '''    fn try_enter_play(
+              &self,
+              identity: &PlayerIdentity,
+              transform: Transform,
+          ) -> Result<OnlinePlayerGuard<'_>> {
+              let player_uuid = GamePlayerUuid::from_bytes(*identity.uuid.as_bytes());
+              self.game_runtime
+                  .connect_player(player_uuid, identity.username.clone(), transform)?;
+              let id = self.next_connection_id.fetch_add(1, Ordering::Relaxed);
+              let connection_id = ConnectionId::new(id);
+              let endpoints = register_play_connection(
+                  &self.shared_play_runtime.connector(),
+                  connection_id,
+                  NonZeroUsize::new(PLAY_OUTPUT_QUEUE_CAPACITY)
+                      .expect("Play output queue capacity is non-zero"),
+              );
+              let (play_reader, play_writer) = match endpoints {
+                  Ok(endpoints) => endpoints,
+                  Err(error) => {
+                      let _ = self.game_runtime.disconnect_player(player_uuid);
+                      return Err(error);
+                  }
+              };
+              self.online_players.fetch_add(1, Ordering::Relaxed);
+              Ok(OnlinePlayerGuard {
+                  state: self,
+                  connection_id,
+                  player_uuid,
+                  play_reader,
+                  play_writer: Some(play_writer),
+              })
+          }
+          '''
+          if old_try not in text:
+              raise SystemExit("try_enter_play target not found")
+          text = text.replace(old_try, new_try, 1)
+          text = text.replace(
+              '''    #[cfg(test)]
+              fn enter_play(&self) -> OnlinePlayerGuard<'_> {
+                  self.try_enter_play()
+                      .expect("test Play connection must register")
+              }
+              ''',
+              '''    #[cfg(test)]
+              fn enter_play(&self) -> OnlinePlayerGuard<'_> {
+                  let identity = offline_player_identity("TestPlayer");
+                  let transform = game_spawn_transform(self.world.world_profile())
+                      .expect("test spawn transform must be valid");
+                  self.try_enter_play(&identity, transform)
+                      .expect("test Play connection must register")
+              }
+              ''',
+              1,
+          )
+          text = text.replace(
+              "    connection_id: ConnectionId,\n    play_reader: PlayReaderEndpoint,",
+              "    connection_id: ConnectionId,\n    player_uuid: GamePlayerUuid,\n    play_reader: PlayReaderEndpoint,",
+              1,
+          )
+          text = text.replace(
+              "        let _ = self.play_reader.try_disconnect();\n        self.state.online_players.fetch_sub(1, Ordering::Relaxed);",
+              "        let _ = self.play_reader.try_disconnect();\n        let _ = self.state.game_runtime.disconnect_player(self.player_uuid);\n        self.state.online_players.fetch_sub(1, Ordering::Relaxed);",
+              1,
+          )
+
+          text = text.replace(
+              "                context,\n                profile,\n                session,",
+              "                context,\n                &identity,\n                profile,\n                session,",
+              1,
+          )
+          text = text.replace(
+              "    context: ServerContext<'_>,\n    profile: &ProtocolProfile,\n    session: &mut ProtocolSession,\n    play_round_limit: Option<usize>,\n) -> Result<()> {\n    let config = context.config;",
+              "    context: ServerContext<'_>,\n    identity: &PlayerIdentity,\n    profile: &ProtocolProfile,\n    session: &mut ProtocolSession,\n    play_round_limit: Option<usize>,\n) -> Result<()> {\n    let config = context.config;",
+              1,
+          )
+          text = text.replace(
+              "    handle_play_protocol(reader, writer, context, profile, session, play_round_limit)",
+              "    handle_play_protocol(\n        reader,\n        writer,\n        context,\n        identity,\n        profile,\n        session,\n        play_round_limit,\n    )",
+              1,
+          )
+          text = text.replace(
+              "    context: ServerContext<'_>,\n    profile: &ProtocolProfile,\n    session: &mut ProtocolSession,\n    play_round_limit: Option<usize>,\n) -> Result<()> {\n    let config = context.config;\n    if config.profile_name.as_deref() != Some(version_26_1_2::PROFILE_NAME) {",
+              "    context: ServerContext<'_>,\n    identity: &PlayerIdentity,\n    profile: &ProtocolProfile,\n    session: &mut ProtocolSession,\n    play_round_limit: Option<usize>,\n) -> Result<()> {\n    let config = context.config;\n    if config.profile_name.as_deref() != Some(version_26_1_2::PROFILE_NAME) {",
+              1,
+          )
+          text = text.replace(
+              "    let mut online_player = context.state.try_enter_play()?;",
+              "    let transform = game_spawn_transform(context.state.world().world_profile())?;\n    let mut online_player = context.state.try_enter_play(identity, transform)?;",
+              1,
+          )
+          text = text.replace(
+              "fn static_player_position(world: &RomPackWorld) -> PlayerPosition {",
+              '''fn game_spawn_transform(world: &RomPackWorld) -> Result<Transform> {
+              Transform::new(
+                  play_runtime::player_spawn_position(world),
+                  0.0,
+                  0.0,
+                  false,
+              )
+              .context("generated player spawn transform is invalid")
+          }
+
+          fn static_player_position(world: &RomPackWorld) -> PlayerPosition {''',
+              1,
+          )
+          main.write_text(text, encoding="utf-8")
+          PY
+          cargo fmt --all
+          git add crates/ferrum-game/src/entity.rs crates/ferrum-server/src/main.rs
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "Connect live players to gameplay state"
+          git push origin HEAD:feature/vanilla-parity-foundation
