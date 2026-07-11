@@ -54,7 +54,8 @@ impl SharedGameRuntime {
         source: &CommandSource,
         input: &str,
     ) -> Result<CommandOutcome, GameRuntimeError> {
-        execute_command(&mut self.write()?, source, input).map_err(Into::into)
+        let mut state = self.write()?;
+        execute_command(&mut *state, source, input).map_err(Into::into)
     }
 
     pub fn tick(&self) -> Result<(), GameRuntimeError> {
@@ -76,14 +77,16 @@ impl SharedGameRuntime {
         &self,
         operation: impl FnOnce(&GameState) -> T,
     ) -> Result<T, GameRuntimeError> {
-        Ok(operation(&self.read()?))
+        let state = self.read()?;
+        Ok(operation(&*state))
     }
 
     pub fn with_state_mut<T>(
         &self,
         operation: impl FnOnce(&mut GameState) -> Result<T, GameRuntimeError>,
     ) -> Result<T, GameRuntimeError> {
-        operation(&mut self.write()?)
+        let mut state = self.write()?;
+        operation(&mut *state)
     }
 
     fn read(&self) -> Result<std::sync::RwLockReadGuard<'_, GameState>, GameRuntimeError> {
