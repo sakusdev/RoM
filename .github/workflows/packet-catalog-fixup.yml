@@ -27,6 +27,8 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           : > packet-catalog-integration.log
           status=0
+          python scripts/repair_packet_catalog_protocol_script.py >> packet-catalog-integration.log 2>&1
+          status=$?
           for script in \
             scripts/apply_packet_catalog_protocol.py \
             scripts/add_packet_canonical_names.py \
@@ -34,12 +36,12 @@ jobs:
             scripts/apply_bootstrap_packet_catalog.py \
             scripts/apply_server_packet_catalog.py
           do
-            echo "=== $script ===" | tee -a packet-catalog-integration.log
-            python "$script" >> packet-catalog-integration.log 2>&1
-            status=$?
             if [ "$status" -ne 0 ]; then
               break
             fi
+            echo "=== $script ===" | tee -a packet-catalog-integration.log
+            python "$script" >> packet-catalog-integration.log 2>&1
+            status=$?
           done
           if [ "$status" -eq 0 ]; then
             echo "=== cargo fmt ===" | tee -a packet-catalog-integration.log
