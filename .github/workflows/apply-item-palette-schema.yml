@@ -25,7 +25,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - name: Apply, validate, and publish item palette schema
+      - name: Apply and validate item palette schema
         id: integrate
         continue-on-error: true
         shell: bash
@@ -43,20 +43,31 @@ jobs:
             PY
             python scripts/apply_item_palette_schema.py
             git restore scripts/apply_item_palette_schema.py
-            git diff --stat -- crates Cargo.lock
             cargo fmt --all
             cargo clippy --workspace --all-targets -- -D warnings
             cargo test --workspace
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add crates Cargo.lock
-            git diff --cached --stat
             git commit -m "Store generated item protocol IDs in version packs"
-            git push origin HEAD:feature/player-inventory-sync
+            commit=$(git rev-parse HEAD)
+            branch="automation/item-palette-${GITHUB_RUN_ID}"
+            git push origin "HEAD:refs/heads/${branch}"
+            {
+              echo "commit=${commit}"
+              echo "branch=${branch}"
+            } >> "$GITHUB_OUTPUT"
           ) >integration.log 2>&1
           status=$?
           echo "status=$status" >> "$GITHUB_OUTPUT"
           exit 0
+      - name: Report validated commit
+        if: steps.integrate.outputs.status == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh pr comment 53 --repo sakusdev/RoM --body "Validated item palette commit: \`${{ steps.integrate.outputs.commit }}\` on \`${{ steps.integrate.outputs.branch }}\`."
       - name: Report integration failure
         if: steps.integrate.outputs.status != '0'
         env:
