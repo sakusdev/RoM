@@ -67,7 +67,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          gh pr comment 53 --repo sakusdev/RoM --body "Validated item palette commit: \`${{ steps.integrate.outputs.commit }}\` on \`${{ steps.integrate.outputs.branch }}\`."
+          {
+            echo 'Validated item palette integration log:'
+            echo '```text'
+            tail -n 100 integration.log
+            echo '```'
+          } > validated.md
+          gh pr comment 53 --repo sakusdev/RoM --body-file validated.md
       - name: Report integration failure
         if: steps.integrate.outputs.status != '0'
         env:
