@@ -1,0 +1,40 @@
+name: Apply play command and hotbar integration
+
+on:
+  push:
+    branches: [feature/play-command-hotbar]
+    paths:
+      - .github/workflows/apply-play-command-hotbar.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/play-command-hotbar
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Apply gameplay input integration
+        run: |
+          set -euo pipefail
+          python scripts/apply_play_command_hotbar.py
+          cargo fmt --all
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+      - name: Commit integrated sources
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "Wire client commands and hotbar selection into gameplay"
+          git push origin HEAD:feature/play-command-hotbar
