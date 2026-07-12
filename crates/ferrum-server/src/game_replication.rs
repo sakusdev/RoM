@@ -1,9 +1,7 @@
 use std::{
     collections::{BTreeMap, VecDeque},
     num::NonZeroUsize,
-    sync::mpsc::{
-        Receiver, RecvTimeoutError, SyncSender, TryRecvError, TrySendError, sync_channel,
-    },
+    sync::mpsc::{Receiver, RecvTimeoutError, SyncSender, TryRecvError, sync_channel},
     thread::{self, JoinHandle},
     time::Duration,
 };
@@ -157,18 +155,8 @@ impl GameReplicationControl {
         Ok(())
     }
 
-    pub fn try_shutdown(&self) {
-        match self.commands.try_send(ReplicationCommand::Shutdown) {
-            Ok(())
-            | Err(TrySendError::Full(ReplicationCommand::Shutdown))
-            | Err(TrySendError::Disconnected(ReplicationCommand::Shutdown)) => {}
-            Err(TrySendError::Full(ReplicationCommand::Register { .. }))
-            | Err(TrySendError::Full(ReplicationCommand::Unregister { .. }))
-            | Err(TrySendError::Disconnected(ReplicationCommand::Register { .. }))
-            | Err(TrySendError::Disconnected(ReplicationCommand::Unregister { .. })) => {
-                unreachable!("shutdown sends only Shutdown commands")
-            }
-        }
+    pub fn request_shutdown(&self) {
+        let _ = self.commands.send(ReplicationCommand::Shutdown);
     }
 }
 
@@ -185,7 +173,7 @@ impl GameReplicationService {
     }
 
     pub fn shutdown(mut self) -> Result<GameReplicationExit> {
-        self.control.try_shutdown();
+        self.control.request_shutdown();
         self.join_worker()
     }
 
@@ -202,7 +190,7 @@ impl GameReplicationService {
 
 impl Drop for GameReplicationService {
     fn drop(&mut self) {
-        self.control.try_shutdown();
+        self.control.request_shutdown();
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
         }
@@ -439,14 +427,39 @@ mod tests {
         workers.ingest_available(inputs, 64).unwrap();
     }
 
+    fn recv_output(
+        writer: &crate::play_connection::PlayWriterEndpoint,
+        workers: &mut ferrum_runtime::WorkerRuntime<
+            crate::authoritative_runtime::PlayInput,
+            PlayOutput,
+        >,
+        inputs: &mut BoundedInputQueue<crate::authoritative_runtime::PlayInput>,
+    ) -> PlayOutput {
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            ingest(workers, inputs);
+            match writer.try_recv_output() {
+                Ok(output) => return output,
+                Err(ferrum_runtime::WorkerReceiveError::Empty) => {
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "replication output timeout"
+                    );
+                    thread::sleep(Duration::from_millis(1));
+                }
+                Err(ferrum_runtime::WorkerReceiveError::RuntimeDisconnected) => {
+                    panic!("replication runtime disconnected")
+                }
+            }
+        }
+    }
+
     #[test]
     fn broadcasts_chat_and_routes_teleports_only_to_the_target() {
         let game = SharedGameRuntime::vanilla_overworld();
         let service = spawn_game_replication(&game, GameReplicationConfig::default()).unwrap();
         let steve = PlayerUuid::new(1);
         let alex = PlayerUuid::new(2);
-        game.connect_player(steve, "Steve", spawn()).unwrap();
-        game.connect_player(alex, "Alex", spawn()).unwrap();
 
         let (connector, mut workers) = worker_channel(NonZeroUsize::new(64).unwrap());
         let (steve_reader, steve_writer) = register_play_connection(
@@ -464,26 +477,29 @@ mod tests {
         let mut inputs = BoundedInputQueue::try_new(64).unwrap();
         ingest(&mut workers, &mut inputs);
         service.control().register(steve, steve_reader).unwrap();
+        game.connect_player(steve, "Steve", spawn()).unwrap();
         service.control().register(alex, alex_reader).unwrap();
+        game.connect_player(alex, "Alex", spawn()).unwrap();
+        assert!(matches!(
+            recv_output(&steve_writer, &mut workers, &mut inputs),
+            PlayOutput::SystemChat { message, .. } if message == "Alex joined the game"
+        ));
 
         game.execute_command(&CommandSource::console(), "/say hello")
             .unwrap();
         game.execute_command(&CommandSource::console(), "/tp Steve 4 70 8")
             .unwrap();
-        thread::sleep(Duration::from_millis(25));
-        ingest(&mut workers, &mut inputs);
-
         assert!(matches!(
-            steve_writer.try_recv_output().unwrap(),
+            recv_output(&steve_writer, &mut workers, &mut inputs),
             PlayOutput::SystemChat { message, overlay: false } if message == "[Server] hello"
         ));
         assert!(matches!(
-            steve_writer.try_recv_output().unwrap(),
+            recv_output(&steve_writer, &mut workers, &mut inputs),
             PlayOutput::PlayerTeleport { teleport_id: 2, transform }
                 if transform.position == [4.0, 70.0, 8.0]
         ));
         assert!(matches!(
-            alex_writer.try_recv_output().unwrap(),
+            recv_output(&alex_writer, &mut workers, &mut inputs),
             PlayOutput::SystemChat { message, overlay: false } if message == "[Server] hello"
         ));
         assert!(alex_writer.try_recv_output().is_err());
@@ -496,7 +512,6 @@ mod tests {
         let service = spawn_game_replication(&game, GameReplicationConfig::default()).unwrap();
         let steve = PlayerUuid::new(3);
         let alex = PlayerUuid::new(4);
-        game.connect_player(steve, "Steve", spawn()).unwrap();
 
         let (connector, mut workers) = worker_channel(NonZeroUsize::new(32).unwrap());
         let (steve_reader, steve_writer) = register_play_connection(
@@ -505,23 +520,27 @@ mod tests {
             NonZeroUsize::new(8).unwrap(),
         )
         .unwrap();
+        let (alex_reader, _alex_writer) = register_play_connection(
+            &connector,
+            ConnectionId::new(4),
+            NonZeroUsize::new(8).unwrap(),
+        )
+        .unwrap();
         let mut inputs = BoundedInputQueue::try_new(32).unwrap();
         ingest(&mut workers, &mut inputs);
         service.control().register(steve, steve_reader).unwrap();
-
+        game.connect_player(steve, "Steve", spawn()).unwrap();
+        service.control().register(alex, alex_reader).unwrap();
         game.connect_player(alex, "Alex", spawn()).unwrap();
-        thread::sleep(Duration::from_millis(20));
-        ingest(&mut workers, &mut inputs);
         assert!(matches!(
-            steve_writer.try_recv_output().unwrap(),
+            recv_output(&steve_writer, &mut workers, &mut inputs),
             PlayOutput::SystemChat { message, .. } if message == "Alex joined the game"
         ));
 
+        service.control().unregister(alex).unwrap();
         game.disconnect_player(alex).unwrap();
-        thread::sleep(Duration::from_millis(20));
-        ingest(&mut workers, &mut inputs);
         assert!(matches!(
-            steve_writer.try_recv_output().unwrap(),
+            recv_output(&steve_writer, &mut workers, &mut inputs),
             PlayOutput::SystemChat { message, .. } if message == "Alex left the game"
         ));
         service.shutdown().unwrap();

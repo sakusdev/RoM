@@ -312,8 +312,6 @@ impl ServerState {
         transform: Transform,
     ) -> Result<OnlinePlayerGuard<'_>> {
         let player_uuid = GamePlayerUuid::from_bytes(*identity.uuid.as_bytes());
-        self.game_runtime
-            .connect_player(player_uuid, identity.username.clone(), transform)?;
         let id = self.next_connection_id.fetch_add(1, Ordering::Relaxed);
         let connection_id = ConnectionId::new(id);
         let endpoints = register_play_connection(
@@ -322,21 +320,22 @@ impl ServerState {
             NonZeroUsize::new(PLAY_OUTPUT_QUEUE_CAPACITY)
                 .expect("Play output queue capacity is non-zero"),
         );
-        let (play_reader, play_writer) = match endpoints {
-            Ok(endpoints) => endpoints,
-            Err(error) => {
-                let _ = self.game_runtime.disconnect_player(player_uuid);
-                return Err(error.into());
-            }
-        };
+        let (play_reader, play_writer) = endpoints?;
         if let Err(error) = self
             .game_replication
             .control()
             .register(player_uuid, play_reader.clone())
         {
             let _ = play_reader.try_disconnect();
-            let _ = self.game_runtime.disconnect_player(player_uuid);
             return Err(error.context("cannot register player for gameplay replication"));
+        }
+        if let Err(error) =
+            self.game_runtime
+                .connect_player(player_uuid, identity.username.clone(), transform)
+        {
+            let _ = self.game_replication.control().unregister(player_uuid);
+            let _ = play_reader.try_disconnect();
+            return Err(error.into());
         }
         self.online_players.fetch_add(1, Ordering::Relaxed);
         Ok(OnlinePlayerGuard {
