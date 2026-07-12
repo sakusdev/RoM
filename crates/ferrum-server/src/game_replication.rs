@@ -278,13 +278,14 @@ fn process_commands(
                 endpoint,
                 reply,
             } => {
-                let result = if connections.contains_key(&uuid) {
-                    Err(format!(
+                let result = match connections.entry(uuid) {
+                    std::collections::btree_map::Entry::Vacant(entry) => {
+                        entry.insert(ReplicationConnection::new(endpoint, pending_limit));
+                        Ok(())
+                    }
+                    std::collections::btree_map::Entry::Occupied(_) => Err(format!(
                         "player {uuid:?} is already registered for replication"
-                    ))
-                } else {
-                    connections.insert(uuid, ReplicationConnection::new(endpoint, pending_limit));
-                    Ok(())
+                    )),
                 };
                 let _ = reply.send(result);
             }
