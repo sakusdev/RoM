@@ -40,6 +40,7 @@ jobs:
             path.write_text(text, encoding='utf-8')
             PY
             python scripts/apply_item_palette_schema.py
+            git restore scripts/apply_item_palette_schema.py
             if git diff --quiet -- crates Cargo.lock; then
               echo "item palette transform produced no source changes"
               exit 1
