@@ -38,8 +38,8 @@ jobs:
               "'''            packet_catalog: vec!['''",
           )
           text = text.replace(
-              '            packet_catalog: PacketCatalog::new([\n',
-              '            packet_catalog: vec![\n',
+              "            packet_catalog: PacketCatalog::new(['''",
+              "            packet_catalog: vec!['''",
           )
           path.write_text(text, encoding='utf-8')
           PY
