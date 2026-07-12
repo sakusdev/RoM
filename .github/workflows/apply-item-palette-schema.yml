@@ -33,6 +33,10 @@ jobs:
               'raise SystemExit(f"{path}: expected at least one replacement target, found {count}")',
               'raise SystemExit(f"{path}: target {old[:160]!r} not found; count={count}")',
           )
+          text = text.replace(
+              "'''            packet_catalog: PacketCatalog::new(['''",
+              "'''            packet_catalog: vec!['''",
+          )
           path.write_text(text, encoding='utf-8')
           PY
           python scripts/apply_item_palette_schema.py
