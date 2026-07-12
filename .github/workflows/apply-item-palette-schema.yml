@@ -29,6 +29,10 @@ jobs:
           text = path.read_text(encoding='utf-8')
           text = text.replace('if count != 1:', 'if count < 1:')
           text = text.replace('expected one replacement target', 'expected at least one replacement target')
+          text = text.replace(
+              'raise SystemExit(f"{path}: expected at least one replacement target, found {count}")',
+              'raise SystemExit(f"{path}: target {old[:160]!r} not found; count={count}")',
+          )
           path.write_text(text, encoding='utf-8')
           PY
           python scripts/apply_item_palette_schema.py
