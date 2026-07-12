@@ -17,4 +17,14 @@ jobs:
           components: rustfmt, clippy
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
+      - name: Run workspace tests
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --workspace 2>&1 | tee test.log
+      - name: Upload test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: packet-catalog-tests-${{ matrix.os }}
+          path: test.log
