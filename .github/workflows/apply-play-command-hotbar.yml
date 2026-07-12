@@ -26,12 +26,22 @@ jobs:
         with:
           components: rustfmt, clippy
       - name: Apply gameplay input integration
+        shell: bash
         run: |
-          set -euo pipefail
-          python scripts/apply_play_command_hotbar.py
-          cargo fmt --all
-          cargo clippy --workspace --all-targets -- -D warnings
-          cargo test --workspace
+          set -o pipefail
+          (
+            set -euo pipefail
+            python scripts/apply_play_command_hotbar.py
+            cargo fmt --all
+            cargo clippy --workspace --all-targets -- -D warnings
+            cargo test --workspace
+          ) 2>&1 | tee integration.log
+      - name: Upload integration diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: play-command-hotbar-integration
+          path: integration.log
       - name: Commit integrated sources
         run: |
           set -euo pipefail
