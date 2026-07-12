@@ -2667,6 +2667,8 @@ mod tests {
             PlayOutputPacketIds {
                 keep_alive_request: 0x43,
                 disconnect: 0x44,
+                system_chat: 0x45,
+                player_position: 0x46,
             },
             PlayOutput::Packet(vec![0x03, 0xaa]),
         )
@@ -2686,6 +2688,8 @@ mod tests {
             PlayOutputPacketIds {
                 keep_alive_request: 0x43,
                 disconnect: 0x44,
+                system_chat: 0x45,
+                player_position: 0x46,
             },
             PlayOutput::KeepAliveRequest(73),
         )
@@ -2706,6 +2710,8 @@ mod tests {
             PlayOutputPacketIds {
                 keep_alive_request: 0x43,
                 disconnect: 0x44,
+                system_chat: 0x45,
+                player_position: 0x46,
             },
             PlayOutput::Disconnect("bye".to_owned()),
         )
