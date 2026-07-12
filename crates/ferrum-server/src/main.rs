@@ -669,10 +669,11 @@ fn load_version_pack(path: &Path, config: &ServerConfig) -> Result<LoadedVersion
         protocol_profile_from_packets(&config.version_name, pack.metadata.protocol, &pack.packets)?;
     let registry_payloads = registry_payloads_from_pack(&pack.registries)?;
     println!(
-        "loaded RoM version pack {} (SHA-256 {}, {} packets, data version {}, {} sections, {} registries / {} entries)",
+        "loaded RoM version pack {} (SHA-256 {}, {} typed packets / {} catalog entries, data version {}, {} sections, {} registries / {} entries)",
         canonical.display(),
         summary.sha256,
         summary.packet_count,
+        summary.packet_catalog_count,
         pack.world.data_version,
         pack.world.overworld_section_count,
         summary.registry_count,
@@ -951,14 +952,17 @@ fn protocol_profile_from_packets(
     protocol: i32,
     packets: &[RomPackPacket],
 ) -> Result<ProtocolProfile> {
-    let expected: BTreeSet<_> = PacketKind::ALL.iter().copied().collect();
     let actual: BTreeSet<_> = packets.iter().map(|packet| packet.kind).collect();
-    if actual != expected || packets.len() != expected.len() {
-        bail!(
-            "version pack packet kinds do not match the runtime: expected {}, got {}",
-            expected.len(),
-            packets.len()
-        );
+    let missing = PacketKind::CORE
+        .iter()
+        .copied()
+        .filter(|kind| !actual.contains(kind))
+        .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        bail!("version pack is missing required core packet kinds: {missing:?}");
+    }
+    if actual.len() != packets.len() {
+        bail!("version pack typed packet kinds are not unique");
     }
 
     let mut table = PacketTable::new();

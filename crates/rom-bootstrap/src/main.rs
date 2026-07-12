@@ -42,6 +42,10 @@ enum Command {
         #[arg(long)]
         force_generate: bool,
 
+        /// Mojang-generated reports/packets.json for the selected version.
+        #[arg(long, value_name = "PATH")]
+        packet_report: Option<PathBuf>,
+
         /// RoM workspace to build when no server binary is supplied or found beside rom-bootstrap.
         #[arg(long, default_value = ".")]
         workspace: PathBuf,
@@ -87,6 +91,10 @@ enum Command {
         /// Regenerate the pack even when the recorded pack is already valid.
         #[arg(long)]
         force: bool,
+
+        /// Mojang-generated reports/packets.json. Standard instance paths are auto-detected.
+        #[arg(long, value_name = "PATH")]
+        packet_report: Option<PathBuf>,
 
         /// Print the result as JSON.
         #[arg(long)]
@@ -150,6 +158,7 @@ fn main() -> Result<()> {
             accept_minecraft_eula,
             force_download,
             force_generate,
+            packet_report,
             workspace,
             server_binary,
             json,
@@ -160,6 +169,7 @@ fn main() -> Result<()> {
                 accept_minecraft_eula,
                 force_download,
                 force_generate,
+                packet_report,
                 workspace,
                 server_binary,
             })?;
@@ -222,9 +232,14 @@ fn main() -> Result<()> {
         Command::Generate {
             instance,
             force,
+            packet_report,
             json,
         } => {
-            let report = generate_version_pack(&GenerateOptions { instance, force })?;
+            let report = generate_version_pack(&GenerateOptions {
+                instance,
+                force,
+                packet_report,
+            })?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
@@ -236,8 +251,9 @@ fn main() -> Result<()> {
                 println!("Game JAR: {}", report.game_jar_path);
                 println!("Game JAR SHA-256: {}", report.game_jar_sha256);
                 println!(
-                    "Packets: {} / data version: {} / sections: {}+{} / registries: {} / entries: {} / source resources: {}",
+                    "Typed packets: {} / full packet catalog: {} / data version: {} / sections: {}+{} / registries: {} / entries: {} / source resources: {}",
                     report.packet_count,
+                    report.packet_catalog_count,
                     report.world_data_version,
                     report.overworld_min_section_y,
                     report.overworld_section_count,
