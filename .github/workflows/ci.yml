@@ -16,19 +16,5 @@ jobs:
         with:
           components: rustfmt, clippy
       - run: cargo fmt --all --check
-      - name: Run cargo clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tee clippy.log
-      - name: Upload Play replication diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: play-replication-${{ matrix.os }}
-          path: clippy.log
-      - name: Run workspace tests
-        run: cargo test --workspace 2>&1 | tee test.log
-      - name: Upload Play replication test diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: play-replication-tests-${{ matrix.os }}
-          path: test.log
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
