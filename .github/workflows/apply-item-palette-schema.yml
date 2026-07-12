@@ -10,6 +10,8 @@ on:
 
 permissions:
   contents: write
+  issues: write
+  pull-requests: write
 
 jobs:
   apply:
@@ -18,12 +20,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: feature/player-inventory-sync
-          fetch-depth: 0
+          fetch-depth: 1
           show-progress: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - name: Apply item palette schema
+      - name: Apply and validate item palette schema
         id: integrate
         continue-on-error: true
         shell: bash
@@ -45,34 +47,28 @@ jobs:
               echo "item palette transform produced no source changes"
               exit 1
             fi
-            git diff --stat -- crates Cargo.lock
             cargo fmt --all
             cargo clippy --workspace --all-targets -- -D warnings
             cargo test --workspace
           ) >integration.log 2>&1
           status=$?
           echo "status=$status" >> "$GITHUB_OUTPUT"
-          if [ "$status" -ne 0 ]; then
-            tail -n 180 integration.log
-          fi
           exit 0
-      - name: Commit integration failure diagnostics
+      - name: Report integration failure
         if: steps.integrate.outputs.status != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          set -euo pipefail
-          tail -n 220 integration.log > /tmp/item-palette-schema.log
-          git reset --hard HEAD
-          mkdir -p diagnostics
-          cp /tmp/item-palette-schema.log diagnostics/item-palette-schema.log
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add diagnostics/item-palette-schema.log
-          git commit -m "Record item palette integration diagnostics"
-          git pull --rebase origin feature/player-inventory-sync
-          git push origin HEAD:feature/player-inventory-sync
+          {
+            echo 'Item palette integration failed:'
+            echo '```text'
+            tail -n 180 integration.log
+            echo '```'
+          } > failure.md
+          gh pr comment 53 --repo sakusdev/RoM --body-file failure.md
           exit 1
-      - name: Publish integrated sources
+      - name: Commit and push integrated sources
         id: publish
         if: steps.integrate.outputs.status == '0'
         continue-on-error: true
@@ -82,36 +78,27 @@ jobs:
           (
             set -euxo pipefail
             git status --short
-            git diff --stat -- crates Cargo.lock
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add crates Cargo.lock
             git diff --cached --stat
             git commit -m "Store generated item protocol IDs in version packs"
-            git fetch origin feature/player-inventory-sync
-            git rebase origin/feature/player-inventory-sync
             git push origin HEAD:feature/player-inventory-sync
           ) >publish.log 2>&1
           status=$?
           echo "status=$status" >> "$GITHUB_OUTPUT"
-          if [ "$status" -ne 0 ]; then
-            cat publish.log
-          fi
           exit 0
-      - name: Commit publish failure diagnostics
+      - name: Report publish failure
         if: steps.integrate.outputs.status == '0' && steps.publish.outputs.status != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          set -euo pipefail
-          cp publish.log /tmp/item-palette-publish.log
-          git reset --hard HEAD
-          git fetch origin feature/player-inventory-sync
-          git reset --hard origin/feature/player-inventory-sync
-          mkdir -p diagnostics
-          cp /tmp/item-palette-publish.log diagnostics/item-palette-publish.log
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add diagnostics/item-palette-publish.log
-          git commit -m "Record item palette publish diagnostics"
-          git push origin HEAD:feature/player-inventory-sync
+          {
+            echo 'Item palette publish failed:'
+            echo '```text'
+            cat publish.log
+            echo '```'
+          } > failure.md
+          gh pr comment 53 --repo sakusdev/RoM --body-file failure.md
           exit 1
