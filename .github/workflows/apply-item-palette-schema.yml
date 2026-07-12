@@ -25,14 +25,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - name: Apply and validate item palette schema
+      - name: Apply, validate, and publish item palette schema
         id: integrate
         continue-on-error: true
         shell: bash
         run: |
           set +e
           (
-            set -euo pipefail
+            set -euxo pipefail
             python - <<'PY'
             from pathlib import Path
             path = Path('scripts/apply_item_palette_schema.py')
@@ -43,13 +43,16 @@ jobs:
             PY
             python scripts/apply_item_palette_schema.py
             git restore scripts/apply_item_palette_schema.py
-            if git diff --quiet -- crates Cargo.lock; then
-              echo "item palette transform produced no source changes"
-              exit 1
-            fi
+            git diff --stat -- crates Cargo.lock
             cargo fmt --all
             cargo clippy --workspace --all-targets -- -D warnings
             cargo test --workspace
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add crates Cargo.lock
+            git diff --cached --stat
+            git commit -m "Store generated item protocol IDs in version packs"
+            git push origin HEAD:feature/player-inventory-sync
           ) >integration.log 2>&1
           status=$?
           echo "status=$status" >> "$GITHUB_OUTPUT"
@@ -63,41 +66,7 @@ jobs:
           {
             echo 'Item palette integration failed:'
             echo '```text'
-            tail -n 180 integration.log
-            echo '```'
-          } > failure.md
-          gh pr comment 53 --repo sakusdev/RoM --body-file failure.md
-          exit 1
-      - name: Commit and push integrated sources
-        id: publish
-        if: steps.integrate.outputs.status == '0'
-        continue-on-error: true
-        shell: bash
-        run: |
-          set +e
-          (
-            set -euxo pipefail
-            git status --short
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add crates Cargo.lock
-            git diff --cached --stat
-            git commit -m "Store generated item protocol IDs in version packs"
-            git push origin HEAD:feature/player-inventory-sync
-          ) >publish.log 2>&1
-          status=$?
-          echo "status=$status" >> "$GITHUB_OUTPUT"
-          exit 0
-      - name: Report publish failure
-        if: steps.integrate.outputs.status == '0' && steps.publish.outputs.status != '0'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          {
-            echo 'Item palette publish failed:'
-            echo '```text'
-            cat publish.log
+            tail -n 220 integration.log
             echo '```'
           } > failure.md
           gh pr comment 53 --repo sakusdev/RoM --body-file failure.md
