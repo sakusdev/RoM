@@ -139,6 +139,11 @@ impl<'a> PacketReader<'a> {
         Ok(u16::from_be_bytes([bytes[0], bytes[1]]))
     }
 
+    pub(crate) fn read_i16(&mut self) -> Result<i16> {
+        let bytes = self.read_bytes(2)?;
+        Ok(i16::from_be_bytes([bytes[0], bytes[1]]))
+    }
+
     pub(crate) fn read_i64(&mut self) -> Result<i64> {
         let bytes = self.read_bytes(8)?;
         Ok(i64::from_be_bytes([
@@ -232,6 +237,13 @@ mod tests {
         write_string(&mut packet, "Ferrum").unwrap();
         let mut reader = PacketReader::new(&packet);
         assert_eq!(reader.read_string().unwrap(), "Ferrum");
+    }
+
+    #[test]
+    fn reads_big_endian_signed_short_payloads() {
+        let bytes = (-12_i16).to_be_bytes();
+        let mut reader = PacketReader::new(&bytes);
+        assert_eq!(reader.read_i16().unwrap(), -12);
     }
 
     #[test]

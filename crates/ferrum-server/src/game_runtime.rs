@@ -110,6 +110,16 @@ impl SharedGameRuntime {
         Ok(events)
     }
 
+    pub fn select_hotbar(
+        &self,
+        uuid: PlayerUuid,
+        selected_hotbar: u8,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self.write()?.select_hotbar(uuid, selected_hotbar)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
     pub fn execute_command(
         &self,
         source: &CommandSource,

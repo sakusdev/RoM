@@ -19,7 +19,7 @@ pub use entity::{
     Entity, EntityError, EntityId, EntityStore, EntityType, EntityUuid, Transform, Velocity,
 };
 pub use inventory::{
-    EquipmentSlot, Inventory, InventoryError, ItemStack, MAX_VANILLA_STACK_SIZE,
+    EquipmentSlot, HOTBAR_SLOTS, Inventory, InventoryError, ItemStack, MAX_VANILLA_STACK_SIZE,
     PLAYER_INVENTORY_SLOTS,
 };
 pub use persistence::{GameSnapshot, PersistenceError};
