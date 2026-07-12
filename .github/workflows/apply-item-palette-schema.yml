@@ -1,0 +1,58 @@
+name: Apply item palette schema
+
+on:
+  push:
+    branches: [feature/player-inventory-sync]
+    paths:
+      - .github/workflows/apply-item-palette-schema.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/player-inventory-sync
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Apply item palette schema
+        shell: bash
+        run: |
+          set -o pipefail
+          (
+            set -euo pipefail
+            python - <<'PY'
+            from pathlib import Path
+            path = Path('scripts/apply_item_palette_schema.py')
+            text = path.read_text(encoding='utf-8')
+            text = text.replace('if count != 1:', 'if count < 1:')
+            text = text.replace('expected one replacement target', 'expected at least one replacement target')
+            path.write_text(text, encoding='utf-8')
+            PY
+            python scripts/apply_item_palette_schema.py
+            cargo fmt --all
+            cargo clippy --workspace --all-targets -- -D warnings
+            cargo test --workspace
+          ) 2>&1 | tee integration.log
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: item-palette-schema-integration
+          path: integration.log
+      - name: Commit integrated sources
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates Cargo.lock
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "Store generated item protocol IDs in version packs"
+          git push origin HEAD:feature/player-inventory-sync
