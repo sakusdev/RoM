@@ -1,10 +1,12 @@
 name: Apply item palette schema
 
 on:
-  push:
-    branches: [feature/player-inventory-sync]
+  pull_request:
+    branches: [master]
     paths:
       - .github/workflows/apply-item-palette-schema.yml
+      - scripts/apply_item_palette_schema.py
+      - crates/rom-bootstrap/src/registry_report.rs
 
 permissions:
   contents: write
