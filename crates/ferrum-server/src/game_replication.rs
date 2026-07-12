@@ -355,6 +355,7 @@ fn dispatch_event(
             target_chat(connections, uuid, "You died".to_owned(), false, exit)
         }
         GameEvent::PlayerMoved { .. }
+        | GameEvent::SelectedHotbarChanged { .. }
         | GameEvent::TimeChanged { .. }
         | GameEvent::SaveRequested
         | GameEvent::ShutdownRequested => {}

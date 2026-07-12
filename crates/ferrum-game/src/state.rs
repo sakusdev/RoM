@@ -65,6 +65,11 @@ pub enum GameEvent {
         inserted: u32,
         item: String,
     },
+    SelectedHotbarChanged {
+        uuid: PlayerUuid,
+        previous: u8,
+        current: u8,
+    },
     PlayerKilled {
         uuid: PlayerUuid,
     },
@@ -298,6 +303,27 @@ impl GameState {
         Ok((remainder, events))
     }
 
+    pub fn select_hotbar(
+        &mut self,
+        uuid: PlayerUuid,
+        selected_hotbar: u8,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
+        let player = self
+            .players
+            .get_mut(&uuid)
+            .ok_or(GameStateError::UnknownPlayer { uuid })?;
+        let previous = player.inventory.selected_hotbar();
+        player.inventory.select_hotbar(selected_hotbar)?;
+        if previous == selected_hotbar {
+            return Ok(Vec::new());
+        }
+        Ok(vec![GameEvent::SelectedHotbarChanged {
+            uuid,
+            previous,
+            current: selected_hotbar,
+        }])
+    }
+
     pub fn kill_player(&mut self, uuid: PlayerUuid) -> Result<Vec<GameEvent>, GameStateError> {
         let player = self
             .players
@@ -473,6 +499,24 @@ mod tests {
         state.tick();
         assert_eq!(state.time().game_time, 1);
         assert_eq!(state.time().day_time, 1);
+    }
+
+    #[test]
+    fn selected_hotbar_is_authoritative_and_validated() {
+        let uuid = PlayerUuid::new(8);
+        let mut state = GameState::default();
+        state.connect_player(uuid, "Steve", spawn()).unwrap();
+        let events = state.select_hotbar(uuid, 5).unwrap();
+        assert_eq!(state.player(uuid).unwrap().inventory.selected_hotbar(), 5);
+        assert!(matches!(
+            events.as_slice(),
+            [GameEvent::SelectedHotbarChanged {
+                uuid: event_uuid,
+                previous: 0,
+                current: 5,
+            }] if *event_uuid == uuid
+        ));
+        assert!(state.select_hotbar(uuid, 9).is_err());
     }
 
     #[test]
