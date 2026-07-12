@@ -10,7 +10,10 @@ const MAX_PACKET_REPORT_BYTES: u64 = 32 * 1024 * 1024;
 
 pub fn read_packet_report(path: &Path) -> Result<PacketCatalog> {
     if !path.is_file() {
-        bail!("packet report {} does not exist or is not a file", path.display());
+        bail!(
+            "packet report {} does not exist or is not a file",
+            path.display()
+        );
     }
     let metadata = fs::metadata(path)
         .with_context(|| format!("cannot stat packet report {}", path.display()))?;
@@ -21,8 +24,8 @@ pub fn read_packet_report(path: &Path) -> Result<PacketCatalog> {
             metadata.len()
         );
     }
-    let bytes = fs::read(path)
-        .with_context(|| format!("cannot read packet report {}", path.display()))?;
+    let bytes =
+        fs::read(path).with_context(|| format!("cannot read packet report {}", path.display()))?;
     parse_packet_report(&bytes)
         .with_context(|| format!("cannot parse packet report {}", path.display()))
 }
@@ -81,20 +84,25 @@ fn phase_aliases() -> [(ProtocolPhase, &'static [&'static str]); 5] {
 
 fn direction_aliases() -> [(PacketDirection, &'static [&'static str]); 2] {
     [
-        (PacketDirection::Serverbound, &["serverbound", "to_server", "toServer"]),
-        (PacketDirection::Clientbound, &["clientbound", "to_client", "toClient"]),
+        (
+            PacketDirection::Serverbound,
+            &["serverbound", "to_server", "toServer"],
+        ),
+        (
+            PacketDirection::Clientbound,
+            &["clientbound", "to_client", "toClient"],
+        ),
     ]
 }
 
-fn find_object_value<'a>(
-    object: &'a Map<String, Value>,
-    aliases: &[&str],
-) -> Option<&'a Value> {
+fn find_object_value<'a>(object: &'a Map<String, Value>, aliases: &[&str]) -> Option<&'a Value> {
     aliases.iter().find_map(|alias| object.get(*alias))
 }
 
 fn packet_map(value: &Value) -> Result<&Map<String, Value>> {
-    let object = value.as_object().context("packet direction must be an object")?;
+    let object = value
+        .as_object()
+        .context("packet direction must be an object")?;
     if let Some(packets) = object.get("packets") {
         return packets
             .as_object()
@@ -104,7 +112,9 @@ fn packet_map(value: &Value) -> Result<&Map<String, Value>> {
 }
 
 fn packet_id(value: &Value) -> Result<i32> {
-    let object = value.as_object().context("packet record must be an object")?;
+    let object = value
+        .as_object()
+        .context("packet record must be an object")?;
     let value = ["protocol_id", "protocolId", "id"]
         .iter()
         .find_map(|field| object.get(*field))

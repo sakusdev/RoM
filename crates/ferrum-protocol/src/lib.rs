@@ -2,6 +2,13 @@
 //!
 //! Socket I/O and gameplay state intentionally live outside this crate.
 
+mod packet_catalog;
+
+pub use packet_catalog::{
+    PacketCatalog, PacketCatalogError, PacketDescriptor, canonical_packet_name, known_packet_kind,
+    normalize_packet_name,
+};
+
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -9,7 +16,8 @@ use std::{
     fmt::{self, Display, Formatter},
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ProtocolPhase {
     Handshake,
     Status,
@@ -19,7 +27,8 @@ pub enum ProtocolPhase {
     Closed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PacketDirection {
     Serverbound,
     Clientbound,
@@ -75,10 +84,97 @@ pub enum PacketKind {
     BlockChangedAck,
     BlockUpdate,
     ForgetLevelChunk,
+    ChatCommand,
+    ChatMessage,
+    SetCarriedItem,
+    ContainerClick,
+    CloseContainer,
+    SetCreativeModeSlot,
+    SetHeldSlot,
+    SetContainerContent,
+    SetContainerSlot,
+    AddEntity,
+    RemoveEntities,
+    MoveEntityPosition,
+    MoveEntityPositionRotation,
+    MoveEntityRotation,
+    TeleportEntity,
+    RotateHead,
+    SetEntityData,
+    SetEquipment,
+    PlayerInfoUpdate,
+    PlayerInfoRemove,
 }
 
 impl PacketKind {
     pub const ALL: &'static [Self] = &[
+        Self::Handshake,
+        Self::StatusRequest,
+        Self::PingRequest,
+        Self::StatusResponse,
+        Self::PongResponse,
+        Self::LoginStart,
+        Self::LoginAcknowledged,
+        Self::LoginDisconnect,
+        Self::LoginSuccess,
+        Self::ConfigurationAcknowledged,
+        Self::ConfigurationClientInformation,
+        Self::ConfigurationDisconnect,
+        Self::RegistryData,
+        Self::FeatureFlags,
+        Self::UpdateTags,
+        Self::SelectKnownPacksRequest,
+        Self::SelectKnownPacksResponse,
+        Self::FinishConfiguration,
+        Self::PlayLogin,
+        Self::ChunkBatchStart,
+        Self::ChunkBatchFinished,
+        Self::ChunkBatchReceived,
+        Self::LevelChunkWithLight,
+        Self::SetChunkCacheCenter,
+        Self::DefaultSpawnPosition,
+        Self::PlayerPosition,
+        Self::SystemChat,
+        Self::AcceptTeleportation,
+        Self::PlayDisconnect,
+        Self::KeepAliveRequest,
+        Self::KeepAliveResponse,
+        Self::ClientTickEnd,
+        Self::MovePlayerPosition,
+        Self::MovePlayerPositionRotation,
+        Self::MovePlayerRotation,
+        Self::MovePlayerStatusOnly,
+        Self::PlayerAction,
+        Self::UseItemOn,
+        Self::BlockChangedAck,
+        Self::BlockUpdate,
+        Self::ForgetLevelChunk,
+        Self::ChatCommand,
+        Self::ChatMessage,
+        Self::SetCarriedItem,
+        Self::ContainerClick,
+        Self::CloseContainer,
+        Self::SetCreativeModeSlot,
+        Self::SetHeldSlot,
+        Self::SetContainerContent,
+        Self::SetContainerSlot,
+        Self::AddEntity,
+        Self::RemoveEntities,
+        Self::MoveEntityPosition,
+        Self::MoveEntityPositionRotation,
+        Self::MoveEntityRotation,
+        Self::TeleportEntity,
+        Self::RotateHead,
+        Self::SetEntityData,
+        Self::SetEquipment,
+        Self::PlayerInfoUpdate,
+        Self::PlayerInfoRemove,
+    ];
+
+    /// Packet kinds required by the current native server core. Optional kinds
+    /// may be present in a generated packet catalog without being required by
+    /// hand-authored built-in profiles.
+    pub const CORE: &'static [Self] = &[
         Self::Handshake,
         Self::StatusRequest,
         Self::PingRequest,
@@ -164,7 +260,27 @@ impl PacketKind {
             | Self::UseItemOn
             | Self::BlockChangedAck
             | Self::BlockUpdate
-            | Self::ForgetLevelChunk => ProtocolPhase::Play,
+            | Self::ForgetLevelChunk
+            | Self::ChatCommand
+            | Self::ChatMessage
+            | Self::SetCarriedItem
+            | Self::ContainerClick
+            | Self::CloseContainer
+            | Self::SetCreativeModeSlot
+            | Self::SetHeldSlot
+            | Self::SetContainerContent
+            | Self::SetContainerSlot
+            | Self::AddEntity
+            | Self::RemoveEntities
+            | Self::MoveEntityPosition
+            | Self::MoveEntityPositionRotation
+            | Self::MoveEntityRotation
+            | Self::TeleportEntity
+            | Self::RotateHead
+            | Self::SetEntityData
+            | Self::SetEquipment
+            | Self::PlayerInfoUpdate
+            | Self::PlayerInfoRemove => ProtocolPhase::Play,
         }
     }
 
@@ -188,7 +304,13 @@ impl PacketKind {
             | Self::MovePlayerRotation
             | Self::MovePlayerStatusOnly
             | Self::PlayerAction
-            | Self::UseItemOn => PacketDirection::Serverbound,
+            | Self::UseItemOn
+            | Self::ChatCommand
+            | Self::ChatMessage
+            | Self::SetCarriedItem
+            | Self::ContainerClick
+            | Self::CloseContainer
+            | Self::SetCreativeModeSlot => PacketDirection::Serverbound,
             _ => PacketDirection::Clientbound,
         }
     }

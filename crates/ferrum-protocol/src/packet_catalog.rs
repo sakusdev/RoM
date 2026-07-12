@@ -47,7 +47,9 @@ pub struct PacketCatalog {
 }
 
 impl PacketCatalog {
-    pub fn new(entries: impl IntoIterator<Item = PacketDescriptor>) -> Result<Self, PacketCatalogError> {
+    pub fn new(
+        entries: impl IntoIterator<Item = PacketDescriptor>,
+    ) -> Result<Self, PacketCatalogError> {
         let mut entries = entries.into_iter().collect::<Vec<_>>();
         entries.sort_by(|left, right| {
             (left.phase, left.direction, left.id, left.name.as_str()).cmp(&(
@@ -133,9 +135,9 @@ impl PacketCatalog {
         direction: PacketDirection,
         id: i32,
     ) -> Option<&PacketDescriptor> {
-        self.entries.iter().find(|entry| {
-            entry.phase == phase && entry.direction == direction && entry.id == id
-        })
+        self.entries
+            .iter()
+            .find(|entry| entry.phase == phase && entry.direction == direction && entry.id == id)
     }
 
     pub fn typed_table(&self) -> Result<PacketTable, PacketCatalogError> {
@@ -229,19 +231,15 @@ pub fn known_packet_kind(
             PacketDirection::Serverbound,
             "configuration_acknowledged" | "finish_configuration",
         ) => Some(PacketKind::ConfigurationAcknowledged),
-        (
-            ProtocolPhase::Configuration,
-            PacketDirection::Serverbound,
-            "client_information",
-        ) => Some(PacketKind::ConfigurationClientInformation),
+        (ProtocolPhase::Configuration, PacketDirection::Serverbound, "client_information") => {
+            Some(PacketKind::ConfigurationClientInformation)
+        }
         (ProtocolPhase::Configuration, PacketDirection::Clientbound, "disconnect") => {
             Some(PacketKind::ConfigurationDisconnect)
         }
-        (
-            ProtocolPhase::Configuration,
-            PacketDirection::Clientbound,
-            "finish_configuration",
-        ) => Some(PacketKind::FinishConfiguration),
+        (ProtocolPhase::Configuration, PacketDirection::Clientbound, "finish_configuration") => {
+            Some(PacketKind::FinishConfiguration)
+        }
         (ProtocolPhase::Configuration, PacketDirection::Clientbound, "registry_data") => {
             Some(PacketKind::RegistryData)
         }
@@ -253,19 +251,13 @@ pub fn known_packet_kind(
         (ProtocolPhase::Configuration, PacketDirection::Clientbound, "update_tags") => {
             Some(PacketKind::UpdateTags)
         }
-        (
-            ProtocolPhase::Configuration,
-            PacketDirection::Clientbound,
-            "select_known_packs",
-        ) => Some(PacketKind::SelectKnownPacksRequest),
-        (
-            ProtocolPhase::Configuration,
-            PacketDirection::Serverbound,
-            "select_known_packs",
-        ) => Some(PacketKind::SelectKnownPacksResponse),
-        (ProtocolPhase::Play, PacketDirection::Clientbound, "login") => {
-            Some(PacketKind::PlayLogin)
+        (ProtocolPhase::Configuration, PacketDirection::Clientbound, "select_known_packs") => {
+            Some(PacketKind::SelectKnownPacksRequest)
         }
+        (ProtocolPhase::Configuration, PacketDirection::Serverbound, "select_known_packs") => {
+            Some(PacketKind::SelectKnownPacksResponse)
+        }
+        (ProtocolPhase::Play, PacketDirection::Clientbound, "login") => Some(PacketKind::PlayLogin),
         (ProtocolPhase::Play, PacketDirection::Clientbound, "chunk_batch_start") => {
             Some(PacketKind::ChunkBatchStart)
         }
@@ -281,11 +273,9 @@ pub fn known_packet_kind(
         (ProtocolPhase::Play, PacketDirection::Clientbound, "set_chunk_cache_center") => {
             Some(PacketKind::SetChunkCacheCenter)
         }
-        (
-            ProtocolPhase::Play,
-            PacketDirection::Clientbound,
-            "set_default_spawn_position",
-        ) => Some(PacketKind::DefaultSpawnPosition),
+        (ProtocolPhase::Play, PacketDirection::Clientbound, "set_default_spawn_position") => {
+            Some(PacketKind::DefaultSpawnPosition)
+        }
         (ProtocolPhase::Play, PacketDirection::Clientbound, "player_position") => {
             Some(PacketKind::PlayerPosition)
         }
@@ -398,6 +388,73 @@ pub fn known_packet_kind(
     }
 }
 
+#[must_use]
+pub const fn canonical_packet_name(kind: PacketKind) -> &'static str {
+    match kind {
+        PacketKind::Handshake => "minecraft:intention",
+        PacketKind::StatusRequest => "minecraft:status_request",
+        PacketKind::PingRequest => "minecraft:ping_request",
+        PacketKind::StatusResponse => "minecraft:status_response",
+        PacketKind::PongResponse => "minecraft:pong_response",
+        PacketKind::LoginStart => "minecraft:hello",
+        PacketKind::LoginAcknowledged => "minecraft:login_acknowledged",
+        PacketKind::LoginDisconnect => "minecraft:login_disconnect",
+        PacketKind::LoginSuccess => "minecraft:game_profile",
+        PacketKind::ConfigurationAcknowledged => "minecraft:configuration_acknowledged",
+        PacketKind::ConfigurationClientInformation => "minecraft:client_information",
+        PacketKind::ConfigurationDisconnect => "minecraft:disconnect",
+        PacketKind::RegistryData => "minecraft:registry_data",
+        PacketKind::FeatureFlags => "minecraft:update_enabled_features",
+        PacketKind::UpdateTags => "minecraft:update_tags",
+        PacketKind::SelectKnownPacksRequest | PacketKind::SelectKnownPacksResponse => {
+            "minecraft:select_known_packs"
+        }
+        PacketKind::FinishConfiguration => "minecraft:finish_configuration",
+        PacketKind::PlayLogin => "minecraft:login",
+        PacketKind::ChunkBatchStart => "minecraft:chunk_batch_start",
+        PacketKind::ChunkBatchFinished => "minecraft:chunk_batch_finished",
+        PacketKind::ChunkBatchReceived => "minecraft:chunk_batch_received",
+        PacketKind::LevelChunkWithLight => "minecraft:level_chunk_with_light",
+        PacketKind::SetChunkCacheCenter => "minecraft:set_chunk_cache_center",
+        PacketKind::DefaultSpawnPosition => "minecraft:set_default_spawn_position",
+        PacketKind::PlayerPosition => "minecraft:player_position",
+        PacketKind::SystemChat => "minecraft:system_chat",
+        PacketKind::AcceptTeleportation => "minecraft:accept_teleportation",
+        PacketKind::PlayDisconnect => "minecraft:disconnect",
+        PacketKind::KeepAliveRequest | PacketKind::KeepAliveResponse => "minecraft:keep_alive",
+        PacketKind::ClientTickEnd => "minecraft:client_tick_end",
+        PacketKind::MovePlayerPosition => "minecraft:move_player_pos",
+        PacketKind::MovePlayerPositionRotation => "minecraft:move_player_pos_rot",
+        PacketKind::MovePlayerRotation => "minecraft:move_player_rot",
+        PacketKind::MovePlayerStatusOnly => "minecraft:move_player_status_only",
+        PacketKind::PlayerAction => "minecraft:player_action",
+        PacketKind::UseItemOn => "minecraft:use_item_on",
+        PacketKind::BlockChangedAck => "minecraft:block_changed_ack",
+        PacketKind::BlockUpdate => "minecraft:block_update",
+        PacketKind::ForgetLevelChunk => "minecraft:forget_level_chunk",
+        PacketKind::ChatCommand => "minecraft:chat_command",
+        PacketKind::ChatMessage => "minecraft:chat",
+        PacketKind::SetCarriedItem => "minecraft:set_carried_item",
+        PacketKind::ContainerClick => "minecraft:container_click",
+        PacketKind::CloseContainer => "minecraft:container_close",
+        PacketKind::SetCreativeModeSlot => "minecraft:set_creative_mode_slot",
+        PacketKind::SetHeldSlot => "minecraft:set_held_slot",
+        PacketKind::SetContainerContent => "minecraft:container_set_content",
+        PacketKind::SetContainerSlot => "minecraft:container_set_slot",
+        PacketKind::AddEntity => "minecraft:add_entity",
+        PacketKind::RemoveEntities => "minecraft:remove_entities",
+        PacketKind::MoveEntityPosition => "minecraft:move_entity_pos",
+        PacketKind::MoveEntityPositionRotation => "minecraft:move_entity_pos_rot",
+        PacketKind::MoveEntityRotation => "minecraft:move_entity_rot",
+        PacketKind::TeleportEntity => "minecraft:teleport_entity",
+        PacketKind::RotateHead => "minecraft:rotate_head",
+        PacketKind::SetEntityData => "minecraft:set_entity_data",
+        PacketKind::SetEquipment => "minecraft:set_equipment",
+        PacketKind::PlayerInfoUpdate => "minecraft:player_info_update",
+        PacketKind::PlayerInfoRemove => "minecraft:player_info_remove",
+    }
+}
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum PacketCatalogError {
     #[error("packet catalog cannot contain the closed protocol phase")]
@@ -410,7 +467,9 @@ pub enum PacketCatalogError {
     InvalidName { name: String },
     #[error("packet name {name} is not canonical; expected {canonical}")]
     NonCanonicalName { name: String, canonical: String },
-    #[error("duplicate packet name {name} in {phase:?}/{direction:?}: IDs {first_id} and {second_id}")]
+    #[error(
+        "duplicate packet name {name} in {phase:?}/{direction:?}: IDs {first_id} and {second_id}"
+    )]
     DuplicateName {
         phase: ProtocolPhase,
         direction: PacketDirection,
@@ -481,7 +540,10 @@ mod tests {
             )
             .unwrap(),
         ]);
-        assert!(matches!(duplicate_id, Err(PacketCatalogError::DuplicateId { .. })));
+        assert!(matches!(
+            duplicate_id,
+            Err(PacketCatalogError::DuplicateId { .. })
+        ));
     }
 
     #[test]

@@ -289,6 +289,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ferrum-game"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "ferrum-importer"
 version = "0.1.0"
 dependencies = [
@@ -327,6 +336,7 @@ name = "ferrum-protocol"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "thiserror",
 ]
 
 [[package]]
@@ -355,6 +365,7 @@ dependencies = [
  "anyhow",
  "clap",
  "ferrum-configuration",
+ "ferrum-game",
  "ferrum-nbt",
  "ferrum-play",
  "ferrum-protocol",
@@ -363,6 +374,7 @@ dependencies = [
  "ferrum-version-26-1-2",
  "ferrum-world",
  "serde_json",
+ "thiserror",
 ]
 
 [[package]]
@@ -1057,6 +1069,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "ferrum-protocol",
  "ferrum-rompack",
  "ferrum-version-26-1-2",
  "reqwest",
