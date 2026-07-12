@@ -9,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub const ROMPACK_SCHEMA_VERSION: u32 = 5;
+pub const ROMPACK_SCHEMA_VERSION: u32 = 6;
 const ROMPACK_MAGIC: &[u8; 8] = b"ROMPACK\0";
 const HEADER_BYTES: usize = ROMPACK_MAGIC.len() + 4 + 8;
 const TRAILER_BYTES: usize = 32;
@@ -19,6 +19,7 @@ pub struct RomPackLimits {
     pub max_file_bytes: u64,
     pub max_json_bytes: u64,
     pub max_packets: usize,
+    pub max_items: usize,
     pub max_sections: usize,
     pub max_registries: usize,
     pub max_entries_per_registry: usize,
@@ -34,6 +35,7 @@ impl Default for RomPackLimits {
             max_file_bytes: 64 * 1024 * 1024,
             max_json_bytes: 32 * 1024 * 1024,
             max_packets: 4_096,
+            max_items: 100_000,
             max_sections: 1_024,
             max_registries: 1_024,
             max_entries_per_registry: 1_000_000,
@@ -53,6 +55,8 @@ pub struct RomPack {
     /// Complete generated packet inventory, including packets not implemented yet.
     pub packet_catalog: Vec<PacketDescriptor>,
     pub world: RomPackWorld,
+    /// Static item registry IDs used by Play-state ItemStack codecs.
+    pub items: Vec<RomPackItem>,
     pub registries: Vec<RomPackRegistry>,
     pub resources: Vec<RomPackResource>,
 }
@@ -111,6 +115,12 @@ pub struct RomPackPacket {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RomPackItem {
+    pub item: String,
+    pub protocol_id: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RomPackRegistry {
     pub id: String,
     pub entries: Vec<String>,
@@ -130,6 +140,7 @@ pub struct RomPackSummary {
     pub size: u64,
     pub packet_count: usize,
     pub packet_catalog_count: usize,
+    pub item_count: usize,
     pub registry_count: usize,
     pub registry_entry_count: usize,
     pub resource_count: usize,
@@ -397,6 +408,25 @@ pub fn validate_rompack(pack: &RomPack, limits: RomPackLimits) -> Result<()> {
         }
     }
 
+    if pack.items.len() > limits.max_items {
+        bail!("version pack contains too many item registry records");
+    }
+    let mut previous_item: Option<&str> = None;
+    let mut item_protocol_ids = BTreeSet::new();
+    for item in &pack.items {
+        validate_resource_location("item ID", &item.item, limits.max_identifier_bytes)?;
+        if previous_item.is_some_and(|previous| previous >= item.item.as_str()) {
+            bail!("version-pack items must be strictly sorted and unique");
+        }
+        previous_item = Some(&item.item);
+        if item.protocol_id < 0 {
+            bail!("item {} protocol ID cannot be negative", item.item);
+        }
+        if !item_protocol_ids.insert(item.protocol_id) {
+            bail!("duplicate item protocol ID {}", item.protocol_id);
+        }
+    }
+
     if pack.registries.len() > limits.max_registries {
         bail!("version pack contains too many registries");
     }
@@ -466,6 +496,7 @@ fn summary(path: PathBuf, bytes: &[u8], pack: &RomPack) -> RomPackSummary {
         size: bytes.len() as u64,
         packet_count: pack.packets.len(),
         packet_catalog_count: pack.packet_catalog.len(),
+        item_count: pack.items.len(),
         registry_count: pack.registries.len(),
         registry_entry_count: pack
             .registries
@@ -590,6 +621,16 @@ mod tests {
                     id: 0,
                 },
             ],
+            items: vec![
+                RomPackItem {
+                    item: "minecraft:air".to_owned(),
+                    protocol_id: 0,
+                },
+                RomPackItem {
+                    item: "minecraft:stone".to_owned(),
+                    protocol_id: 1,
+                },
+            ],
             packet_catalog: vec![
                 PacketDescriptor::new(
                     ferrum_protocol::ProtocolPhase::Handshake,
@@ -657,6 +698,7 @@ mod tests {
         assert_eq!(written.sha256, read.sha256);
         assert_eq!(written.packet_count, 3);
         assert_eq!(written.packet_catalog_count, 3);
+        assert_eq!(written.item_count, 2);
         assert_eq!(written.registry_count, 2);
         assert_eq!(written.registry_entry_count, 4);
         assert_eq!(written.resource_count, 1);
@@ -711,6 +753,14 @@ mod tests {
                 id: 0,
             },
         ];
+        assert!(validate_rompack(&pack, RomPackLimits::default()).is_err());
+
+        let mut pack = sample_pack();
+        pack.items.reverse();
+        assert!(validate_rompack(&pack, RomPackLimits::default()).is_err());
+
+        let mut pack = sample_pack();
+        pack.items[1].protocol_id = pack.items[0].protocol_id;
         assert!(validate_rompack(&pack, RomPackLimits::default()).is_err());
 
         let mut pack = sample_pack();

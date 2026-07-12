@@ -19,6 +19,7 @@ pub struct SetupOptions {
     pub force_download: bool,
     pub force_generate: bool,
     pub packet_report: Option<PathBuf>,
+    pub registry_report: Option<PathBuf>,
     pub workspace: PathBuf,
     pub server_binary: Option<PathBuf>,
 }
@@ -55,6 +56,7 @@ pub fn setup_instance(options: &SetupOptions) -> Result<SetupReport> {
         instance: options.instance.clone(),
         force: options.force_generate,
         packet_report: options.packet_report.clone(),
+        registry_report: options.registry_report.clone(),
     })?;
     let installed_server = install_local_server(&InstallLocalOptions {
         instance: options.instance.clone(),
@@ -206,6 +208,7 @@ mod tests {
             size: 1,
             packet_count: 1,
             packet_catalog_count: 1,
+            item_count: 1,
             registry_count: 1,
             registry_entry_count: 1,
             resource_count: 1,
@@ -234,6 +237,7 @@ mod tests {
             size: 1,
             packet_count: 1,
             packet_catalog_count: 1,
+            item_count: 1,
             registry_count: 1,
             registry_entry_count: 1,
             resource_count: 1,

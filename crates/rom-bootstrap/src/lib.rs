@@ -1,5 +1,6 @@
 mod extract;
 mod packet_report;
+mod registry_report;
 mod setup;
 
 pub use extract::{GenerateOptions, GenerateReport, generate_version_pack};
