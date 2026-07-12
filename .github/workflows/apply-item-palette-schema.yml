@@ -18,7 +18,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: feature/player-inventory-sync
-          fetch-depth: 0
+          fetch-depth: 1
+          show-progress: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -39,6 +40,11 @@ jobs:
             path.write_text(text, encoding='utf-8')
             PY
             python scripts/apply_item_palette_schema.py
+            if git diff --quiet -- crates Cargo.lock; then
+              echo "item palette transform produced no source changes"
+              exit 1
+            fi
+            git diff --stat -- crates Cargo.lock
             cargo fmt --all
             cargo clippy --workspace --all-targets -- -D warnings
             cargo test --workspace
@@ -71,8 +77,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add crates Cargo.lock
-          if git diff --cached --quiet; then
-            exit 0
-          fi
           git commit -m "Store generated item protocol IDs in version packs"
           git push origin HEAD:feature/player-inventory-sync
