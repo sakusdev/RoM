@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use ferrum_game::Transform;
 use ferrum_play::PlayerMovement;
 use ferrum_runtime::{
     BoundedInputQueue, ConnectionId, FixedRateClock, Tick, WorkerIngressReport, WorkerOutputError,
@@ -19,7 +20,7 @@ pub enum PlayInput {
     Disconnected,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum PlayOutput {
     /// Unframed protocol packet bytes including the packet ID.
     Packet(Vec<u8>),
@@ -27,6 +28,13 @@ pub enum PlayOutput {
     KeepAliveRequest(i64),
     /// Request a protocol-aware Play disconnect with this reason.
     Disconnect(String),
+    /// Send a protocol-aware system chat component.
+    SystemChat { message: String, overlay: bool },
+    /// Teleport this connection using a connection-local teleport identifier.
+    PlayerTeleport {
+        teleport_id: i32,
+        transform: Transform,
+    },
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

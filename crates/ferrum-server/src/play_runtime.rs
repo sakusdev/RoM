@@ -71,6 +71,23 @@ impl<'a> GameplaySync<'a> {
         self.runtime.move_player(self.player_uuid, transform)?;
         Ok(())
     }
+
+    fn refresh(self, player: &mut PlayerState) -> Result<()> {
+        let transform = self.runtime.with_state(|state| {
+            state
+                .player(self.player_uuid)
+                .and_then(|player| player.entity_id)
+                .and_then(|entity_id| state.entities().get(entity_id))
+                .map(|entity| entity.transform)
+        })?;
+        if let Some(transform) = transform {
+            player.position = transform.position;
+            player.yaw = transform.yaw;
+            player.pitch = transform.pitch;
+            player.on_ground = transform.on_ground;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -503,6 +520,22 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
                         }
                         PlayInput::ChunkBatchReceived(_) => {}
                         PlayInput::Movement(movement) => {
+                            if let Some(gameplay) = gameplay {
+                                gameplay.refresh(&mut player)?;
+                                let authoritative_chunk = player.chunk_pos();
+                                if authoritative_chunk != view.center() {
+                                    let delta = view.recenter(authoritative_chunk)?;
+                                    shared_world.ensure_chunks_loaded(&delta.newly_visible)?;
+                                    send_chunk_view_delta(
+                                        writer,
+                                        profile,
+                                        shared_world,
+                                        authoritative_chunk,
+                                        &delta,
+                                        play_reader,
+                                    )?;
+                                }
+                            }
                             validate_movement_delta(&player, movement)?;
                             validate_movement_floor(movement, world_profile.floor_y)?;
                             let previous_chunk = player.chunk_pos();
@@ -527,6 +560,15 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
                         PlayInput::Disconnected => {
                             unreachable!("socket disconnect is not decoded from a Play packet")
                         }
+                    }
+                }
+                Some(PacketKind::AcceptTeleportation) => {
+                    let teleport_id = packet_reader.read_varint()?;
+                    if teleport_id < 0 {
+                        bail!("teleport acknowledgement id cannot be negative");
+                    }
+                    if !packet_reader.take_remaining().is_empty() {
+                        bail!("teleport acknowledgement contains trailing bytes");
                     }
                 }
                 Some(PacketKind::PlayerAction) => {
