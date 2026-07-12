@@ -1,0 +1,39 @@
+name: Packet catalog fixup
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    if: ${{ github.head_ref == 'feature/vanilla-packet-catalog' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/vanilla-packet-catalog
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Apply packet catalog integration
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python scripts/apply_packet_catalog_protocol.py
+          python scripts/add_packet_canonical_names.py
+          python scripts/apply_rompack_packet_catalog.py
+          python scripts/apply_bootstrap_packet_catalog.py
+          python scripts/apply_server_packet_catalog.py
+          cargo fmt --all
+          cargo check --workspace
+          git add Cargo.toml Cargo.lock crates/ferrum-protocol crates/ferrum-rompack crates/rom-bootstrap crates/ferrum-server
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "Add data-driven packet catalog ingestion"
+          git push origin HEAD:feature/vanilla-packet-catalog
