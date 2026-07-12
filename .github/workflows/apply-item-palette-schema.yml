@@ -1,4 +1,4 @@
-name: Diagnose item palette transform
+name: Apply item palette schema
 
 on:
   pull_request:
@@ -9,13 +9,13 @@ on:
       - crates/rom-bootstrap/src/registry_report.rs
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  diagnose:
+  apply:
     runs-on: ubuntu-latest
     steps:
-      - name: Clone and apply transform
+      - name: Clone, apply, validate, and publish
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -41,5 +41,15 @@ jobs:
           PY
           python scripts/apply_item_palette_schema.py
           git restore scripts/apply_item_palette_schema.py
-          git diff --stat -- crates Cargo.lock
-          git diff --check -- crates Cargo.lock
+          if git diff --quiet -- crates Cargo.lock; then
+            echo 'item palette transform produced no source changes'
+            exit 1
+          fi
+          cargo fmt --all
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add crates Cargo.lock
+          git commit -m 'Store generated item protocol IDs in version packs'
+          git push origin HEAD:feature/player-inventory-sync
