@@ -37,6 +37,10 @@ jobs:
               "'''            packet_catalog: PacketCatalog::new(['''",
               "'''            packet_catalog: vec!['''",
           )
+          text = text.replace(
+              '            packet_catalog: PacketCatalog::new([\n',
+              '            packet_catalog: vec![\n',
+          )
           path.write_text(text, encoding='utf-8')
           PY
           python scripts/apply_item_palette_schema.py
