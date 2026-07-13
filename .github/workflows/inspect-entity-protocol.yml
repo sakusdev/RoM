@@ -25,7 +25,7 @@ jobs:
         run: |
           set -euo pipefail
           instance="$RUNNER_TEMP/rom-entity-inspect"
-          cargo run --quiet --release -p rom-bootstrap -- prepare \
+          cargo run --quiet --locked --release -p rom-bootstrap -- prepare \
             --instance "$instance" \
             --version 26.1.2 \
             --accept-minecraft-eula \
@@ -33,10 +33,16 @@ jobs:
           server_jar="$(jq -r '.official_server_jar' prepare.json)"
           test -f "$server_jar"
 
-          inner_path="$(unzip -p "$server_jar" META-INF/versions.list 2>/dev/null | tr -d '\r' | awk -F '\t' 'NF == 3 { print $3; exit }')"
-          if [[ -n "$inner_path" ]]; then
+          listed_path="$(unzip -p "$server_jar" META-INF/versions.list 2>/dev/null | tr -d '\r' | awk -F '\t' 'NF == 3 { print $3; exit }')"
+          if [[ -n "$listed_path" ]]; then
+            if [[ "$listed_path" == META-INF/versions/* ]]; then
+              inner_path="$listed_path"
+            else
+              inner_path="META-INF/versions/$listed_path"
+            fi
             unzip -p "$server_jar" "$inner_path" > game-server.jar
           else
+            inner_path=''
             cp "$server_jar" game-server.jar
           fi
           jar tf game-server.jar > class-list.txt
