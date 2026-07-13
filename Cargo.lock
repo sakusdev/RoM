@@ -326,6 +326,7 @@ dependencies = [
 name = "ferrum-play"
 version = "0.1.0"
 dependencies = [
+ "ferrum-game",
  "ferrum-nbt",
  "ferrum-world",
  "thiserror",

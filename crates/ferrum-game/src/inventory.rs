@@ -230,7 +230,15 @@ impl Inventory {
         self.slots.fill(None);
     }
 
-    pub fn insert(&mut self, mut stack: ItemStack) -> Option<ItemStack> {
+    pub fn insert(&mut self, stack: ItemStack) -> Option<ItemStack> {
+        self.insert_with_changed_slots(stack).0
+    }
+
+    pub fn insert_with_changed_slots(
+        &mut self,
+        mut stack: ItemStack,
+    ) -> (Option<ItemStack>, Vec<usize>) {
+        let mut changed_slots = Vec::new();
         for index in MAIN_INVENTORY_START..=HOTBAR_END {
             let Some(existing) = self.slots[index].as_mut() else {
                 continue;
@@ -241,8 +249,9 @@ impl Inventory {
             let moved = existing.remaining_capacity().min(stack.count);
             existing.count += moved;
             stack.count -= moved;
+            changed_slots.push(index);
             if stack.count == 0 {
-                return None;
+                return (None, changed_slots);
             }
         }
 
@@ -255,12 +264,13 @@ impl Inventory {
             placed.count = moved;
             self.slots[index] = Some(placed);
             stack.count -= moved;
+            changed_slots.push(index);
             if stack.count == 0 {
-                return None;
+                return (None, changed_slots);
             }
         }
 
-        Some(stack)
+        (Some(stack), changed_slots)
     }
 
     #[must_use]
@@ -314,6 +324,18 @@ mod tests {
         );
         assert_eq!(inventory.slot(9).unwrap().unwrap().count(), 64);
         assert_eq!(inventory.slot(10).unwrap().unwrap().count(), 4);
+    }
+
+    #[test]
+    fn insertion_reports_every_changed_slot() {
+        let mut inventory = Inventory::new();
+        inventory
+            .set_slot(9, Some(ItemStack::new("minecraft:stone", 60).unwrap()))
+            .unwrap();
+        let (remainder, changed) =
+            inventory.insert_with_changed_slots(ItemStack::new("minecraft:stone", 8).unwrap());
+        assert_eq!(remainder, None);
+        assert_eq!(changed, vec![9, 10]);
     }
 
     #[test]

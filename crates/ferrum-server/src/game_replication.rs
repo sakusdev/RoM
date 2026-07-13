@@ -7,7 +7,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
-use ferrum_game::{GameEvent, PlayerUuid};
+use ferrum_game::{GameEvent, ItemStack, PLAYER_INVENTORY_SLOTS, PlayerUuid};
 
 use crate::{
     authoritative_runtime::PlayOutput,
@@ -116,6 +116,11 @@ enum ReplicationCommand {
         endpoint: PlayReaderEndpoint,
         reply: SyncSender<Result<(), String>>,
     },
+    SyncInventory {
+        uuid: PlayerUuid,
+        slots: Vec<Option<ItemStack>>,
+        reply: SyncSender<Result<(), String>>,
+    },
     Unregister {
         uuid: PlayerUuid,
         reply: SyncSender<()>,
@@ -141,6 +146,17 @@ impl GameReplicationControl {
         response
             .recv()
             .context("game replication service dropped registration response")?
+            .map_err(anyhow::Error::msg)
+    }
+
+    pub fn sync_inventory(&self, uuid: PlayerUuid, slots: Vec<Option<ItemStack>>) -> Result<()> {
+        let (reply, response) = sync_channel(1);
+        self.commands
+            .send(ReplicationCommand::SyncInventory { uuid, slots, reply })
+            .context("game replication service is disconnected")?;
+        response
+            .recv()
+            .context("game replication service dropped inventory sync response")?
             .map_err(anyhow::Error::msg)
     }
 
@@ -203,6 +219,9 @@ pub fn spawn_game_replication(
 ) -> Result<GameReplicationService> {
     if config.poll_interval.is_zero() {
         bail!("game replication poll interval must be greater than zero");
+    }
+    if config.pending_output_limit.get() < PLAYER_INVENTORY_SLOTS {
+        bail!("game replication pending output limit must be at least {PLAYER_INVENTORY_SLOTS}");
     }
     let subscription = runtime.subscribe(config.event_capacity)?;
     let (commands, receiver) = sync_channel(config.command_capacity.get());
@@ -289,6 +308,22 @@ fn process_commands(
                 };
                 let _ = reply.send(result);
             }
+            ReplicationCommand::SyncInventory { uuid, slots, reply } => {
+                let result = if slots.len() != PLAYER_INVENTORY_SLOTS {
+                    Err(format!(
+                        "player inventory has {} slots; expected {PLAYER_INVENTORY_SLOTS}",
+                        slots.len()
+                    ))
+                } else if let Some(connection) = connections.get_mut(&uuid) {
+                    for (slot, stack) in slots.into_iter().enumerate() {
+                        connection.queue(PlayOutput::SetPlayerInventory { slot, stack }, exit);
+                    }
+                    Ok(())
+                } else {
+                    Err(format!("player {uuid:?} is not registered for replication"))
+                };
+                let _ = reply.send(result);
+            }
             ReplicationCommand::Unregister { uuid, reply } => {
                 connections.remove(&uuid);
                 let _ = reply.send(());
@@ -351,6 +386,11 @@ fn dispatch_event(
             inserted,
             item,
         } => target_chat(connections, uuid, format!("+{inserted} {item}"), true, exit),
+        GameEvent::InventorySlotChanged { uuid, slot, stack } => {
+            if let Some(connection) = connections.get_mut(&uuid) {
+                connection.queue(PlayOutput::SetPlayerInventory { slot, stack }, exit);
+            }
+        }
         GameEvent::PlayerKilled { uuid } => {
             target_chat(connections, uuid, "You died".to_owned(), false, exit)
         }
@@ -505,6 +545,49 @@ mod tests {
             PlayOutput::SystemChat { message, overlay: false } if message == "[Server] hello"
         ));
         assert!(alex_writer.try_recv_output().is_err());
+        service.shutdown().unwrap();
+    }
+
+    #[test]
+    fn synchronizes_full_inventory_and_give_slot_changes() {
+        let game = SharedGameRuntime::vanilla_overworld();
+        let service = spawn_game_replication(&game, GameReplicationConfig::default()).unwrap();
+        let steve = PlayerUuid::new(30);
+        let (connector, mut workers) = worker_channel(NonZeroUsize::new(128).unwrap());
+        let (reader, writer) = register_play_connection(
+            &connector,
+            ConnectionId::new(30),
+            NonZeroUsize::new(128).unwrap(),
+        )
+        .unwrap();
+        let mut inputs = BoundedInputQueue::try_new(128).unwrap();
+        ingest(&mut workers, &mut inputs);
+        service.control().register(steve, reader).unwrap();
+        game.connect_player(steve, "Steve", spawn()).unwrap();
+        let slots = game
+            .with_state(|state| state.player(steve).unwrap().inventory.slots().to_vec())
+            .unwrap();
+        service.control().sync_inventory(steve, slots).unwrap();
+        for slot in 0..PLAYER_INVENTORY_SLOTS {
+            assert_eq!(
+                recv_output(&writer, &mut workers, &mut inputs),
+                PlayOutput::SetPlayerInventory { slot, stack: None }
+            );
+        }
+
+        game.execute_command(&CommandSource::console(), "/give Steve minecraft:stone 1")
+            .unwrap();
+        assert!(matches!(
+            recv_output(&writer, &mut workers, &mut inputs),
+            PlayOutput::SystemChat { .. }
+        ));
+        assert!(matches!(
+            recv_output(&writer, &mut workers, &mut inputs),
+            PlayOutput::SetPlayerInventory {
+                slot: 9,
+                stack: Some(stack),
+            } if stack.item() == "minecraft:stone" && stack.count() == 1
+        ));
         service.shutdown().unwrap();
     }
 

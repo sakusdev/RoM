@@ -65,6 +65,11 @@ pub enum GameEvent {
         inserted: u32,
         item: String,
     },
+    InventorySlotChanged {
+        uuid: PlayerUuid,
+        slot: usize,
+        stack: Option<ItemStack>,
+    },
     SelectedHotbarChanged {
         uuid: PlayerUuid,
         previous: u8,
@@ -289,17 +294,25 @@ impl GameState {
             .ok_or(GameStateError::UnknownPlayer { uuid })?;
         let item = stack.item().to_owned();
         let requested = stack.count();
-        let remainder = player.inventory.insert(stack);
+        let (remainder, changed_slots) = player.inventory.insert_with_changed_slots(stack);
         let inserted = requested - remainder.as_ref().map_or(0, ItemStack::count);
-        let events = if inserted == 0 {
-            Vec::new()
-        } else {
-            vec![GameEvent::InventoryChanged {
+        let mut events = Vec::with_capacity(changed_slots.len().saturating_add(1));
+        if inserted > 0 {
+            events.push(GameEvent::InventoryChanged {
                 uuid,
                 inserted,
                 item,
-            }]
-        };
+            });
+            events.extend(
+                changed_slots
+                    .into_iter()
+                    .map(|slot| GameEvent::InventorySlotChanged {
+                        uuid,
+                        slot,
+                        stack: player.inventory.slots()[slot].clone(),
+                    }),
+            );
+        }
         Ok((remainder, events))
     }
 
@@ -493,6 +506,14 @@ mod tests {
         assert!(matches!(
             events[0],
             GameEvent::InventoryChanged { inserted: 64, .. }
+        ));
+        assert!(matches!(
+            &events[1],
+            GameEvent::InventorySlotChanged {
+                slot: 9,
+                stack: Some(stack),
+                ..
+            } if stack.item() == "minecraft:stone" && stack.count() == 64
         ));
         state.set_game_mode(uuid, GameMode::Creative).unwrap();
         assert_eq!(state.player(uuid).unwrap().game_mode, GameMode::Creative);
