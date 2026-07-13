@@ -1,0 +1,39 @@
+name: Fix persistence configuration
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.head_ref == 'agent/finish-rom-core'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/finish-rom-core
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Use grouped world persistence configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('crates/ferrum-server/src/main.rs')
+          text = path.read_text().replace('world_service_config', 'persistence.world')
+          path.write_text(text)
+          PY
+          cargo fmt --all
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add crates/ferrum-server/src/main.rs
+          if ! git diff --cached --quiet; then
+            git commit -m 'Use grouped world persistence configuration'
+            git push origin HEAD:agent/finish-rom-core
+          fi
