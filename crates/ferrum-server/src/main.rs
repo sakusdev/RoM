@@ -2021,7 +2021,12 @@ fn handle_configuration_protocol<R: Read, W: Write>(
     send_registry_data(writer, context.state.registry_payloads(), profile)?;
 
     if let Some(packet_id) = profile.packets().id(PacketKind::UpdateTags) {
-        let body = encode_tags(&[])?;
+        let tags = if config.profile_name.as_deref() == Some(version_26_1_2::PROFILE_NAME) {
+            version_26_1_2::configuration_tags()
+        } else {
+            Vec::new()
+        };
+        let body = encode_tags(&tags)?;
         write_packet(
             writer,
             &build_packet(packet_id, |output| {
@@ -4007,7 +4012,12 @@ mod tests {
         let tags = read_packet(&mut cursor).unwrap();
         let mut tags_reader = PacketReader::new(&tags);
         assert_eq!(tags_reader.read_varint().unwrap(), 0x0d);
-        assert_eq!(tags_reader.read_varint().unwrap(), 0);
+        assert_eq!(
+            tags_reader.take_remaining(),
+            encode_tags(&version_26_1_2::configuration_tags())
+                .unwrap()
+                .as_slice()
+        );
 
         let finish = read_packet(&mut cursor).unwrap();
         assert_eq!(PacketReader::new(&finish).read_varint().unwrap(), 0x03);
