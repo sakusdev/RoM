@@ -1,0 +1,83 @@
+name: Inspect official configuration protocol
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    if: github.head_ref == 'agent/finish-rom-core'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/finish-rom-core
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Prepare verified official 26.1.2 JAR
+        shell: bash
+        run: |
+          set -euo pipefail
+          instance="$RUNNER_TEMP/rom-config-inspect"
+          cargo run --quiet --locked --release -p rom-bootstrap -- prepare \
+            --instance "$instance" \
+            --version 26.1.2 \
+            --accept-minecraft-eula \
+            --json > prepare.json
+          server_jar="$(jq -r '.official_server_jar' prepare.json)"
+          listed_path="$(unzip -p "$server_jar" META-INF/versions.list 2>/dev/null | tr -d '\r' | awk -F '\t' 'NF == 3 { print $3; exit }')"
+          if [[ -n "$listed_path" ]]; then
+            if [[ "$listed_path" == META-INF/versions/* ]]; then
+              inner_path="$listed_path"
+            else
+              inner_path="META-INF/versions/$listed_path"
+            fi
+            unzip -p "$server_jar" "$inner_path" > game-server.jar
+          else
+            cp "$server_jar" game-server.jar
+          fi
+          jar tf game-server.jar > class-list.txt
+      - name: Disassemble configuration packet codecs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p configuration-protocol
+          cp class-list.txt configuration-protocol/
+          targets=(
+            'net.minecraft.network.protocol.configuration.ClientboundRegistryDataPacket'
+            'net.minecraft.network.protocol.configuration.ClientboundUpdateEnabledFeaturesPacket'
+            'net.minecraft.network.protocol.common.ClientboundUpdateTagsPacket'
+            'net.minecraft.network.protocol.configuration.ClientboundFinishConfigurationPacket'
+            'net.minecraft.network.protocol.configuration.ServerboundFinishConfigurationPacket'
+            'net.minecraft.network.protocol.configuration.ClientboundSelectKnownPacks'
+            'net.minecraft.network.protocol.configuration.ServerboundSelectKnownPacks'
+            'net.minecraft.resources.RegistryDataLoader$NetworkedRegistryData'
+            'net.minecraft.resources.RegistrySynchronization'
+            'net.minecraft.network.RegistryFriendlyByteBuf'
+            'net.minecraft.network.FriendlyByteBuf'
+          )
+          : > configuration-protocol/class-status.tsv
+          for target in "${targets[@]}"; do
+            class_path="${target//./\/}.class"
+            output="configuration-protocol/${target//[.$]/_}.txt"
+            if grep -Fxq "$class_path" class-list.txt; then
+              printf '%s\tNAMED\n' "$target" >> configuration-protocol/class-status.tsv
+              javap -classpath game-server.jar -p -c -s -constants "$target" > "$output"
+            else
+              printf '%s\tMISSING\n' "$target" >> configuration-protocol/class-status.tsv
+            fi
+          done
+          grep -Ei 'RegistrySynchronization|NetworkedRegistryData|RegistryDataPacket|UpdateTagsPacket|EnabledFeatures' class-list.txt > configuration-protocol/related-classes.txt || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: official-26.1.2-configuration-protocol
+          path: configuration-protocol
+          if-no-files-found: error
+          retention-days: 7
