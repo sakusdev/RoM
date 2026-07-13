@@ -1,0 +1,64 @@
+name: Restore Play codec surface
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: write
+
+jobs:
+  restore:
+    if: github.head_ref == 'agent/finish-rom-core'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/finish-rom-core
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Restore master Play codecs and expose entity module only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout origin/master -- crates/ferrum-play/src/lib.rs
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('crates/ferrum-play/src/lib.rs')
+          text = path.read_text()
+          if 'mod entity;' not in text:
+              text = text.replace('mod chunk_stream;\n', 'mod chunk_stream;\nmod entity;\n', 1)
+          exports = '''pub use entity::{
+              EncodedEntityMovement, EntityEncodeError, EntityMovementKind, EntityProtocolRegistry,
+              PlayerInfoEntry, encode_add_entity, encode_empty_entity_data, encode_entity_movement,
+              encode_player_info_remove, encode_player_info_update, encode_remove_entities,
+              encode_rotate_head, encode_teleport_entity,
+          };
+          '''.replace('          ', '')
+          if 'pub use entity::{' not in text:
+              text = text.replace(
+                  'pub use chunk_stream::encode_forget_level_chunk;\n',
+                  'pub use chunk_stream::encode_forget_level_chunk;\n' + exports,
+                  1,
+              )
+          path.write_text(text)
+
+          entity = Path('crates/ferrum-play/src/entity.rs')
+          text = entity.read_text().replace(
+              'b"_- .".contains(&byte)',
+              "matches!(byte, b'_' | b'-' | b'.')"
+          )
+          entity.write_text(text)
+          PY
+          cargo fmt --all
+          cargo test -p ferrum-play --lib
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add crates/ferrum-play/src/lib.rs crates/ferrum-play/src/entity.rs
+          if ! git diff --cached --quiet; then
+            git commit -m 'Restore existing Play codecs and add entity module'
+            git push origin HEAD:agent/finish-rom-core
+          fi
