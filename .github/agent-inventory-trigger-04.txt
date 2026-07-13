@@ -1,1 +1,0 @@
-Trigger inventory implementation validation after inbound component safety fixes.
