@@ -118,7 +118,6 @@ enum ReplicationCommand {
     },
     SyncInventory {
         uuid: PlayerUuid,
-        slots: Vec<Option<ItemStack>>,
         reply: SyncSender<Result<(), String>>,
     },
     Unregister {
@@ -149,10 +148,10 @@ impl GameReplicationControl {
             .map_err(anyhow::Error::msg)
     }
 
-    pub fn sync_inventory(&self, uuid: PlayerUuid, slots: Vec<Option<ItemStack>>) -> Result<()> {
+    pub fn sync_inventory(&self, uuid: PlayerUuid) -> Result<()> {
         let (reply, response) = sync_channel(1);
         self.commands
-            .send(ReplicationCommand::SyncInventory { uuid, slots, reply })
+            .send(ReplicationCommand::SyncInventory { uuid, reply })
             .context("game replication service is disconnected")?;
         response
             .recv()
@@ -224,11 +223,12 @@ pub fn spawn_game_replication(
         bail!("game replication pending output limit must be at least {PLAYER_INVENTORY_SLOTS}");
     }
     let subscription = runtime.subscribe(config.event_capacity)?;
+    let runtime = runtime.clone();
     let (commands, receiver) = sync_channel(config.command_capacity.get());
     let control = GameReplicationControl { commands };
     let worker = thread::Builder::new()
         .name("rom-game-replication".to_owned())
-        .spawn(move || run_replication(subscription, receiver, config))
+        .spawn(move || run_replication(runtime, subscription, receiver, config))
         .context("cannot spawn game replication service")?;
     Ok(GameReplicationService {
         control,
@@ -237,6 +237,7 @@ pub fn spawn_game_replication(
 }
 
 fn run_replication(
+    runtime: SharedGameRuntime,
     subscription: GameEventSubscription,
     commands: Receiver<ReplicationCommand>,
     config: GameReplicationConfig,
@@ -245,6 +246,7 @@ fn run_replication(
     let mut exit = GameReplicationExit::default();
     loop {
         if process_commands(
+            &runtime,
             &commands,
             &mut connections,
             config.pending_output_limit.get(),
@@ -279,6 +281,7 @@ fn run_replication(
 }
 
 fn process_commands(
+    runtime: &SharedGameRuntime,
     commands: &Receiver<ReplicationCommand>,
     connections: &mut BTreeMap<PlayerUuid, ReplicationConnection>,
     pending_limit: usize,
@@ -308,17 +311,35 @@ fn process_commands(
                 };
                 let _ = reply.send(result);
             }
-            ReplicationCommand::SyncInventory { uuid, slots, reply } => {
-                let result = if slots.len() != PLAYER_INVENTORY_SLOTS {
-                    Err(format!(
-                        "player inventory has {} slots; expected {PLAYER_INVENTORY_SLOTS}",
-                        slots.len()
-                    ))
-                } else if let Some(connection) = connections.get_mut(&uuid) {
-                    for (slot, stack) in slots.into_iter().enumerate() {
-                        connection.queue(PlayOutput::SetPlayerInventory { slot, stack }, exit);
-                    }
-                    Ok(())
+            ReplicationCommand::SyncInventory { uuid, reply } => {
+                let result = if let Some(connection) = connections.get_mut(&uuid) {
+                    runtime
+                        .with_state(|state| {
+                            state
+                                .player(uuid)
+                                .map(|player| player.inventory.slots().to_vec())
+                        })
+                        .map_err(|error| error.to_string())
+                        .and_then(|slots| {
+                            slots.ok_or_else(|| {
+                                format!("player {uuid:?} is missing from authoritative state")
+                            })
+                        })
+                        .and_then(|slots| {
+                            if slots.len() != PLAYER_INVENTORY_SLOTS {
+                                return Err(format!(
+                                    "player inventory has {} slots; expected {PLAYER_INVENTORY_SLOTS}",
+                                    slots.len()
+                                ));
+                            }
+                            for (slot, stack) in slots.into_iter().enumerate() {
+                                connection.queue(
+                                    PlayOutput::SetPlayerInventory { slot, stack },
+                                    exit,
+                                );
+                            }
+                            Ok(())
+                        })
                 } else {
                     Err(format!("player {uuid:?} is not registered for replication"))
                 };
@@ -564,10 +585,7 @@ mod tests {
         ingest(&mut workers, &mut inputs);
         service.control().register(steve, reader).unwrap();
         game.connect_player(steve, "Steve", spawn()).unwrap();
-        let slots = game
-            .with_state(|state| state.player(steve).unwrap().inventory.slots().to_vec())
-            .unwrap();
-        service.control().sync_inventory(steve, slots).unwrap();
+        service.control().sync_inventory(steve).unwrap();
         for slot in 0..PLAYER_INVENTORY_SLOTS {
             assert_eq!(
                 recv_output(&writer, &mut workers, &mut inputs),

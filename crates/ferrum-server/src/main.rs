@@ -28,7 +28,10 @@ use ferrum_rompack::{RomPack, RomPackPacket, RomPackRegistry, RomPackWorld, read
 use ferrum_runtime::ConnectionId;
 use ferrum_server::{
     authoritative_runtime::{PlayInput, PlayOutput},
-    game_replication::{GameReplicationConfig, GameReplicationService, spawn_game_replication},
+    game_replication::{
+        GameReplicationConfig, GameReplicationControl, GameReplicationService,
+        spawn_game_replication,
+    },
     game_runtime::SharedGameRuntime,
     game_service::{
         GameService, GameServiceConfig, GameServiceControl, GameServiceExit, load_game_state,
@@ -339,35 +342,6 @@ impl ServerState {
             let _ = play_reader.try_disconnect();
             return Err(error.into());
         }
-        let inventory = match self.game_runtime.with_state(|state| {
-            state
-                .player(player_uuid)
-                .map(|player| player.inventory.slots().to_vec())
-        }) {
-            Ok(Some(inventory)) => inventory,
-            Ok(None) => {
-                let _ = self.game_replication.control().unregister(player_uuid);
-                let _ = self.game_runtime.disconnect_player(player_uuid);
-                let _ = play_reader.try_disconnect();
-                bail!("connected player is missing from authoritative game state");
-            }
-            Err(error) => {
-                let _ = self.game_replication.control().unregister(player_uuid);
-                let _ = self.game_runtime.disconnect_player(player_uuid);
-                let _ = play_reader.try_disconnect();
-                return Err(error.into());
-            }
-        };
-        if let Err(error) = self
-            .game_replication
-            .control()
-            .sync_inventory(player_uuid, inventory)
-        {
-            let _ = self.game_replication.control().unregister(player_uuid);
-            let _ = self.game_runtime.disconnect_player(player_uuid);
-            let _ = play_reader.try_disconnect();
-            return Err(error.context("cannot queue initial player inventory sync"));
-        }
         self.online_players.fetch_add(1, Ordering::Relaxed);
         Ok(OnlinePlayerGuard {
             state: self,
@@ -488,6 +462,12 @@ struct ServerContext<'a> {
 struct PlayWorldContext<'a> {
     shared_world: &'a play_runtime::SharedWorld,
     connection: ConnectionId,
+}
+
+#[derive(Debug)]
+struct InitialInventorySync {
+    control: GameReplicationControl,
+    uuid: GamePlayerUuid,
 }
 
 fn main() -> Result<()> {
@@ -2042,6 +2022,10 @@ fn handle_play_protocol<R: Read, W: Write>(
         None => None,
     };
     let play_reader = writer_worker.as_ref().map(|_| online_player.play_reader());
+    let initial_inventory_sync = play_reader.is_some().then(|| InitialInventorySync {
+        control: context.state.game_replication.control(),
+        uuid: online_player.player_uuid(),
+    });
     let gameplay =
         play_runtime::GameplaySync::new(&context.state.game_runtime, online_player.player_uuid());
     let result = run_static_play_session_with_bridge(
@@ -2056,6 +2040,7 @@ fn handle_play_protocol<R: Read, W: Write>(
         },
         play_reader,
         Some(gameplay),
+        initial_inventory_sync,
         play_round_limit,
     );
     let writer_result = shutdown_live_play_writer(writer_worker);
@@ -2227,6 +2212,7 @@ fn run_static_play_session<R: Read, W: Write>(
         world,
         None,
         None,
+        None,
         play_round_limit,
     )
 }
@@ -2244,6 +2230,7 @@ fn run_static_play_session_with_bridge<R: Read, W: Write>(
     world: PlayWorldContext<'_>,
     play_reader: Option<&PlayReaderEndpoint>,
     gameplay: Option<play_runtime::GameplaySync<'_>>,
+    initial_inventory_sync: Option<InitialInventorySync>,
     play_round_limit: Option<usize>,
 ) -> Result<()> {
     let _world_subscription = world.shared_world.subscribe(world.connection)?;
@@ -2309,6 +2296,11 @@ fn run_static_play_session_with_bridge<R: Read, W: Write>(
         &encode_player_position(&static_player_position(world_profile))?,
         play_reader,
     )?;
+    if let Some(sync) = initial_inventory_sync {
+        sync.control
+            .sync_inventory(sync.uuid)
+            .context("cannot queue initial player inventory after Play bootstrap")?;
+    }
     if play_reader.is_none() {
         writer.flush()?;
     }
