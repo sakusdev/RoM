@@ -33,6 +33,16 @@ jobs:
                   if !path.starts_with("META-INF/versions/") || !path.ends_with(".jar") {
                       bail!("invalid embedded game JAR path in versions.list: {path}");
                   }
+                  let sha256 = fields[0];
+                  let digest = if sha256.len() == 64 && sha256.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                      Some(sha256.to_ascii_lowercase())
+                  } else {
+                      None
+                  };
+                  candidates.push(GameJarCandidate {
+                      path: path.to_owned(),
+                      sha256: digest,
+                  });
           '''.replace('          ', '')
           new = '''        let listed_path = fields[2];
                   validate_zip_path(listed_path)?;
@@ -45,12 +55,26 @@ jobs:
                   if !path.ends_with(".jar") {
                       bail!("invalid embedded game JAR path in versions.list: {listed_path}");
                   }
+                  let sha256 = fields[0];
+                  let digest = if sha256.len() == 64 && sha256.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                      Some(sha256.to_ascii_lowercase())
+                  } else {
+                      None
+                  };
+                  candidates.push(GameJarCandidate {
+                      path,
+                      sha256: digest,
+                  });
           '''.replace('          ', '')
-          if new not in text:
-              if old not in text:
-                  raise SystemExit('versions.list parser anchor missing')
-              text = text.replace(old, new, 1)
-              text = text.replace('path: path.to_owned(),', 'path,', 1)
+          if 'let listed_path = fields[2];' not in text:
+              start = text.index('        let path = fields[2];')
+              end_marker = '        });\n'
+              end = text.index(end_marker, start) + len(end_marker)
+              current = text[start:end]
+              # Keep exact Rust indentation while replacing the complete record parser block.
+              new_block = new
+              text = text[:start] + new_block + text[end:]
+
           text = text.replace(
               'format!("{digest}\\tserver-26.1.2\\tMETA-INF/versions/26.1.2/server.jar\\n")',
               'format!("{digest}\\t26.1.2\\t26.1.2/server-26.1.2.jar\\n")'
@@ -69,23 +93,30 @@ jobs:
 
           workflow = Path('.github/workflows/inspect-entity-protocol.yml')
           text = workflow.read_text()
-          old = '''          inner_path="$(unzip -p "$server_jar" META-INF/versions.list 2>/dev/null | tr -d '\\r' | awk -F '\\t' 'NF == 3 { print $3; exit }')"
-                    if [[ -n "$inner_path" ]]; then
-                      unzip -p "$server_jar" "$inner_path" > game-server.jar
-          '''.replace('          ', '')
-          new = '''          listed_path="$(unzip -p "$server_jar" META-INF/versions.list 2>/dev/null | tr -d '\\r' | awk -F '\\t' 'NF == 3 { print $3; exit }')"
-                    if [[ -n "$listed_path" ]]; then
-                      if [[ "$listed_path" == META-INF/versions/* ]]; then
-                        inner_path="$listed_path"
-                      else
-                        inner_path="META-INF/versions/$listed_path"
-                      fi
-                      unzip -p "$server_jar" "$inner_path" > game-server.jar
-          '''.replace('          ', '')
-          if 'listed_path=' not in text:
-              if old not in text:
-                  raise SystemExit('inspection workflow path anchor missing')
-              text = text.replace(old, new, 1)
+          if 'listed_path="$(unzip -p' not in text:
+              old = '''          inner_path="$(unzip -p "$server_jar" META-INF/versions.list 2>/dev/null | tr -d '\\r' | awk -F '\\t' 'NF == 3 { print $3; exit }')"
+                        if [[ -n "$inner_path" ]]; then
+                          unzip -p "$server_jar" "$inner_path" > game-server.jar
+                        else
+                          cp "$server_jar" game-server.jar
+                        fi
+              '''.replace('              ', '')
+              new = '''          listed_path="$(unzip -p "$server_jar" META-INF/versions.list 2>/dev/null | tr -d '\\r' | awk -F '\\t' 'NF == 3 { print $3; exit }')"
+                        if [[ -n "$listed_path" ]]; then
+                          if [[ "$listed_path" == META-INF/versions/* ]]; then
+                            inner_path="$listed_path"
+                          else
+                            inner_path="META-INF/versions/$listed_path"
+                          fi
+                          unzip -p "$server_jar" "$inner_path" > game-server.jar
+                        else
+                          inner_path=''
+                          cp "$server_jar" game-server.jar
+                        fi
+              '''.replace('              ', '')
+              start = text.index('          inner_path="$(unzip -p')
+              end = text.index('          jar tf game-server.jar', start)
+              text = text[:start] + new + text[end:]
           workflow.write_text(text)
           PY
           cargo fmt --all
