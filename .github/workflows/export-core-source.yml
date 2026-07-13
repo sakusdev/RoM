@@ -1,0 +1,24 @@
+name: Export core source
+
+on:
+  pull_request:
+    branches: [master]
+
+jobs:
+  export:
+    if: github.head_ref == 'agent/finish-rom-core'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/finish-rom-core
+      - name: Archive source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar --exclude=.git --exclude=target -czf rom-core-source.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rom-core-source
+          path: rom-core-source.tar.gz
+          retention-days: 3
