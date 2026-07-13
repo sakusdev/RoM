@@ -115,7 +115,7 @@ impl WorldSnapshot {
                         actual: non_empty,
                     }
                 })?;
-                if section.fluid_count > non_empty_block_count {
+                if usize::from(section.fluid_count) > BLOCKS_PER_SECTION {
                     return Err(WorldPersistenceError::InvalidFluidCount {
                         position,
                         section_index,
