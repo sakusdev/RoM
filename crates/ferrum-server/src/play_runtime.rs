@@ -349,7 +349,15 @@ impl SharedWorld {
             .with_context(|| format!("shared world is missing chunk ({}, {})", pos.x, pos.z))
     }
 
-    fn apply_event(
+    pub(super) fn store_snapshot(&self) -> Result<ChunkStore> {
+        let inner = self
+            .inner
+            .lock()
+            .map_err(|_| anyhow::anyhow!("shared world lock poisoned"))?;
+        Ok(inner.runtime.state().clone())
+    }
+
+    pub(super) fn apply_event(
         &self,
         connection: ConnectionId,
         event: WorldEvent,
