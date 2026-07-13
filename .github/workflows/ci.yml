@@ -26,12 +26,12 @@ jobs:
 
           path = Path('crates/ferrum-server/src/game_replication.rs')
           text = path.read_text()
-          old = '''        assert!(matches!(
-              recv_output(&alex_writer, &mut workers, &mut inputs),
-              PlayOutput::SystemChat { message, overlay: false } if message == "[Server] hello"
-          ));
-          '''
-          new = '''        let alex_output = recv_output(&alex_writer, &mut workers, &mut inputs);
+          if 'let alex_output = recv_output(&alex_writer' not in text:
+              needle = 'recv_output(&alex_writer, &mut workers, &mut inputs),'
+              needle_at = text.index(needle)
+              start = text.rfind('        assert!(matches!(', 0, needle_at)
+              end = text.index('        ));', needle_at) + len('        ));')
+              replacement = '''        let alex_output = recv_output(&alex_writer, &mut workers, &mut inputs);
           let alex_output = match alex_output {
               PlayOutput::SystemChat {
                   message,
@@ -44,14 +44,10 @@ jobs:
           assert!(matches!(
               alex_output,
               PlayOutput::SystemChat { message, overlay: false } if message == "[Server] hello"
-          ));
-          '''
-          old = old.replace('\n          ', '\n').lstrip('\n')
-          new = new.replace('\n          ', '\n').lstrip('\n')
-          if old in text:
-              path.write_text(text.replace(old, new, 1))
-          elif 'let alex_output = recv_output(&alex_writer' not in text:
-              raise SystemExit('replication test patch target was not found')
+          ));'''
+              replacement = replacement.replace('\n          ', '\n')
+              text = text[:start] + replacement + text[end:]
+              path.write_text(text)
           PYCODE
           cargo fmt --all
           cargo test -p ferrum-server --lib game_replication::tests::broadcasts_chat_and_routes_teleports_only_to_the_target
