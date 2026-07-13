@@ -43,7 +43,7 @@ jobs:
             cp "$server_jar" game-server.jar
           fi
           jar tf game-server.jar > class-list.txt
-      - name: Disassemble configuration packet codecs
+      - name: Disassemble configuration packet codecs and task order
         shell: bash
         run: |
           set -euo pipefail
@@ -59,6 +59,10 @@ jobs:
             'net.minecraft.network.protocol.configuration.ServerboundSelectKnownPacks'
             'net.minecraft.resources.RegistryDataLoader$NetworkedRegistryData'
             'net.minecraft.resources.RegistrySynchronization'
+            'net.minecraft.resources.NetworkRegistryLoadTask'
+            'net.minecraft.server.network.ServerConfigurationPacketListenerImpl'
+            'net.minecraft.server.network.config.SynchronizeRegistriesTask'
+            'net.minecraft.server.network.ConfigurationTask'
             'net.minecraft.network.RegistryFriendlyByteBuf'
             'net.minecraft.network.FriendlyByteBuf'
           )
@@ -73,7 +77,7 @@ jobs:
               printf '%s\tMISSING\n' "$target" >> configuration-protocol/class-status.tsv
             fi
           done
-          grep -Ei 'RegistrySynchronization|NetworkedRegistryData|RegistryDataPacket|UpdateTagsPacket|EnabledFeatures' class-list.txt > configuration-protocol/related-classes.txt || true
+          grep -Ei 'RegistrySynchronization|NetworkedRegistryData|RegistryDataPacket|UpdateTagsPacket|EnabledFeatures|SynchronizeRegistriesTask|ServerConfigurationPacketListenerImpl' class-list.txt > configuration-protocol/related-classes.txt || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:
