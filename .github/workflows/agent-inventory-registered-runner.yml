@@ -24,35 +24,40 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - name: Remove generators and validate final source
+      - name: Finalize source and publish result
         shell: bash
         run: |
-          python - <<'PYCODE'
+          set +e
+          LOG="$RUNNER_TEMP/finalize-inventory.log"
+          {
+            python - <<'PYCODE'
+          import re
           from pathlib import Path
 
           state = Path('crates/ferrum-game/src/state.rs')
           text = state.read_text()
-          old = '''#[allow(clippy::filter_map_bool_then)]
-          fn slot_diff_events(
-              uuid: PlayerUuid,
-              before: &[Option<ItemStack>],
-              after: &[Option<ItemStack>],
-          ) -> Vec<GameEvent> {
-              before
-                  .iter()
-                  .zip(after)
-                  .enumerate()
-                  .filter_map(|(slot, (before, after))| {
-                      (before != after).then(|| GameEvent::InventorySlotChanged {
-                          uuid,
-                          slot,
-                          stack: after.clone(),
-                      })
-                  })
-                  .collect()
-          }
-          '''
-          new = '''fn slot_diff_events(
+          pattern = re.compile(
+              r"#\[allow\(clippy::filter_map_bool_then\)\]\n"
+              r"fn slot_diff_events\(\n"
+              r"    uuid: PlayerUuid,\n"
+              r"    before: &\[Option<ItemStack>\],\n"
+              r"    after: &\[Option<ItemStack>\],\n"
+              r"\) -> Vec<GameEvent> \{\n"
+              r"    before\n"
+              r"        \.iter\(\)\n"
+              r"        \.zip\(after\)\n"
+              r"        \.enumerate\(\)\n"
+              r"        \.filter_map\(\|\(slot, \(before, after\)\)\| \{\n"
+              r"            \(before != after\)\.then\(\|\| GameEvent::InventorySlotChanged \{\n"
+              r"                uuid,\n"
+              r"                slot,\n"
+              r"                stack: after\.clone\(\),\n"
+              r"            \}\)\n"
+              r"        \}\)\n"
+              r"        \.collect\(\)\n"
+              r"\}\n"
+          )
+          replacement = '''fn slot_diff_events(
               uuid: PlayerUuid,
               before: &[Option<ItemStack>],
               after: &[Option<ItemStack>],
@@ -70,25 +75,29 @@ jobs:
                   .collect()
           }
           '''
-          old = '\n'.join(line[10:] if line.startswith('          ') else line for line in old.splitlines()) + '\n'
-          new = '\n'.join(line[10:] if line.startswith('          ') else line for line in new.splitlines()) + '\n'
-          if old not in text:
-              raise SystemExit('slot_diff_events cleanup target not found')
-          state.write_text(text.replace(old, new, 1))
+          replacement = '\n'.join(
+              line[10:] if line.startswith('          ') else line
+              for line in replacement.splitlines()
+          ) + '\n'
+          text, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f'slot_diff_events cleanup matched {count} blocks')
+          state.write_text(text)
           PYCODE
 
-          rm -rf .github/agent-inventory-payload
-          rm -f .github/agent-inventory-trigger-04.txt
-          rm -f .github/workflows/agent-complete-inventory-debug.yml
-          rm -f .github/workflows/agent-complete-inventory.yml
-          rm -f .github/workflows/agent-inventory-registered-runner.yml
-          rm -f sitecustomize.py
-          rm -f crates/ferrum-game/build.rs
-          rm -f crates/ferrum-rompack/build.rs
-          rm -f crates/ferrum-server/build.rs
-          rm -f crates/rom-bootstrap/build.rs
+            rm -rf .github/agent-inventory-payload
+            rm -f .github/agent-inventory-trigger-04.txt
+            rm -f .github/workflows/agent-complete-inventory-debug.yml
+            rm -f .github/workflows/agent-complete-inventory.yml
+            rm -f .github/workflows/agent-inventory-registered-runner.yml
+            rm -f .github/finalize-inventory-error.log
+            rm -f sitecustomize.py
+            rm -f crates/ferrum-game/build.rs
+            rm -f crates/ferrum-rompack/build.rs
+            rm -f crates/ferrum-server/build.rs
+            rm -f crates/rom-bootstrap/build.rs
 
-          cat > .github/workflows/ci.yml <<'YAML'
+            cat > .github/workflows/ci.yml <<'YAML'
           name: CI
 
           on:
@@ -108,14 +117,31 @@ jobs:
                 - run: cargo test --workspace
           YAML
 
-          cargo fmt --all
-          cargo fmt --all --check
-          cargo clippy --workspace --all-targets -- -D warnings
-          cargo test --workspace
+            cargo fmt --all
+            cargo fmt --all --check
+            cargo clippy --workspace --all-targets -- -D warnings
+            cargo test --workspace
+          } >"$LOG" 2>&1
+          STATUS=$?
 
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          if [ "$STATUS" -ne 0 ]; then
+            {
+              echo 'Final inventory cleanup failed.'
+              echo
+              tail -n 4000 "$LOG"
+            } > .github/finalize-inventory-error.log
+            git add .github/finalize-inventory-error.log
+            git commit -m 'Record final inventory cleanup diagnostics'
+            git push origin HEAD:agent/complete-inventory-containers
+            cat "$LOG"
+            exit "$STATUS"
+          fi
+
           git add -A
           git diff --cached --stat
           git commit -m 'Finalize inventory and container implementation'
           git push origin HEAD:agent/complete-inventory-containers
+          cat "$LOG"
