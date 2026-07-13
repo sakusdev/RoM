@@ -1,0 +1,101 @@
+name: Observe automatic release
+
+on:
+  pull_request:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  observe:
+    if: github.head_ref == 'agent/release-observer'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Observe release workflow and assets
+        id: observe
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TARGET_SHA: 412d3bb46b17793276d1b8355bdfc70bed2f5d09
+        run: |
+          set -euo pipefail
+
+          release_run=''
+          for attempt in $(seq 1 90); do
+            runs="$(gh api "repos/${GH_REPO}/actions/runs?branch=master&per_page=50")"
+            release_run="$(
+              jq -c --arg sha "$TARGET_SHA" '
+                [.workflow_runs[]
+                  | select(.name == "Release RoM native binaries" and .head_sha == $sha)]
+                | sort_by(.created_at)
+                | last // empty
+              ' <<<"$runs"
+            )"
+
+            if [[ -n "$release_run" ]]; then
+              status="$(jq -r '.status' <<<"$release_run")"
+              printf 'Release workflow status: %s\n' "$status"
+              if [[ "$status" == 'completed' ]]; then
+                break
+              fi
+            else
+              echo 'Release workflow has not appeared yet.'
+            fi
+            sleep 10
+          done
+
+          [[ -n "$release_run" ]] || {
+            echo 'Release workflow was not found.' >&2
+            exit 1
+          }
+
+          status="$(jq -r '.status' <<<"$release_run")"
+          conclusion="$(jq -r '.conclusion // ""' <<<"$release_run")"
+          run_id="$(jq -r '.id' <<<"$release_run")"
+
+          jobs="$(gh api "repos/${GH_REPO}/actions/runs/${run_id}/jobs?per_page=100")"
+          releases="$(gh api "repos/${GH_REPO}/releases?per_page=20")"
+          release="$(
+            jq -c --arg sha "$TARGET_SHA" '
+              [.[] | select(.target_commitish == $sha)]
+              | sort_by(.created_at)
+              | last // empty
+            ' <<<"$releases"
+          )"
+
+          jq -n \
+            --argjson workflow "$release_run" \
+            --argjson jobs "$jobs" \
+            --argjson release "${release:-null}" \
+            '{workflow: $workflow, jobs: $jobs.jobs, release: $release}' \
+            > release-status.json
+
+          cat release-status.json
+          [[ "$status" == 'completed' ]] || exit 1
+          [[ "$conclusion" == 'success' ]] || exit 1
+          [[ -n "$release" ]] || exit 1
+
+          asset_count="$(jq '.assets | length' <<<"$release")"
+          test "$asset_count" -ge 41
+          for required in \
+            rom-bootstrap-windows-x86_64.exe \
+            rom-bootstrap-linux-x86_64 \
+            rom-bootstrap-linux-aarch64 \
+            rom-bootstrap-android-aarch64 \
+            rom-bootstrap-macos-x86_64 \
+            rom-bootstrap-macos-aarch64 \
+            install-termux.sh \
+            install-pixel-terminal.sh \
+            SHA256SUMS; do
+            jq -r '.assets[].name' <<<"$release" | grep -Fx "$required"
+          done
+
+      - name: Upload observation
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-observation
+          path: release-status.json
+          if-no-files-found: warn
