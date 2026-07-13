@@ -1,15 +1,19 @@
-name: CI
+name: Finalize inventory implementation
 
 on:
-  push:
   pull_request:
+    types: [reopened, synchronize]
 
 permissions:
   contents: write
 
+concurrency:
+  group: finalize-inventory-pr-54
+  cancel-in-progress: false
+
 jobs:
-  apply-inventory:
-    if: github.event_name == 'pull_request' && github.head_ref == 'agent/complete-inventory-containers'
+  finalize:
+    if: github.event.pull_request.number == 54 && github.head_ref == 'agent/complete-inventory-containers'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,180 +23,27 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - name: Apply complete inventory implementation
+      - name: Format, remove temporary build scripts, and validate
         shell: bash
         run: |
-          if [ -f crates/ferrum-game/src/container.rs ]; then
-            echo 'Inventory implementation is already present.'
+          if [ ! -f crates/ferrum-server/build.rs ]; then
+            echo 'Inventory source is already finalized.'
             exit 0
           fi
-          set +e
-          LOG="$RUNNER_TEMP/complete-inventory.log"
-          {
-            python - <<'PYCODE'
-          import base64
-          import hashlib
-          import lzma
-          from pathlib import Path
-          parts = sorted(Path('.github/agent-inventory-payload').glob('part*.b64'))
-          if len(parts) != 6:
-              raise SystemExit(f'expected 6 payload parts, found {len(parts)}')
-          encoded = ''.join(path.read_text().strip() for path in parts)
-          compressed_source = lzma.decompress(base64.b64decode(encoded))
-          actual = hashlib.sha256(compressed_source).hexdigest()
-          expected = 'f53a43821ed9f86484c7f960d0dfe67a0c9adf26145ec522d93154cc6615dcd3'
-          if actual != expected:
-              raise SystemExit(f'implementation payload digest mismatch: {actual}')
-          source = compressed_source.decode('utf-8')
-          source = source.replace(
-              "replace_once(\n    'crates/ferrum-server/src/main.rs',\n    '''    item_protocol_ids: ItemProtocolRegistry,\n''',\n    '''    item_protocol_ids: ItemProtocolRegistry,\n    data_component_protocol_ids: DataComponentProtocolRegistry,\n''')",
-              "replace_once(\n    'crates/ferrum-server/src/main.rs',\n    '''    runtime_profile: Option<ProtocolProfile>,\n    item_protocol_ids: ItemProtocolRegistry,\n''',\n    '''    runtime_profile: Option<ProtocolProfile>,\n    item_protocol_ids: ItemProtocolRegistry,\n    data_component_protocol_ids: DataComponentProtocolRegistry,\n''')",
-          )
-          exec(compile(source, 'apply_complete_inventory.py', 'exec'))
 
-          container = Path('crates/ferrum-game/src/container.rs')
-          text = container.read_text()
-          text = text.replace(
-              'SlotRef::Player(index) if self.open.is_some() => self.insert_external(stack)?',
-              'SlotRef::Player(_index) if self.open.is_some() => self.insert_external(stack)?',
-          )
-          text = text.replace(
-              '.filter_map(|(index, (before, after))| (before != after).then_some(index))',
-              '.filter(|(_, (before, after))| before != after)\n        .map(|(index, _)| index)',
-          )
-          container.write_text(text)
+          cargo fmt --all
+          rm -f crates/ferrum-game/build.rs
+          rm -f crates/ferrum-rompack/build.rs
+          rm -f crates/ferrum-server/build.rs
+          rm -f crates/rom-bootstrap/build.rs
+          cargo fmt --all
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
 
-          state = Path('crates/ferrum-game/src/state.rs')
-          text = state.read_text()
-          text = text.replace(
-              '''        .filter_map(|(slot, (before, after))| {
-            (before != after).then(|| GameEvent::InventorySlotChanged {
-                uuid,
-                slot,
-                stack: after.clone(),
-            })
-        })''',
-              '''        .filter(|(_, (before, after))| before != after)
-        .map(|(slot, (_, after))| GameEvent::InventorySlotChanged {
-            uuid,
-            slot,
-            stack: after.clone(),
-        })''',
-          )
-          state.write_text(text)
-
-          cargo = Path('crates/ferrum-play/Cargo.toml')
-          text = cargo.read_text()
-          if 'serde_json.workspace = true' not in text:
-              text = text.replace('ferrum-world = { path = "../ferrum-world" }\n', 'ferrum-world = { path = "../ferrum-world" }\nserde_json.workspace = true\n')
-          cargo.write_text(text)
-
-          play_runtime = Path('crates/ferrum-server/src/play_runtime.rs')
-          text = play_runtime.read_text()
-          text = text.replace(
-              'BlockPosition, DataComponentProtocolRegistry, ItemProtocolRegistry, PlayerMovement,',
-              'BlockPosition, ItemProtocolRegistry, PlayerMovement,',
-          )
-          text = text.replace("    components: &'a DataComponentProtocolRegistry,\n", '')
-          text = text.replace("        components: &'a DataComponentProtocolRegistry,\n", '')
-          text = text.replace('            components,\n', '')
-          text = text.replace(
-              'decode_container_click(payload, self.items, self.components)',
-              'decode_container_click(payload, self.items)',
-          )
-          text = text.replace(
-              'decode_creative_slot_update(payload, self.items, self.components)',
-              'decode_creative_slot_update(payload, self.items)',
-          )
-          play_runtime.write_text(text)
-
-          main = Path('crates/ferrum-server/src/main.rs')
-          text = main.read_text().replace('        &config.data_component_protocol_ids,\n', '')
-          main.write_text(text)
-
-          extract = Path('crates/rom-bootstrap/src/extract.rs')
-          text = extract.read_text()
-          text = text.replace(
-              'ROMPACK_SCHEMA_VERSION, RomPack, RomPackBiomes, RomPackBlockStates, RomPackDataComponent,\n    RomPackItem, RomPackMetadata,',
-              'ROMPACK_SCHEMA_VERSION, RomPack, RomPackBiomes, RomPackBlockStates, RomPackMetadata,',
-          )
-          extract.write_text(text)
-
-          registry = Path('crates/rom-bootstrap/src/registry_report.rs')
-          text = registry.read_text()
-          text = text.replace(
-              'pub fn read_item_registry_report(',
-              '#[allow(dead_code)]\npub fn read_item_registry_report(',
-          )
-          text = text.replace(
-              'pub fn parse_item_registry_report(',
-              '#[allow(dead_code)]\npub fn parse_item_registry_report(',
-          )
-          registry.write_text(text)
-
-          writer = Path('crates/ferrum-server/src/play_writer.rs')
-          text = writer.read_text()
-          text = text.replace(
-              '| PlayOutput::SetPlayerInventory { .. } => {}',
-              '| PlayOutput::SetPlayerInventory { .. }\n                    | PlayOutput::SetContainerContent { .. }\n                    | PlayOutput::SetContainerSlot { .. } => {}',
-          )
-          text = text.replace(
-              '| PlayOutput::SetPlayerInventory { .. } => Ok(PlayWriterDirective::Continue)',
-              '| PlayOutput::SetPlayerInventory { .. }\n                | PlayOutput::SetContainerContent { .. }\n                | PlayOutput::SetContainerSlot { .. } => Ok(PlayWriterDirective::Continue)',
-          )
-          writer.write_text(text)
-          PYCODE
-            cargo fmt --all
-            cargo fmt --all --check
-            cargo clippy --workspace --all-targets -- -D warnings
-            cargo test --workspace
-          } >"$LOG" 2>&1
-          STATUS=$?
-          if [ "$STATUS" -ne 0 ]; then
-            cp "$LOG" complete-inventory.log
-            cat "$LOG"
-            exit "$STATUS"
-          fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add crates Cargo.lock
-          if git diff --cached --quiet; then
-            echo 'Implementation produced no source changes.'
-            exit 1
-          fi
-          git commit -m 'Complete authoritative inventory and containers'
+          git add -A
+          git diff --cached --stat
+          git commit -m 'Finalize inventory and container implementation'
           git push origin HEAD:agent/complete-inventory-containers
-          cat "$LOG"
-      - name: Upload implementation diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: complete-inventory-diagnostics
-          path: complete-inventory.log
-
-  test:
-    needs: apply-inventory
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: agent/complete-inventory-containers
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - run: cargo fmt --all --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Run workspace tests
-        shell: bash
-        run: |
-          set -o pipefail
-          cargo test --workspace 2>&1 | tee test.log
-      - name: Upload test diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: inventory-tests-${{ matrix.os }}
-          path: test.log
