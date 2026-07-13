@@ -16,9 +16,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tar --exclude=.git --exclude=target -czf rom-core-source.tar.gz .
+          tar --exclude=.git --exclude=target -C "$GITHUB_WORKSPACE" -czf "$RUNNER_TEMP/rom-core-source.tar.gz" .
       - uses: actions/upload-artifact@v4
         with:
           name: rom-core-source
-          path: rom-core-source.tar.gz
+          path: ${{ runner.temp }}/rom-core-source.tar.gz
           retention-days: 3
