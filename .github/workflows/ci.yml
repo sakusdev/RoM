@@ -46,8 +46,8 @@ jobs:
               PlayOutput::SystemChat { message, overlay: false } if message == "[Server] hello"
           ));
           '''
-          old = '\n'.join(line[10:] if line.startswith('          ') else line for line in old.splitlines()) + '\n'
-          new = '\n'.join(line[10:] if line.startswith('          ') else line for line in new.splitlines()) + '\n'
+          old = old.replace('\n          ', '\n').lstrip('\n')
+          new = new.replace('\n          ', '\n').lstrip('\n')
           if old in text:
               path.write_text(text.replace(old, new, 1))
           elif 'let alex_output = recv_output(&alex_writer' not in text:
