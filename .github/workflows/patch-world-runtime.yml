@@ -1,0 +1,51 @@
+name: Patch shared world persistence
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.head_ref == 'agent/finish-rom-core'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/finish-rom-core
+          fetch-depth: 0
+      - name: Expose deterministic world snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('crates/ferrum-server/src/play_runtime.rs')
+          text = path.read_text()
+          if 'pub(super) fn store_snapshot' not in text:
+              marker = '    fn apply_event(\n'
+              at = text.index(marker)
+              addition = '''    pub(super) fn store_snapshot(&self) -> Result<ChunkStore> {
+                  let inner = self
+                      .inner
+                      .lock()
+                      .map_err(|_| anyhow::anyhow!("shared world lock poisoned"))?;
+                  Ok(inner.runtime.state().clone())
+              }
+
+          '''.replace('          ', '')
+              text = text[:at] + addition + text[at:]
+          text = text.replace('    fn apply_event(\n', '    pub(super) fn apply_event(\n', 1)
+          path.write_text(text)
+          PY
+          cargo fmt --all
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add crates/ferrum-server/src/play_runtime.rs
+          if ! git diff --cached --quiet; then
+            git commit -m 'Expose shared world snapshots to persistence service'
+            git push origin HEAD:agent/finish-rom-core
+          fi
