@@ -7,7 +7,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
-use ferrum_game::{GameEvent, ItemStack, PLAYER_INVENTORY_SLOTS, PlayerUuid};
+use ferrum_game::{GameEvent, PLAYER_INVENTORY_SLOTS, PlayerUuid};
 
 use crate::{
     authoritative_runtime::PlayOutput,
