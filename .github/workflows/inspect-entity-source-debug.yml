@@ -1,0 +1,52 @@
+name: Diagnose official entity source
+
+on:
+  pull_request:
+    branches: [master]
+
+jobs:
+  diagnose:
+    if: github.head_ref == 'agent/finish-rom-core'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/finish-rom-core
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Diagnose official artifact metadata
+        shell: bash
+        run: |
+          set -u
+          status=0
+          instance="$RUNNER_TEMP/rom-entity-inspect"
+          echo '== prepare =='
+          cargo run --locked --release -p rom-bootstrap -- prepare \
+            --instance "$instance" \
+            --version 26.1.2 \
+            --accept-minecraft-eula \
+            --json > prepare.json 2>prepare.stderr || status=$?
+          cat prepare.stderr
+          cat prepare.json || true
+          server_jar="$(jq -r '.official_server_jar // empty' prepare.json 2>/dev/null || true)"
+          echo "server_jar=$server_jar exists=$(test -f "$server_jar" && echo yes || echo no)"
+
+          echo '== manifest =='
+          curl --fail --location --silent --show-error \
+            https://piston-meta.mojang.com/mc/game/version_manifest_v2.json \
+            -o version-manifest.json || status=$?
+          version_url="$(jq -r '.versions[] | select(.id == "26.1.2") | .url' version-manifest.json 2>/dev/null | head -n1)"
+          echo "version_url=$version_url"
+          if [[ -n "$version_url" ]]; then
+            curl --fail --location --silent --show-error "$version_url" -o version.json || status=$?
+            jq '{id, javaVersion, downloads: (.downloads | keys)}' version.json || true
+            mappings_url="$(jq -r '.downloads.server_mappings.url // empty' version.json)"
+            echo "mappings_url=$mappings_url"
+          fi
+
+          if [[ -f "$server_jar" ]]; then
+            echo '== outer jar =='
+            jar tf "$server_jar" | head -n 30 || true
+            echo '== versions.list =='
+            unzip -p "$server_jar" META-INF/versions.list | sed -n l || true
+          fi
+          exit "$status"
