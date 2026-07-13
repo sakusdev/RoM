@@ -1,65 +1,30 @@
-name: Finalize inventory implementation
+name: CI
 
 on:
+  push:
   pull_request:
-    types: [reopened, synchronize]
-
-permissions:
-  contents: write
-
-concurrency:
-  group: finalize-inventory-pr-54
-  cancel-in-progress: false
 
 jobs:
-  finalize:
-    if: github.event.pull_request.number == 54 && github.head_ref == 'agent/complete-inventory-containers'
-    runs-on: ubuntu-latest
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: agent/complete-inventory-containers
-          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - name: Format, remove temporary build scripts, and validate
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Run workspace tests
         shell: bash
         run: |
-          if [ ! -f crates/ferrum-server/build.rs ]; then
-            echo 'Inventory source is already finalized.'
-            exit 0
-          fi
-
-          set +e
-          {
-            cargo fmt --all
-            rm -f crates/ferrum-game/build.rs
-            rm -f crates/ferrum-rompack/build.rs
-            rm -f crates/ferrum-server/build.rs
-            rm -f crates/rom-bootstrap/build.rs
-            cargo fmt --all
-            cargo fmt --all --check
-            cargo clippy --workspace --all-targets -- -D warnings
-            cargo test --workspace
-          } > finalize-inventory.log 2>&1
-          STATUS=$?
-
-          if [ "$STATUS" -ne 0 ]; then
-            cat finalize-inventory.log
-            exit "$STATUS"
-          fi
-
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
-          git diff --cached --stat
-          git commit -m 'Finalize inventory and container implementation'
-          git push origin HEAD:agent/complete-inventory-containers
-          cat finalize-inventory.log
-      - name: Upload finalization diagnostics
+          set -o pipefail
+          cargo test --workspace 2>&1 | tee test.log
+      - name: Upload test diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: finalize-inventory-diagnostics
-          path: finalize-inventory.log
+          name: test-diagnostics-${{ matrix.os }}
+          path: test.log
