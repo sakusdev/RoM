@@ -31,14 +31,18 @@ jobs:
           {
             python - <<'PYCODE'
           import base64
+          import hashlib
           import lzma
-          import re
           from pathlib import Path
-          workflow = Path('.github/workflows/agent-complete-inventory.yml').read_text()
-          match = re.search(r"payload = '([^']+)'", workflow)
-          if match is None:
-              raise SystemExit('compressed implementation payload was not found')
-          source = lzma.decompress(base64.b64decode(match.group(1))).decode('utf-8')
+          parts = sorted(Path('.github/agent-inventory-payload').glob('part*.b64'))
+          if len(parts) != 6:
+              raise SystemExit(f'expected 6 payload parts, found {len(parts)}')
+          encoded = ''.join(path.read_text().strip() for path in parts)
+          source = lzma.decompress(base64.b64decode(encoded))
+          actual = hashlib.sha256(source).hexdigest()
+          expected = 'f53a43821ed9f86484c7f960d0dfe67a0c9adf26145ec522d93154cc6615dcd3'
+          if actual != expected:
+              raise SystemExit(f'implementation payload digest mismatch: {actual}')
           exec(compile(source, 'apply_complete_inventory.py', 'exec'))
           PYCODE
             cargo fmt --all
@@ -54,7 +58,6 @@ jobs:
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          rm -f .github/agent-complete-inventory-error.log
           git add crates Cargo.lock
           if git diff --cached --quiet; then
             echo 'Implementation produced no source changes.'
