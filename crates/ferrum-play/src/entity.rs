@@ -198,10 +198,7 @@ pub fn encode_remove_entities(entity_ids: &[EntityId]) -> Result<Vec<u8>, Entity
     Ok(output)
 }
 
-pub fn encode_rotate_head(
-    entity_id: EntityId,
-    yaw: f32,
-) -> Result<Vec<u8>, EntityEncodeError> {
+pub fn encode_rotate_head(entity_id: EntityId, yaw: f32) -> Result<Vec<u8>, EntityEncodeError> {
     validate_rotation(yaw)?;
     let mut output = Vec::new();
     write_entity_id(&mut output, entity_id)?;
@@ -347,7 +344,11 @@ fn validate_username(name: &str) -> Result<(), EntityEncodeError> {
 }
 
 fn validate_transform(transform: Transform) -> Result<(), EntityEncodeError> {
-    if transform.position.into_iter().any(|value| !value.is_finite()) {
+    if transform
+        .position
+        .into_iter()
+        .any(|value| !value.is_finite())
+    {
         return Err(EntityEncodeError::NonFiniteCoordinate);
     }
     validate_rotation(transform.yaw)?;
@@ -376,9 +377,10 @@ fn pack_degrees(degrees: f32) -> u8 {
 }
 
 fn write_entity_id(output: &mut Vec<u8>, entity_id: EntityId) -> Result<(), EntityEncodeError> {
-    let value = i32::try_from(entity_id.get()).map_err(|_| EntityEncodeError::EntityIdOutOfRange {
-        entity_id: entity_id.get(),
-    })?;
+    let value =
+        i32::try_from(entity_id.get()).map_err(|_| EntityEncodeError::EntityIdOutOfRange {
+            entity_id: entity_id.get(),
+        })?;
     write_varint(output, value);
     Ok(())
 }
@@ -413,9 +415,9 @@ fn is_resource_location(value: &str) -> bool {
     };
     !namespace.is_empty()
         && !path.is_empty()
-        && namespace
-            .bytes()
-            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"_- .".contains(&byte))
+        && namespace.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-' | b'.')
+        })
         && path.bytes().all(|byte| {
             byte.is_ascii_lowercase()
                 || byte.is_ascii_digit()
@@ -464,8 +466,8 @@ mod tests {
 
     fn uuid() -> PlayerUuid {
         PlayerUuid::from_bytes([
-            0x56, 0x27, 0xdd, 0x98, 0xe6, 0xbe, 0x3c, 0x21, 0xb8, 0xa8, 0xe9, 0x23, 0x44,
-            0x18, 0x36, 0x41,
+            0x56, 0x27, 0xdd, 0x98, 0xe6, 0xbe, 0x3c, 0x21, 0xb8, 0xa8, 0xe9, 0x23, 0x44, 0x18,
+            0x36, 0x41,
         ])
     }
 
@@ -475,12 +477,9 @@ mod tests {
 
     #[test]
     fn player_info_uses_fixed_eight_action_bitset() {
-        let payload = encode_player_info_update(&[PlayerInfoEntry::new(
-            uuid(),
-            "Steve",
-            GameMode::Survival,
-        )])
-        .unwrap();
+        let payload =
+            encode_player_info_update(&[PlayerInfoEntry::new(uuid(), "Steve", GameMode::Survival)])
+                .unwrap();
         assert_eq!(payload[0], 0xff);
         assert_eq!(payload[1], 1);
         assert_eq!(&payload[2..18], uuid().as_bytes());
@@ -490,8 +489,7 @@ mod tests {
 
     #[test]
     fn add_entity_uses_generated_entity_type_id() {
-        let registry =
-            EntityProtocolRegistry::new([("minecraft:player", 155)]).unwrap();
+        let registry = EntityProtocolRegistry::new([("minecraft:player", 155)]).unwrap();
         let transform = Transform::new([1.0, 65.0, -2.0], 90.0, 45.0, true).unwrap();
         let payload = encode_add_entity(
             entity_id(),
@@ -536,7 +534,10 @@ mod tests {
 
     #[test]
     fn empty_metadata_is_terminated_with_ff() {
-        assert_eq!(encode_empty_entity_data(entity_id()).unwrap(), vec![7, 0xff]);
+        assert_eq!(
+            encode_empty_entity_data(entity_id()).unwrap(),
+            vec![7, 0xff]
+        );
     }
 
     #[test]
