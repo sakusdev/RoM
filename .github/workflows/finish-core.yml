@@ -1,0 +1,87 @@
+name: Finish RoM core
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    if: github.head_ref == 'agent/finish-rom-core'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/finish-rom-core
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Apply minimal world persistence integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          lib = Path('crates/ferrum-world/src/lib.rs')
+          text = lib.read_text()
+          old = 'pub mod anvil;\nmod chunk_view;\n\npub use chunk_view::{ChunkView, ChunkViewDelta, ChunkViewError};\n'
+          new = '''pub mod anvil;
+          mod chunk_view;
+          pub mod persistence;
+
+          pub use chunk_view::{ChunkView, ChunkViewDelta, ChunkViewError};
+          pub use persistence::{
+              ChunkSectionSnapshot, ChunkSnapshot, WORLD_SNAPSHOT_SCHEMA_VERSION,
+              WorldPersistenceError, WorldSnapshot,
+          };
+          '''.replace('          ', '')
+          if 'pub mod persistence;' not in text:
+              if old not in text:
+                  raise SystemExit('ferrum-world module anchor not found')
+              text = text.replace(old, new, 1)
+          lib.write_text(text)
+
+          cargo = Path('crates/ferrum-world/Cargo.toml')
+          text = cargo.read_text()
+          anchor = 'flate2.workspace = true\nthiserror.workspace = true\n'
+          replacement = 'flate2.workspace = true\nserde.workspace = true\nserde_json.workspace = true\nthiserror.workspace = true\n'
+          if 'serde_json.workspace = true' not in text:
+              if anchor not in text:
+                  raise SystemExit('ferrum-world dependency anchor not found')
+              text = text.replace(anchor, replacement, 1)
+          cargo.write_text(text)
+
+          persistence = Path('crates/ferrum-world/src/persistence.rs')
+          text = persistence.read_text()
+          text = text.replace(
+              'if section.fluid_count > non_empty_block_count {',
+              'if usize::from(section.fluid_count) > BLOCKS_PER_SECTION {'
+          )
+          persistence.write_text(text)
+
+          docs = Path('docs/BOOTSTRAP.md')
+          text = docs.read_text().replace('schema-v4 `.rompack`', 'schema-v7 `.rompack`')
+          text = text.replace(
+              'Schema-v1, schema-v2, and schema-v3 packs are intentionally rejected after the packet-table, world-metadata, and Play-bootstrap migrations and must be regenerated.',
+              'Packs from earlier schemas are intentionally rejected after packet-catalog, world-metadata, item/component-palette, and inventory migrations and must be regenerated.'
+          )
+          docs.write_text(text)
+          PY
+          cargo fmt --all
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+      - name: Commit validated source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add README.md docs/BOOTSTRAP.md crates/ferrum-world/Cargo.toml crates/ferrum-world/src/lib.rs crates/ferrum-world/src/persistence.rs
+          if ! git diff --cached --quiet; then
+            git commit -m 'Add validated world snapshot persistence'
+            git push origin HEAD:agent/finish-rom-core
+          fi
