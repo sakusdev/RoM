@@ -30,14 +30,14 @@ pkg install -y curl coreutils ca-certificates >/dev/null
 
 if [[ "$RELEASE_TAG" == '@TAG@' ]]; then
   log 'Resolving the newest published RoM release'
-  RELEASE_TAG="$(
+  release_json="$(
     curl --fail --location --silent --show-error \
       -H 'Accept: application/vnd.github+json' \
-      "https://api.github.com/repos/${REPOSITORY}/releases?per_page=20" |
-      grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"[^"]+"' |
-      head -n 1 |
-      cut -d '"' -f 4
+      "https://api.github.com/repos/${REPOSITORY}/releases?per_page=20"
   )"
+  tag_lines="$(printf '%s' "$release_json" | grep -oE '"tag_name"[[:space:]]*:[[:space:]]*"[^"]+"')"
+  first_tag_line="${tag_lines%%$'\n'*}"
+  RELEASE_TAG="$(cut -d '"' -f 4 <<<"$first_tag_line")"
 fi
 
 [[ -n "$RELEASE_TAG" ]] || fail 'Could not determine a release tag.'
