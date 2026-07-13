@@ -620,8 +620,18 @@ mod tests {
             PlayOutput::PlayerTeleport { teleport_id: 2, transform }
                 if transform.position == [4.0, 70.0, 8.0]
         ));
+        let alex_output = recv_output(&alex_writer, &mut workers, &mut inputs);
+        let alex_output = match alex_output {
+            PlayOutput::SystemChat {
+                message,
+                overlay: false,
+            } if message == "Steve joined the game" => {
+                recv_output(&alex_writer, &mut workers, &mut inputs)
+            }
+            output => output,
+        };
         assert!(matches!(
-            recv_output(&alex_writer, &mut workers, &mut inputs),
+            alex_output,
             PlayOutput::SystemChat { message, overlay: false } if message == "[Server] hello"
         ));
         assert!(alex_writer.try_recv_output().is_err());
