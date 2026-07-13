@@ -1,0 +1,99 @@
+name: Fix relative bundler paths
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.head_ref == 'agent/finish-rom-core'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/finish-rom-core
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Normalize relative versions.list paths
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('crates/rom-bootstrap/src/extract.rs')
+          text = path.read_text()
+          old = '''        let path = fields[2];
+                  validate_zip_path(path)?;
+                  if !path.starts_with("META-INF/versions/") || !path.ends_with(".jar") {
+                      bail!("invalid embedded game JAR path in versions.list: {path}");
+                  }
+          '''.replace('          ', '')
+          new = '''        let listed_path = fields[2];
+                  validate_zip_path(listed_path)?;
+                  let path = if listed_path.starts_with("META-INF/versions/") {
+                      listed_path.to_owned()
+                  } else {
+                      format!("META-INF/versions/{listed_path}")
+                  };
+                  validate_zip_path(&path)?;
+                  if !path.ends_with(".jar") {
+                      bail!("invalid embedded game JAR path in versions.list: {listed_path}");
+                  }
+          '''.replace('          ', '')
+          if new not in text:
+              if old not in text:
+                  raise SystemExit('versions.list parser anchor missing')
+              text = text.replace(old, new, 1)
+              text = text.replace('path: path.to_owned(),', 'path,', 1)
+          text = text.replace(
+              'format!("{digest}\\tserver-26.1.2\\tMETA-INF/versions/26.1.2/server.jar\\n")',
+              'format!("{digest}\\t26.1.2\\t26.1.2/server-26.1.2.jar\\n")'
+          )
+          text = text.replace(
+              '.start_file("META-INF/versions/26.1.2/server.jar", options)',
+              '.start_file("META-INF/versions/26.1.2/server-26.1.2.jar", options)',
+              1,
+          )
+          text = text.replace(
+              'assert_eq!(resolved.path, "META-INF/versions/26.1.2/server.jar");',
+              'assert_eq!(\n            resolved.path,\n            "META-INF/versions/26.1.2/server-26.1.2.jar"\n        );',
+              1,
+          )
+          path.write_text(text)
+
+          workflow = Path('.github/workflows/inspect-entity-protocol.yml')
+          text = workflow.read_text()
+          old = '''          inner_path="$(unzip -p "$server_jar" META-INF/versions.list 2>/dev/null | tr -d '\\r' | awk -F '\\t' 'NF == 3 { print $3; exit }')"
+                    if [[ -n "$inner_path" ]]; then
+                      unzip -p "$server_jar" "$inner_path" > game-server.jar
+          '''.replace('          ', '')
+          new = '''          listed_path="$(unzip -p "$server_jar" META-INF/versions.list 2>/dev/null | tr -d '\\r' | awk -F '\\t' 'NF == 3 { print $3; exit }')"
+                    if [[ -n "$listed_path" ]]; then
+                      if [[ "$listed_path" == META-INF/versions/* ]]; then
+                        inner_path="$listed_path"
+                      else
+                        inner_path="META-INF/versions/$listed_path"
+                      fi
+                      unzip -p "$server_jar" "$inner_path" > game-server.jar
+          '''.replace('          ', '')
+          if 'listed_path=' not in text:
+              if old not in text:
+                  raise SystemExit('inspection workflow path anchor missing')
+              text = text.replace(old, new, 1)
+          workflow.write_text(text)
+          PY
+          cargo fmt --all
+          cargo test -p rom-bootstrap extract::tests::resolves_and_verifies_the_embedded_game_jar
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add crates/rom-bootstrap/src/extract.rs .github/workflows/inspect-entity-protocol.yml
+          if ! git diff --cached --quiet; then
+            git commit -m 'Support relative embedded server JAR paths'
+            git push origin HEAD:agent/finish-rom-core
+          fi
