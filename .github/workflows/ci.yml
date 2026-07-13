@@ -47,20 +47,13 @@ jobs:
             cargo test --workspace
           } >"$LOG" 2>&1
           STATUS=$?
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           if [ "$STATUS" -ne 0 ]; then
-            {
-              echo 'Complete inventory implementation failed.'
-              echo
-              tail -n 4000 "$LOG"
-            } > .github/agent-complete-inventory-error.log
-            git add .github/agent-complete-inventory-error.log
-            git commit -m 'Record inventory implementation diagnostics'
-            git push origin HEAD:agent/complete-inventory-containers
+            cp "$LOG" complete-inventory.log
             cat "$LOG"
             exit "$STATUS"
           fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           rm -f .github/agent-complete-inventory-error.log
           git add crates Cargo.lock
           if git diff --cached --quiet; then
@@ -70,6 +63,12 @@ jobs:
           git commit -m 'Complete authoritative inventory and containers'
           git push origin HEAD:agent/complete-inventory-containers
           cat "$LOG"
+      - name: Upload implementation diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: complete-inventory-diagnostics
+          path: complete-inventory.log
 
   test:
     needs: apply-inventory
