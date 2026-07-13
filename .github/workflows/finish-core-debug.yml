@@ -1,0 +1,46 @@
+name: Diagnose core integration
+
+on:
+  pull_request:
+    branches: [master]
+
+jobs:
+  diagnose:
+    if: github.head_ref == 'agent/finish-rom-core'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/finish-rom-core
+      - name: Check transformation anchors
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          checks = {
+              'world service default': ('crates/ferrum-server/src/world_service.rs', 'impl WorldServiceConfig {\n    pub(super) fn new(snapshot_path: PathBuf, autosave_interval: Option<Duration>) -> Self {'),
+              'world config empty path': ('crates/ferrum-server/src/world_service.rs', 'if config.snapshot_path.as_os_str().is_empty()'),
+              'shared world snapshot': ('crates/ferrum-server/src/play_runtime.rs', '    pub(super) fn chunk_snapshot(&self, pos: ChunkPos) -> Result<StaticChunk> {'),
+              'main module': ('crates/ferrum-server/src/main.rs', 'mod play_runtime;'),
+              'main identity import': ('crates/ferrum-server/src/main.rs', 'use identity::{PlayerIdentity, offline_player_identity};'),
+              'CLI autosave': ('crates/ferrum-server/src/main.rs', '    /// Autosave interval in seconds. Zero disables periodic saves; shutdown still saves.'),
+              'runtime signature': ('crates/ferrum-server/src/main.rs', '        game_state: Option<GameState>,\n        game_service_config: GameServiceConfig,\n    ) -> Result<Self> {'),
+              'shared world creation': ('crates/ferrum-server/src/main.rs', '        let shared_world = match loaded_chunks {'),
+              'game control': ('crates/ferrum-server/src/main.rs', '    fn game_control(&self) -> GameServiceControl {'),
+              'shutdown tail': ('crates/ferrum-server/src/main.rs', '        self.game_service.shutdown()\n    }'),
+              'state path': ('crates/ferrum-server/src/main.rs', '    let game_state_path = cli.game_state.clone().unwrap_or(default_state_path);'),
+              'loaded chunks': ('crates/ferrum-server/src/main.rs', '    let loaded_chunks = load_configured_world_chunks(&config.world, &world_profile)?;'),
+              'game service config': ('crates/ferrum-server/src/main.rs', '    let game_service_config = GameServiceConfig {'),
+              'console signature': ('crates/ferrum-server/src/main.rs', 'fn spawn_server_console('),
+              'console save transition': ('crates/ferrum-server/src/main.rs', '                        }\n                        if outcome.shutdown_requested {'),
+          }
+          missing = []
+          for name, (path, anchor) in checks.items():
+              found = anchor in Path(path).read_text()
+              print(f'{name}: {"FOUND" if found else "MISSING"}')
+              if not found:
+                  missing.append(name)
+          if missing:
+              raise SystemExit('missing anchors: ' + ', '.join(missing))
+          PY
