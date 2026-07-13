@@ -31,15 +31,24 @@ jobs:
             exit 0
           fi
 
-          cargo fmt --all
-          rm -f crates/ferrum-game/build.rs
-          rm -f crates/ferrum-rompack/build.rs
-          rm -f crates/ferrum-server/build.rs
-          rm -f crates/rom-bootstrap/build.rs
-          cargo fmt --all
-          cargo fmt --all --check
-          cargo clippy --workspace --all-targets -- -D warnings
-          cargo test --workspace
+          set +e
+          {
+            cargo fmt --all
+            rm -f crates/ferrum-game/build.rs
+            rm -f crates/ferrum-rompack/build.rs
+            rm -f crates/ferrum-server/build.rs
+            rm -f crates/rom-bootstrap/build.rs
+            cargo fmt --all
+            cargo fmt --all --check
+            cargo clippy --workspace --all-targets -- -D warnings
+            cargo test --workspace
+          } > finalize-inventory.log 2>&1
+          STATUS=$?
+
+          if [ "$STATUS" -ne 0 ]; then
+            cat finalize-inventory.log
+            exit "$STATUS"
+          fi
 
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
@@ -47,3 +56,10 @@ jobs:
           git diff --cached --stat
           git commit -m 'Finalize inventory and container implementation'
           git push origin HEAD:agent/complete-inventory-containers
+          cat finalize-inventory.log
+      - name: Upload finalization diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: finalize-inventory-diagnostics
+          path: finalize-inventory.log
