@@ -1,0 +1,32 @@
+name: Update core lockfile
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    if: github.head_ref == 'agent/finish-rom-core'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/finish-rom-core
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Refresh and verify Cargo.lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo check --workspace
+          cargo check --locked --workspace
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Cargo.lock
+          if ! git diff --cached --quiet; then
+            git commit -m 'Update lockfile for world persistence'
+            git push origin HEAD:agent/finish-rom-core
+          fi
