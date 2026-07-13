@@ -66,18 +66,18 @@ jobs:
           text = state.read_text()
           text = text.replace(
               '''        .filter_map(|(slot, (before, after))| {
-              (before != after).then(|| GameEvent::InventorySlotChanged {
-                  uuid,
-                  slot,
-                  stack: after.clone(),
-              })
-          })'''.replace('              ', '    '),
+            (before != after).then(|| GameEvent::InventorySlotChanged {
+                uuid,
+                slot,
+                stack: after.clone(),
+            })
+        })''',
               '''        .filter(|(_, (before, after))| before != after)
-          .map(|(slot, (_, after))| GameEvent::InventorySlotChanged {
-              uuid,
-              slot,
-              stack: after.clone(),
-          })'''.replace('          ', '    '),
+        .map(|(slot, (_, after))| GameEvent::InventorySlotChanged {
+            uuid,
+            slot,
+            stack: after.clone(),
+        })''',
           )
           state.write_text(text)
 
@@ -86,6 +86,49 @@ jobs:
           if 'serde_json.workspace = true' not in text:
               text = text.replace('ferrum-world = { path = "../ferrum-world" }\n', 'ferrum-world = { path = "../ferrum-world" }\nserde_json.workspace = true\n')
           cargo.write_text(text)
+
+          play_runtime = Path('crates/ferrum-server/src/play_runtime.rs')
+          text = play_runtime.read_text()
+          text = text.replace(
+              'BlockPosition, DataComponentProtocolRegistry, ItemProtocolRegistry, PlayerMovement,',
+              'BlockPosition, ItemProtocolRegistry, PlayerMovement,',
+          )
+          text = text.replace("    components: &'a DataComponentProtocolRegistry,\n", '')
+          text = text.replace("        components: &'a DataComponentProtocolRegistry,\n", '')
+          text = text.replace('            components,\n', '')
+          text = text.replace(
+              'decode_container_click(payload, self.items, self.components)',
+              'decode_container_click(payload, self.items)',
+          )
+          text = text.replace(
+              'decode_creative_slot_update(payload, self.items, self.components)',
+              'decode_creative_slot_update(payload, self.items)',
+          )
+          play_runtime.write_text(text)
+
+          main = Path('crates/ferrum-server/src/main.rs')
+          text = main.read_text().replace('        &config.data_component_protocol_ids,\n', '')
+          main.write_text(text)
+
+          extract = Path('crates/rom-bootstrap/src/extract.rs')
+          text = extract.read_text()
+          text = text.replace(
+              'ROMPACK_SCHEMA_VERSION, RomPack, RomPackBiomes, RomPackBlockStates, RomPackDataComponent,\n    RomPackItem, RomPackMetadata,',
+              'ROMPACK_SCHEMA_VERSION, RomPack, RomPackBiomes, RomPackBlockStates, RomPackMetadata,',
+          )
+          extract.write_text(text)
+
+          registry = Path('crates/rom-bootstrap/src/registry_report.rs')
+          text = registry.read_text()
+          text = text.replace(
+              'pub fn read_item_registry_report(',
+              '#[allow(dead_code)]\npub fn read_item_registry_report(',
+          )
+          text = text.replace(
+              'pub fn parse_item_registry_report(',
+              '#[allow(dead_code)]\npub fn parse_item_registry_report(',
+          )
+          registry.write_text(text)
 
           writer = Path('crates/ferrum-server/src/play_writer.rs')
           text = writer.read_text()
