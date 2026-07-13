@@ -529,7 +529,16 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(movement.kind, EntityMovementKind::Teleport);
-        assert_eq!(movement.payload.len(), 66);
+        assert_eq!(movement.payload.len(), 62);
+        assert_eq!(movement.payload[0], 7);
+        assert_eq!(&movement.payload[1..9], &20.0_f64.to_be_bytes());
+        assert_eq!(&movement.payload[9..17], &65.0_f64.to_be_bytes());
+        assert_eq!(&movement.payload[17..25], &0.0_f64.to_be_bytes());
+        assert_eq!(&movement.payload[25..49], &[0; 24]);
+        assert_eq!(&movement.payload[49..53], &0.0_f32.to_be_bytes());
+        assert_eq!(&movement.payload[53..57], &0.0_f32.to_be_bytes());
+        assert_eq!(&movement.payload[57..61], &0_i32.to_be_bytes());
+        assert_eq!(movement.payload[61], 1);
     }
 
     #[test]
