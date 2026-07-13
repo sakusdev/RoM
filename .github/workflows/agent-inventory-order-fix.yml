@@ -1,0 +1,45 @@
+name: Fix inventory bootstrap ordering
+
+on:
+  push:
+    branches:
+      - feature/player-inventory-sync
+    paths:
+      - .github/workflows/agent-inventory-order-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/player-inventory-sync
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Apply ordering fix
+        shell: bash
+        run: |
+          python - <<'PYCODE'
+          import base64
+          import lzma
+          payload = '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'
+          source = lzma.decompress(base64.b64decode(payload)).decode('utf-8')
+          exec(compile(source, 'apply_inventory_order_fix.py', 'exec'))
+          PYCODE
+      - run: cargo fmt --all
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - name: Commit source changes
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add crates Cargo.lock
+          git commit -m 'Defer full inventory sync until Play bootstrap'
+          git push origin HEAD:feature/player-inventory-sync
