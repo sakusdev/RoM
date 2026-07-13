@@ -288,7 +288,7 @@ impl ServerState {
             }
             None => play_runtime::SharedWorld::new_with_policy(center, world, play_policy)?,
         });
-        let world_service = spawn_world_service(Arc::clone(&shared_world), world_service_config)?;
+        let world_service = spawn_world_service(Arc::clone(&shared_world), persistence.world)?;
         let shared_play_runtime = spawn_shared_play_runtime(shared_runtime_config)?;
         let game_replication =
             spawn_game_replication(&game_runtime, GameReplicationConfig::default())?;
