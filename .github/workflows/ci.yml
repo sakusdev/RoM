@@ -38,12 +38,54 @@ jobs:
           if len(parts) != 6:
               raise SystemExit(f'expected 6 payload parts, found {len(parts)}')
           encoded = ''.join(path.read_text().strip() for path in parts)
-          source = lzma.decompress(base64.b64decode(encoded))
-          actual = hashlib.sha256(source).hexdigest()
+          compressed_source = lzma.decompress(base64.b64decode(encoded))
+          actual = hashlib.sha256(compressed_source).hexdigest()
           expected = 'f53a43821ed9f86484c7f960d0dfe67a0c9adf26145ec522d93154cc6615dcd3'
           if actual != expected:
               raise SystemExit(f'implementation payload digest mismatch: {actual}')
+          source = compressed_source.decode('utf-8')
+          source = source.replace(
+              "replace_once(\n    'crates/ferrum-server/src/main.rs',\n    '''    item_protocol_ids: ItemProtocolRegistry,\n''',\n    '''    item_protocol_ids: ItemProtocolRegistry,\n    data_component_protocol_ids: DataComponentProtocolRegistry,\n''')",
+              "replace_once(\n    'crates/ferrum-server/src/main.rs',\n    '''    runtime_profile: Option<ProtocolProfile>,\n    item_protocol_ids: ItemProtocolRegistry,\n''',\n    '''    runtime_profile: Option<ProtocolProfile>,\n    item_protocol_ids: ItemProtocolRegistry,\n    data_component_protocol_ids: DataComponentProtocolRegistry,\n''')",
+          )
           exec(compile(source, 'apply_complete_inventory.py', 'exec'))
+
+          container = Path('crates/ferrum-game/src/container.rs')
+          text = container.read_text()
+          text = text.replace(
+              'SlotRef::Player(index) if self.open.is_some() => self.insert_external(stack)?',
+              'SlotRef::Player(_index) if self.open.is_some() => self.insert_external(stack)?',
+          )
+          text = text.replace(
+              '.filter_map(|(index, (before, after))| (before != after).then_some(index))',
+              '.filter(|(_, (before, after))| before != after)\n        .map(|(index, _)| index)',
+          )
+          container.write_text(text)
+
+          state = Path('crates/ferrum-game/src/state.rs')
+          text = state.read_text()
+          text = text.replace(
+              '''        .filter_map(|(slot, (before, after))| {
+              (before != after).then(|| GameEvent::InventorySlotChanged {
+                  uuid,
+                  slot,
+                  stack: after.clone(),
+              })
+          })'''.replace('              ', '    '),
+              '''        .filter(|(_, (before, after))| before != after)
+          .map(|(slot, (_, after))| GameEvent::InventorySlotChanged {
+              uuid,
+              slot,
+              stack: after.clone(),
+          })'''.replace('          ', '    '),
+          )
+          state.write_text(text)
+
+          cargo = Path('crates/ferrum-play/Cargo.toml')
+          text = cargo.read_text()
+          if 'serde_json.workspace = true' not in text:
+              text = text.replace('ferrum-world = { path = "../ferrum-world" }\n', 'ferrum-world = { path = "../ferrum-world" }\nserde_json.workspace = true\n')
+          cargo.write_text(text)
           PYCODE
             cargo fmt --all
             cargo fmt --all --check
