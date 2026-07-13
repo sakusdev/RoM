@@ -4,21 +4,27 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag, for example v0.1.0-alpha.1
-        required: true
-        default: v0.1.0-alpha.1
+        description: Optional release tag. Leave empty for the next vMAJOR.MINOR.PATCH-alpha.N version.
+        required: false
+        default: ""
         type: string
       prerelease:
-        description: Publish as a prerelease
+        description: Publish an explicitly tagged dispatch as a prerelease
         required: true
         default: true
         type: boolean
   push:
+    branches:
+      - master
     tags:
       - "v*"
 
 permissions:
   contents: write
+
+concurrency:
+  group: rom-release-pipeline
+  cancel-in-progress: false
 
 jobs:
   prepare:
@@ -28,25 +34,64 @@ jobs:
       tag: ${{ steps.meta.outputs.tag }}
       prerelease: ${{ steps.meta.outputs.prerelease }}
       target_sha: ${{ steps.meta.outputs.target_sha }}
+      base_version: ${{ steps.meta.outputs.base_version }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - id: meta
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           DISPATCH_TAG: ${{ inputs.tag }}
           DISPATCH_PRERELEASE: ${{ inputs.prerelease }}
         run: |
           set -euo pipefail
 
-          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+          base_version="$(awk '
+            $0 == "[workspace.package]" { in_workspace_package = 1; next }
+            /^\[/ && in_workspace_package { exit }
+            in_workspace_package && $1 == "version" {
+              gsub(/["\r]/, "", $3)
+              print $3
+              exit
+            }
+          ' Cargo.toml)"
+          [[ -n "$base_version" ]] || {
+            echo 'Could not read workspace.package.version from Cargo.toml' >&2
+            exit 1
+          }
+
+          if [[ "$GITHUB_EVENT_NAME" == 'workflow_dispatch' && -n "$DISPATCH_TAG" ]]; then
             tag="$DISPATCH_TAG"
             prerelease="$DISPATCH_PRERELEASE"
-          else
+          elif [[ "$GITHUB_REF_TYPE" == 'tag' ]]; then
             tag="$GITHUB_REF_NAME"
             if [[ "$tag" == *-* ]]; then
               prerelease=true
             else
               prerelease=false
             fi
+          else
+            prefix="v${base_version}-alpha."
+            highest=0
+            while IFS= read -r candidate; do
+              [[ "$candidate" == "$prefix"* ]] || continue
+              sequence="${candidate#"$prefix"}"
+              [[ "$sequence" =~ ^[0-9]+$ ]] || continue
+              if (( sequence > highest )); then
+                highest="$sequence"
+              fi
+            done < <(
+              {
+                git tag --list
+                gh release list --limit 100 --json tagName --jq '.[].tagName'
+              } | sort -u
+            )
+            tag="${prefix}$((highest + 1))"
+            prerelease=true
           fi
 
           if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
@@ -54,9 +99,11 @@ jobs:
             exit 1
           fi
 
+          echo "base_version=$base_version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
           echo "target_sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          printf 'Publishing %s from %s (prerelease=%s)\n' "$tag" "$GITHUB_SHA" "$prerelease"
 
   build:
     name: Build ${{ matrix.platform }}
@@ -76,6 +123,7 @@ jobs:
             bootstrap_raw_asset: rom-bootstrap-windows-x86_64.exe
             archive: zip
             native: true
+            android: false
           - platform: linux-x86_64
             os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
@@ -86,6 +134,7 @@ jobs:
             bootstrap_raw_asset: rom-bootstrap-linux-x86_64
             archive: tar.gz
             native: true
+            android: false
           - platform: linux-aarch64
             os: ubuntu-24.04
             target: aarch64-unknown-linux-gnu
@@ -96,6 +145,18 @@ jobs:
             bootstrap_raw_asset: rom-bootstrap-linux-aarch64
             archive: tar.gz
             native: false
+            android: false
+          - platform: android-aarch64
+            os: ubuntu-24.04
+            target: aarch64-linux-android
+            source_binary: ferrum-server
+            package_binary: ferrum-server
+            raw_asset: ferrum-server-android-aarch64
+            bootstrap_binary: rom-bootstrap
+            bootstrap_raw_asset: rom-bootstrap-android-aarch64
+            archive: tar.gz
+            native: false
+            android: true
           - platform: macos-x86_64
             os: macos-15-intel
             target: x86_64-apple-darwin
@@ -106,6 +167,7 @@ jobs:
             bootstrap_raw_asset: rom-bootstrap-macos-x86_64
             archive: tar.gz
             native: true
+            android: false
           - platform: macos-aarch64
             os: macos-15
             target: aarch64-apple-darwin
@@ -116,6 +178,7 @@ jobs:
             bootstrap_raw_asset: rom-bootstrap-macos-aarch64
             archive: tar.gz
             native: true
+            android: false
 
     steps:
       - uses: actions/checkout@v4
@@ -132,8 +195,19 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross
 
+      - uses: android-actions/setup-android@v3
+        if: matrix.android
+
+      - name: Install Android NDK
+        if: matrix.android
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager 'ndk;27.2.12479018'
+          echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
       - name: Build native server and Bootstrap
-        if: matrix.target != 'aarch64-unknown-linux-gnu'
+        if: matrix.target != 'aarch64-unknown-linux-gnu' && !matrix.android
         run: cargo build --locked --release -p ferrum-server -p rom-bootstrap --target ${{ matrix.target }}
 
       - name: Build Linux ARM64 server and Bootstrap
@@ -143,7 +217,18 @@ jobs:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
         run: cargo build --locked --release -p ferrum-server -p rom-bootstrap --target ${{ matrix.target }}
 
-      - name: Smoke-test Windows executable
+      - name: Build Android ARM64 server and Bootstrap
+        if: matrix.android
+        shell: bash
+        run: |
+          set -euo pipefail
+          toolchain="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="${toolchain}/aarch64-linux-android24-clang"
+          export CC_aarch64_linux_android="${toolchain}/aarch64-linux-android24-clang"
+          export AR_aarch64_linux_android="${toolchain}/llvm-ar"
+          cargo build --locked --release -p ferrum-server -p rom-bootstrap --target "${{ matrix.target }}"
+
+      - name: Smoke-test Windows executables
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
@@ -152,7 +237,7 @@ jobs:
           & "target/${{ matrix.target }}/release/${{ matrix.bootstrap_binary }}" --help | Out-Null
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Smoke-test Unix executable
+      - name: Smoke-test Unix executables
         if: runner.os != 'Windows' && matrix.native
         shell: bash
         run: |
@@ -165,8 +250,9 @@ jobs:
         shell: pwsh
         env:
           TAG: ${{ needs.prepare.outputs.tag }}
+          TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
         run: |
-          $ErrorActionPreference = "Stop"
+          $ErrorActionPreference = 'Stop'
           $package = "RoM-$env:TAG-${{ matrix.platform }}"
           $stage = "dist/$package"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
@@ -174,13 +260,24 @@ jobs:
           Copy-Item "target/${{ matrix.target }}/release/${{ matrix.source_binary }}" "dist/${{ matrix.raw_asset }}"
           Copy-Item "target/${{ matrix.target }}/release/${{ matrix.bootstrap_binary }}" "$stage/${{ matrix.bootstrap_binary }}"
           Copy-Item "target/${{ matrix.target }}/release/${{ matrix.bootstrap_binary }}" "dist/${{ matrix.bootstrap_raw_asset }}"
-          Copy-Item "examples/server-26.1.2.toml" "$stage/server.toml"
+          Copy-Item 'examples/server-26.1.2.toml' "$stage/server.toml"
           Copy-Item README.md "$stage/README.md"
           Copy-Item NOTICE.md "$stage/NOTICE.md"
           Copy-Item LICENSE "$stage/LICENSE"
           New-Item -ItemType Directory -Force -Path "$stage/docs" | Out-Null
-          Copy-Item "docs/BOOTSTRAP.md" "$stage/docs/BOOTSTRAP.md"
+          Copy-Item 'docs/BOOTSTRAP.md' "$stage/docs/BOOTSTRAP.md"
+          Copy-Item 'docs/RELEASES.md' "$stage/docs/RELEASES.md"
+          New-Item -ItemType Directory -Force -Path "$stage/scripts" | Out-Null
+          (Get-Content 'scripts/install-termux.sh' -Raw).Replace('@TAG@', $env:TAG) | Set-Content "$stage/scripts/install-termux.sh" -NoNewline
+          (Get-Content 'scripts/install-pixel-terminal.sh' -Raw).Replace('@TAG@', $env:TAG) | Set-Content "$stage/scripts/install-pixel-terminal.sh" -NoNewline
           Set-Content -Path "$stage/VERSION" -Value $env:TAG -NoNewline
+          @(
+            "version=$env:TAG"
+            "commit=$env:TARGET_SHA"
+            "target=${{ matrix.target }}"
+            'minecraft=26.1.2'
+            'protocol=775'
+          ) | Set-Content "$stage/BUILD_INFO"
           Compress-Archive -Path "$stage/*" -DestinationPath "dist/$package.zip" -Force
 
       - name: Package Unix release
@@ -188,6 +285,7 @@ jobs:
         shell: bash
         env:
           TAG: ${{ needs.prepare.outputs.tag }}
+          TARGET_SHA: ${{ needs.prepare.outputs.target_sha }}
         run: |
           set -euo pipefail
           package="RoM-${TAG}-${{ matrix.platform }}"
@@ -201,9 +299,20 @@ jobs:
           cp README.md "$stage/README.md"
           cp NOTICE.md "$stage/NOTICE.md"
           cp LICENSE "$stage/LICENSE"
-          mkdir -p "$stage/docs"
+          mkdir -p "$stage/docs" "$stage/scripts"
           cp docs/BOOTSTRAP.md "$stage/docs/BOOTSTRAP.md"
+          cp docs/RELEASES.md "$stage/docs/RELEASES.md"
+          sed "s/@TAG@/${TAG}/g" scripts/install-termux.sh > "$stage/scripts/install-termux.sh"
+          sed "s/@TAG@/${TAG}/g" scripts/install-pixel-terminal.sh > "$stage/scripts/install-pixel-terminal.sh"
+          chmod 0755 "$stage/scripts/"*.sh
           printf '%s' "$TAG" > "$stage/VERSION"
+          cat > "$stage/BUILD_INFO" <<EOF
+          version=${TAG}
+          commit=${TARGET_SHA}
+          target=${{ matrix.target }}
+          minecraft=26.1.2
+          protocol=775
+          EOF
           tar -C dist -czf "dist/${package}.tar.gz" "$package"
 
       - name: Record Unix checksums
@@ -213,7 +322,7 @@ jobs:
           set -euo pipefail
           cd dist
           for asset in "${{ matrix.raw_asset }}" "${{ matrix.bootstrap_raw_asset }}" *.tar.gz; do
-            [[ -f "$asset" ]] && shasum -a 256 "$asset" > "$asset.sha256"
+            [[ -f "$asset" ]] && sha256sum "$asset" > "$asset.sha256"
           done
 
       - name: Record Windows checksums
@@ -237,9 +346,40 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  installers:
+    name: Prepare Android installation scripts
+    needs: prepare
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Render versioned installation scripts
+        shell: bash
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for script in install-termux.sh install-pixel-terminal.sh; do
+            sed "s/@TAG@/${TAG}/g" "scripts/${script}" > "dist/${script}"
+            chmod 0755 "dist/${script}"
+            bash -n "dist/${script}"
+            (
+              cd dist
+              sha256sum "$script" > "$script.sha256"
+            )
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-installers
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
   publish:
     name: Publish GitHub Release
-    needs: [prepare, build]
+    needs: [prepare, build, installers]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v4
@@ -262,7 +402,7 @@ jobs:
             -printf '%f\0' |
             sort -z |
             xargs -0 -r sha256sum > SHA256SUMS
-          test "$(wc -l < SHA256SUMS)" -eq 15
+          test "$(wc -l < SHA256SUMS)" -eq 20
 
       - name: Write release notes
         shell: bash
@@ -273,16 +413,16 @@ jobs:
           cat > release-notes.md <<EOF
           # RoM ${TAG}
 
-          Native Rust Minecraft Java Edition server binaries.
+          Native Rust Minecraft Java Edition server and Bootstrap binaries.
 
           **Target:** Minecraft Java Edition 26.1.2 / protocol 775  
           **Source commit:** ${TARGET_SHA}
 
-          This experimental release includes login, Configuration, all synchronized registries, Join Game, one deterministic flat chunk with light, player-position synchronization, system chat, and Keep Alive.
+          This build includes the current authoritative inventory and container transaction implementation, synchronized registries, login and Configuration, world bootstrap, player synchronization, chat, and Keep Alive.
 
-          Each platform provides standalone ferrum-server and rom-bootstrap executables. The archive contains both binaries, server.toml, README.md, NOTICE.md, LICENSE, Bootstrap documentation, and VERSION. Verify downloads with SHA256SUMS.
+          Standalone `ferrum-server` and `rom-bootstrap` executables are provided for Windows x86_64, Linux x86_64, Linux AArch64, Android/Termux AArch64, macOS x86_64, and macOS AArch64. Platform archives include configuration, documentation, `VERSION`, and `BUILD_INFO` files.
 
-          Entities, persistence, full inventory semantics, and online-mode authentication are not implemented yet.
+          Android users can download and run `install-termux.sh`. Pixel Terminal users can download and run `install-pixel-terminal.sh`. Verify all downloads with the per-file checksum or `SHA256SUMS`.
           EOF
 
       - name: Create or update release and upload assets
@@ -297,7 +437,7 @@ jobs:
           set -euo pipefail
 
           release_flags=()
-          if [[ "$PRERELEASE" == "true" ]]; then
+          if [[ "$PRERELEASE" == 'true' ]]; then
             release_flags+=(--prerelease)
           fi
 
@@ -319,8 +459,20 @@ jobs:
           PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
         run: |
           set -euo pipefail
-          test "$(gh release view "$TAG" --json assets --jq '.assets | length')" -ge 31
+          test "$(gh release view "$TAG" --json assets --jq '.assets | length')" -ge 41
           actual_prerelease="$(gh release view "$TAG" --json isPrerelease --jq '.isPrerelease')"
           test "$actual_prerelease" = "$PRERELEASE"
+          for required in \
+            rom-bootstrap-windows-x86_64.exe \
+            rom-bootstrap-linux-x86_64 \
+            rom-bootstrap-linux-aarch64 \
+            rom-bootstrap-android-aarch64 \
+            rom-bootstrap-macos-x86_64 \
+            rom-bootstrap-macos-aarch64 \
+            install-termux.sh \
+            install-pixel-terminal.sh \
+            SHA256SUMS; do
+            gh release view "$TAG" --json assets --jq '.assets[].name' | grep -Fx "$required"
+          done
           gh release view "$TAG" --json url,isPrerelease,assets \
             --jq '{url, prerelease: .isPrerelease, assets: [.assets[].name]}'
