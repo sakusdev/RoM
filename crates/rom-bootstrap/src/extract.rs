@@ -880,7 +880,7 @@ mod tests {
                 .write_all(b"not a valid versions.list row\n")
                 .unwrap();
             writer
-                .start_file("META-INF/versions/26.1.2/server.jar", options)
+                .start_file("META-INF/versions/26.1.2/server-26.1.2.jar", options)
                 .unwrap();
             writer.write_all(game_jar).unwrap();
             writer.finish().unwrap();
@@ -923,7 +923,7 @@ mod tests {
         let path = directory.path().join("server.jar");
         fs::write(&path, outer).unwrap();
         let resolved = resolve_game_jar(&path).unwrap();
-        assert_eq!(resolved.path, "META-INF/versions/26.1.2/server.jar");
+        assert_eq!(resolved.path, "META-INF/versions/26.1.2/server-26.1.2.jar");
         assert_eq!(resolved.sha256, sha256_hex(&game_jar));
         assert_eq!(resolved.bytes, game_jar);
     }
