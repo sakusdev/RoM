@@ -41,18 +41,18 @@ fn main() {
     let main = manifest.join("src/main.rs");
     replace(
         &main,
-        """    let gameplay = play_runtime::GameplaySync::new(
+        r#"    let gameplay = play_runtime::GameplaySync::new(
         &context.state.game_runtime,
         online_player.player_uuid(),
         &config.item_protocol_ids,
         &config.data_component_protocol_ids,
     );
-""",
-        """    let gameplay = play_runtime::GameplaySync::new(
+"#,
+        r#"    let gameplay = play_runtime::GameplaySync::new(
         &context.state.game_runtime,
         online_player.player_uuid(),
         &config.item_protocol_ids,
     );
-""",
+"#,
     );
 }
