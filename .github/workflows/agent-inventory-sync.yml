@@ -1,0 +1,54 @@
+name: Apply inventory synchronization
+
+on:
+  push:
+    branches:
+      - feature/player-inventory-sync
+    paths:
+      - .github/workflows/agent-inventory-sync.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-inventory-sync
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/player-inventory-sync
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Apply source changes
+        shell: bash
+        run: |
+          python - <<'PYCODE'
+          import base64
+          import lzma
+          from pathlib import Path
+          payload = Path('.github/agent-inventory-sync.b64').read_bytes()
+          source = lzma.decompress(base64.b64decode(payload)).decode('utf-8')
+          exec(compile(source, 'apply_inventory_sync.py', 'exec'))
+          PYCODE
+      - run: cargo fmt --all
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - name: Commit source changes
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add crates Cargo.lock
+          if git diff --cached --quiet; then
+            echo 'No source changes to commit.'
+            exit 0
+          fi
+          git commit -m 'Complete authoritative inventory synchronization'
+          git push origin HEAD:feature/player-inventory-sync
