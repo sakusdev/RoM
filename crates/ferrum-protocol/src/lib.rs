@@ -91,6 +91,7 @@ pub enum PacketKind {
     CloseContainer,
     SetCreativeModeSlot,
     SetHeldSlot,
+    SetPlayerInventory,
     SetContainerContent,
     SetContainerSlot,
     AddEntity,
@@ -156,6 +157,7 @@ impl PacketKind {
         Self::CloseContainer,
         Self::SetCreativeModeSlot,
         Self::SetHeldSlot,
+        Self::SetPlayerInventory,
         Self::SetContainerContent,
         Self::SetContainerSlot,
         Self::AddEntity,
@@ -268,6 +270,7 @@ impl PacketKind {
             | Self::CloseContainer
             | Self::SetCreativeModeSlot
             | Self::SetHeldSlot
+            | Self::SetPlayerInventory
             | Self::SetContainerContent
             | Self::SetContainerSlot
             | Self::AddEntity

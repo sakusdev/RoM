@@ -345,6 +345,9 @@ pub fn known_packet_kind(
         (ProtocolPhase::Play, PacketDirection::Clientbound, "set_held_slot") => {
             Some(PacketKind::SetHeldSlot)
         }
+        (ProtocolPhase::Play, PacketDirection::Clientbound, "set_player_inventory") => {
+            Some(PacketKind::SetPlayerInventory)
+        }
         (ProtocolPhase::Play, PacketDirection::Clientbound, "container_set_content") => {
             Some(PacketKind::SetContainerContent)
         }
@@ -439,6 +442,7 @@ pub const fn canonical_packet_name(kind: PacketKind) -> &'static str {
         PacketKind::CloseContainer => "minecraft:container_close",
         PacketKind::SetCreativeModeSlot => "minecraft:set_creative_mode_slot",
         PacketKind::SetHeldSlot => "minecraft:set_held_slot",
+        PacketKind::SetPlayerInventory => "minecraft:set_player_inventory",
         PacketKind::SetContainerContent => "minecraft:container_set_content",
         PacketKind::SetContainerSlot => "minecraft:container_set_slot",
         PacketKind::AddEntity => "minecraft:add_entity",
@@ -494,6 +498,22 @@ pub enum PacketCatalogError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recognizes_set_player_inventory_as_optional_typed_packet() {
+        assert_eq!(
+            known_packet_kind(
+                ProtocolPhase::Play,
+                PacketDirection::Clientbound,
+                "set_player_inventory",
+            ),
+            Some(PacketKind::SetPlayerInventory)
+        );
+        assert_eq!(
+            canonical_packet_name(PacketKind::SetPlayerInventory),
+            "minecraft:set_player_inventory"
+        );
+    }
 
     #[test]
     fn normalizes_and_sorts_report_packet_names() {

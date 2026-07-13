@@ -251,7 +251,9 @@ mod tests {
                 match output {
                     PlayOutput::Packet(bytes) => writer.write_all(&bytes)?,
                     PlayOutput::KeepAliveRequest(id) => writer.write_all(&id.to_be_bytes())?,
-                    PlayOutput::SystemChat { .. } | PlayOutput::PlayerTeleport { .. } => {}
+                    PlayOutput::SystemChat { .. }
+                    | PlayOutput::PlayerTeleport { .. }
+                    | PlayOutput::SetPlayerInventory { .. } => {}
                     PlayOutput::Disconnect(_) => return Ok(PlayWriterDirective::Stop),
                 }
                 Ok(PlayWriterDirective::Continue)
@@ -345,7 +347,8 @@ mod tests {
                 PlayOutput::Packet(_)
                 | PlayOutput::KeepAliveRequest(_)
                 | PlayOutput::SystemChat { .. }
-                | PlayOutput::PlayerTeleport { .. } => Ok(PlayWriterDirective::Continue),
+                | PlayOutput::PlayerTeleport { .. }
+                | PlayOutput::SetPlayerInventory { .. } => Ok(PlayWriterDirective::Continue),
                 PlayOutput::Disconnect(reason) => {
                     assert_eq!(reason, "done");
                     Ok(PlayWriterDirective::Stop)

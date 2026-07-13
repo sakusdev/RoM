@@ -4,6 +4,7 @@
 
 mod block_interaction;
 mod chunk_stream;
+mod inventory;
 mod movement;
 
 pub use block_interaction::{
@@ -12,6 +13,7 @@ pub use block_interaction::{
     player_action_to_world_event, use_item_on_block_to_world_event,
 };
 pub use chunk_stream::encode_forget_level_chunk;
+pub use inventory::{InventoryEncodeError, ItemProtocolRegistry, encode_set_player_inventory};
 pub use movement::{
     MAX_PLAYER_COORDINATE, MovementDecodeError, MovementFlags, PlayerMovement, PlayerState,
     decode_move_player_position, decode_move_player_position_rotation, decode_move_player_rotation,

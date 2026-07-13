@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use ferrum_game::Transform;
+use ferrum_game::{ItemStack, Transform};
 use ferrum_play::PlayerMovement;
 use ferrum_runtime::{
     BoundedInputQueue, ConnectionId, FixedRateClock, Tick, WorkerIngressReport, WorkerOutputError,
@@ -34,6 +34,11 @@ pub enum PlayOutput {
     PlayerTeleport {
         teleport_id: i32,
         transform: Transform,
+    },
+    /// Synchronize one authoritative player inventory slot.
+    SetPlayerInventory {
+        slot: usize,
+        stack: Option<ItemStack>,
     },
 }
 

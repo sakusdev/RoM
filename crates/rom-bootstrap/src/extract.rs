@@ -1,13 +1,14 @@
 use super::{
     BOOTSTRAP_SCHEMA_VERSION, BootstrapManifest, BootstrapStage, absolute_path, eula_is_accepted,
-    packet_report::read_packet_report, verify_file, write_json,
+    packet_report::read_packet_report, registry_report::read_item_registry_report, verify_file,
+    write_json,
 };
 use anyhow::{Context, Result, bail};
 use ferrum_protocol::{PacketCatalog, PacketDescriptor, PacketKind, canonical_packet_name};
 use ferrum_rompack::{
-    ROMPACK_SCHEMA_VERSION, RomPack, RomPackBiomes, RomPackBlockStates, RomPackMetadata,
-    RomPackPacket, RomPackRegistry, RomPackResource, RomPackSource, RomPackSummary, RomPackWorld,
-    read_rompack, sha256_hex, write_rompack,
+    ROMPACK_SCHEMA_VERSION, RomPack, RomPackBiomes, RomPackBlockStates, RomPackItem,
+    RomPackMetadata, RomPackPacket, RomPackRegistry, RomPackResource, RomPackSource,
+    RomPackSummary, RomPackWorld, read_rompack, sha256_hex, write_rompack,
 };
 use ferrum_version_26_1_2 as version_26_1_2;
 use serde::{Deserialize, Serialize};
@@ -68,6 +69,8 @@ pub struct GenerateOptions {
     /// Optional Mojang-generated reports/packets.json. When omitted, standard
     /// instance locations are checked before falling back to the built-in core.
     pub packet_report: Option<PathBuf>,
+    /// Optional Mojang-generated reports/registries.json for static item IDs.
+    pub registry_report: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -82,6 +85,7 @@ pub struct GenerateReport {
     pub game_jar_sha256: String,
     pub packet_count: usize,
     pub packet_catalog_count: usize,
+    pub item_count: usize,
     pub world_data_version: i32,
     pub overworld_min_section_y: i32,
     pub overworld_section_count: usize,
@@ -106,6 +110,8 @@ pub(super) struct PackRecord {
     pub packet_count: usize,
     #[serde(default)]
     pub packet_catalog_count: usize,
+    #[serde(default)]
+    pub item_count: usize,
     pub registry_count: usize,
     pub registry_entry_count: usize,
     pub resource_count: usize,
@@ -162,6 +168,7 @@ pub fn generate_version_pack(options: &GenerateOptions) -> Result<GenerateReport
     let game_jar = resolve_game_jar(&official_jar)?;
     let (registries, resources) = extract_registry_inventory(&game_jar.bytes)?;
     let packet_catalog = resolve_packet_catalog(&instance, options.packet_report.as_deref())?;
+    let items = resolve_item_registry(&instance, options.registry_report.as_deref())?;
     let packets = typed_packet_inventory(&packet_catalog)?;
     let world = builtin_world_metadata();
     validate_against_builtin_profile(
@@ -190,6 +197,7 @@ pub fn generate_version_pack(options: &GenerateOptions) -> Result<GenerateReport
         packets,
         packet_catalog: packet_catalog.entries().to_vec(),
         world,
+        items,
         registries,
         resources,
     };
@@ -200,6 +208,7 @@ pub fn generate_version_pack(options: &GenerateOptions) -> Result<GenerateReport
         size: summary.size,
         packet_count: summary.packet_count,
         packet_catalog_count: summary.packet_catalog_count,
+        item_count: summary.item_count,
         registry_count: summary.registry_count,
         registry_entry_count: summary.registry_entry_count,
         resource_count: summary.resource_count,
@@ -226,6 +235,7 @@ pub fn generate_version_pack(options: &GenerateOptions) -> Result<GenerateReport
         game_jar_sha256: game_jar.sha256,
         packet_count: summary.packet_count,
         packet_catalog_count: summary.packet_catalog_count,
+        item_count: summary.item_count,
         world_data_version: pack.world.data_version,
         overworld_min_section_y: pack.world.overworld_min_section_y,
         overworld_section_count: pack.world.overworld_section_count,
@@ -271,6 +281,7 @@ pub(super) fn verify_version_pack_record(
         && summary.size == record.size
         && summary.packet_count == record.packet_count
         && summary.packet_catalog_count == record.packet_catalog_count
+        && summary.item_count == record.item_count
         && summary.registry_count == record.registry_count
         && summary.registry_entry_count == record.registry_entry_count
         && summary.resource_count == record.resource_count
@@ -313,6 +324,7 @@ fn report_from_existing(
         game_jar_sha256: pack.metadata.source.game_jar_sha256,
         packet_count: summary.packet_count,
         packet_catalog_count: summary.packet_catalog_count,
+        item_count: summary.item_count,
         world_data_version: pack.world.data_version,
         overworld_min_section_y: pack.world.overworld_min_section_y,
         overworld_section_count: pack.world.overworld_section_count,
@@ -595,6 +607,22 @@ fn resolve_packet_catalog(instance: &Path, requested: Option<&Path>) -> Result<P
         }
     }
     builtin_packet_catalog()
+}
+
+fn resolve_item_registry(instance: &Path, requested: Option<&Path>) -> Result<Vec<RomPackItem>> {
+    if let Some(path) = requested {
+        return read_item_registry_report(path);
+    }
+    for candidate in [
+        instance.join("generated/reports/registries.json"),
+        instance.join("generated-reports/reports/registries.json"),
+        instance.join("reports/registries.json"),
+    ] {
+        if candidate.is_file() {
+            return read_item_registry_report(&candidate);
+        }
+    }
+    Ok(Vec::new())
 }
 
 fn builtin_packet_catalog() -> Result<PacketCatalog> {
