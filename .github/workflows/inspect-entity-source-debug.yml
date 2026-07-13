@@ -17,10 +17,11 @@ jobs:
         shell: bash
         run: |
           set -u
+          exec > >(tee diagnostic.txt) 2>&1
           status=0
           instance="$RUNNER_TEMP/rom-entity-inspect"
           echo '== prepare =='
-          cargo run --locked --release -p rom-bootstrap -- prepare \
+          cargo run --quiet --locked --release -p rom-bootstrap -- prepare \
             --instance "$instance" \
             --version 26.1.2 \
             --accept-minecraft-eula \
@@ -50,3 +51,14 @@ jobs:
             unzip -p "$server_jar" META-INF/versions.list | sed -n l || true
           fi
           exit "$status"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: official-source-diagnostic
+          path: |
+            diagnostic.txt
+            prepare.json
+            prepare.stderr
+            version.json
+            version-manifest.json
+          if-no-files-found: ignore
