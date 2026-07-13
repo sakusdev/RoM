@@ -40,8 +40,7 @@ jobs:
           if [[ -n "$version_url" ]]; then
             curl --fail --location --silent --show-error "$version_url" -o version.json || status=$?
             jq '{id, javaVersion, downloads: (.downloads | keys)}' version.json || true
-            mappings_url="$(jq -r '.downloads.server_mappings.url // empty' version.json)"
-            echo "mappings_url=$mappings_url"
+            echo "server_url=$(jq -r '.downloads.server.url // empty' version.json)"
           fi
 
           if [[ -f "$server_jar" ]]; then
