@@ -35,7 +35,6 @@ pub fn read_registry_protocol_report(path: &Path) -> Result<RegistryProtocolRepo
 }
 
 #[allow(dead_code)]
-#[allow(dead_code)]
 pub fn read_item_registry_report(path: &Path) -> Result<Vec<RomPackItem>> {
     Ok(read_registry_protocol_report(path)?.items)
 }
@@ -62,7 +61,6 @@ pub fn parse_registry_protocol_report(bytes: &[u8]) -> Result<RegistryProtocolRe
     })
 }
 
-#[allow(dead_code)]
 #[allow(dead_code)]
 pub fn parse_item_registry_report(bytes: &[u8]) -> Result<Vec<RomPackItem>> {
     Ok(parse_registry_protocol_report(bytes)?.items)
