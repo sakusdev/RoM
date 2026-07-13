@@ -22,7 +22,7 @@ const DEFAULT_POLL_INTERVAL: Duration = Duration::from_millis(25);
 #[derive(Debug, Clone)]
 pub(super) struct WorldServiceConfig {
     pub autosave_interval: Option<Duration>,
-    pub snapshot_path: PathBuf,
+    pub snapshot_path: Option<PathBuf>,
     pub command_capacity: NonZeroUsize,
     pub poll_interval: Duration,
 }
@@ -31,7 +31,18 @@ impl WorldServiceConfig {
     pub(super) fn new(snapshot_path: PathBuf, autosave_interval: Option<Duration>) -> Self {
         Self {
             autosave_interval,
-            snapshot_path,
+            snapshot_path: Some(snapshot_path),
+            command_capacity: NonZeroUsize::new(16).expect("16 is non-zero"),
+            poll_interval: DEFAULT_POLL_INTERVAL,
+        }
+    }
+}
+
+impl Default for WorldServiceConfig {
+    fn default() -> Self {
+        Self {
+            autosave_interval: None,
+            snapshot_path: None,
             command_capacity: NonZeroUsize::new(16).expect("16 is non-zero"),
             poll_interval: DEFAULT_POLL_INTERVAL,
         }
@@ -169,7 +180,11 @@ pub(super) fn save_world_state(world: &SharedWorld, path: &Path) -> Result<World
 }
 
 fn validate_config(config: &WorldServiceConfig) -> Result<()> {
-    if config.snapshot_path.as_os_str().is_empty() {
+    if config
+        .snapshot_path
+        .as_ref()
+        .is_some_and(|path| path.as_os_str().is_empty())
+    {
         bail!("world snapshot path cannot be empty");
     }
     if config.poll_interval.is_zero() {
@@ -180,6 +195,9 @@ fn validate_config(config: &WorldServiceConfig) -> Result<()> {
         .is_some_and(|interval| interval.is_zero())
     {
         bail!("world autosave interval must be greater than zero");
+    }
+    if config.autosave_interval.is_some() && config.snapshot_path.is_none() {
+        bail!("world autosave requires a snapshot path");
     }
     Ok(())
 }
@@ -229,13 +247,18 @@ fn run_world_service(
         match commands.recv_timeout(wait) {
             Ok(WorldServiceCommand::SaveNow { reply }) => {
                 exit.requested_saves = exit.requested_saves.saturating_add(1);
-                let result = save_world_state(&world, &config.snapshot_path)
-                    .map_err(|error| format!("{error:#}"));
+                let result = match &config.snapshot_path {
+                    Some(path) => save_world_state(&world, path)
+                        .map_err(|error| format!("{error:#}")),
+                    None => Err("world snapshot path is not configured".to_owned()),
+                };
                 let _ = reply.send(result);
             }
             Ok(WorldServiceCommand::Shutdown) | Err(RecvTimeoutError::Disconnected) => {
-                save_world_state(&world, &config.snapshot_path)?;
-                exit.requested_saves = exit.requested_saves.saturating_add(1);
+                if let Some(path) = &config.snapshot_path {
+                    save_world_state(&world, path)?;
+                    exit.requested_saves = exit.requested_saves.saturating_add(1);
+                }
                 return Ok(exit);
             }
             Err(RecvTimeoutError::Timeout) => {}
@@ -243,8 +266,10 @@ fn run_world_service(
 
         let now = Instant::now();
         if next_autosave.is_some_and(|deadline| now >= deadline) {
-            save_world_state(&world, &config.snapshot_path)?;
-            exit.autosaves = exit.autosaves.saturating_add(1);
+            if let Some(path) = &config.snapshot_path {
+                save_world_state(&world, path)?;
+                exit.autosaves = exit.autosaves.saturating_add(1);
+            }
             next_autosave = config.autosave_interval.map(|interval| now + interval);
         }
     }
@@ -285,7 +310,8 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::play_runtime::{builtin_world_profile, spawn_chunk};
+    use crate::play_runtime::{SharedWorld, builtin_world_profile, spawn_chunk};
+    use ferrum_runtime::ConnectionId;
     use ferrum_world::{BlockMutation, BlockPos, BlockStateId, WorldEvent};
 
     fn temporary_directory(name: &str) -> PathBuf {
@@ -307,7 +333,7 @@ mod tests {
         let world = SharedWorld::new(spawn_chunk(&profile), profile.clone()).unwrap();
         world
             .apply_event(
-                ferrum_runtime::ConnectionId::new(1),
+                ConnectionId::new(1),
                 WorldEvent::BlockMutation(BlockMutation {
                     position: BlockPos { x: 1, y: 65, z: 1 },
                     state: BlockStateId::new(profile.block_states.stone),
