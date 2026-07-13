@@ -55,4 +55,26 @@ fn main() {
     );
 "#,
     );
+
+    let replication = manifest.join("src/game_replication.rs");
+    replace(
+        &replication,
+        r#"        for slot in 0..PLAYER_INVENTORY_SLOTS {
+            assert_eq!(
+                recv_output(&writer, &mut workers, &mut inputs),
+                PlayOutput::SetPlayerInventory { slot, stack: None }
+            );
+        }
+"#,
+        r#"        assert!(matches!(
+            recv_output(&writer, &mut workers, &mut inputs),
+            PlayOutput::SetContainerContent {
+                container_id: 0,
+                state_id: 0,
+                slots,
+                carried: None,
+            } if slots.len() == PLAYER_INVENTORY_SLOTS && slots.iter().all(Option::is_none)
+        ));
+"#,
+    );
 }
