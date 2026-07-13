@@ -248,8 +248,9 @@ fn run_world_service(
             Ok(WorldServiceCommand::SaveNow { reply }) => {
                 exit.requested_saves = exit.requested_saves.saturating_add(1);
                 let result = match &config.snapshot_path {
-                    Some(path) => save_world_state(&world, path)
-                        .map_err(|error| format!("{error:#}")),
+                    Some(path) => {
+                        save_world_state(&world, path).map_err(|error| format!("{error:#}"))
+                    }
                     None => Err("world snapshot path is not configured".to_owned()),
                 };
                 let _ = reply.send(result);
@@ -280,8 +281,12 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(parent)
-        .with_context(|| format!("cannot create world snapshot directory {}", parent.display()))?;
+    fs::create_dir_all(parent).with_context(|| {
+        format!(
+            "cannot create world snapshot directory {}",
+            parent.display()
+        )
+    })?;
     let file_name = path
         .file_name()
         .context("world snapshot path has no file name")?
