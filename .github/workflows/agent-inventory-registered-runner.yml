@@ -1,78 +1,134 @@
-name: Registered inventory implementation runner
+name: Finalize inventory implementation
 
 on:
-  push:
-    branches:
-      - agent/complete-inventory-containers
-    paths:
-      - .github/workflows/agent-inventory-registered-runner.yml
+  pull_request_target:
+    types: [reopened]
 
 permissions:
   contents: write
 
 concurrency:
-  group: registered-inventory-runner
+  group: finalize-inventory-pr-54
   cancel-in-progress: false
 
 jobs:
-  apply:
+  finalize:
+    if: github.event.pull_request.number == 54 && github.event.pull_request.head.ref == 'agent/complete-inventory-containers'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          repository: sakusdev/RoM
           ref: agent/complete-inventory-containers
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - name: Apply implementation and publish diagnostics
+      - name: Remove generators and validate final source
         shell: bash
         run: |
-          set +e
-          LOG="$RUNNER_TEMP/inventory-runner.log"
-          {
-            python - <<'PYCODE'
-          import base64
-          import lzma
-          import re
+          python - <<'PYCODE'
           from pathlib import Path
-          text = Path('.github/workflows/agent-complete-inventory.yml').read_text()
-          match = re.search(r"payload = '([^']+)'", text)
-          if match is None:
-              raise SystemExit('implementation payload missing')
-          source = lzma.decompress(base64.b64decode(match.group(1))).decode('utf-8')
-          exec(compile(source, 'apply_complete_inventory.py', 'exec'))
+
+          state = Path('crates/ferrum-game/src/state.rs')
+          text = state.read_text()
+          old = '''#[allow(clippy::filter_map_bool_then)]
+          fn slot_diff_events(
+              uuid: PlayerUuid,
+              before: &[Option<ItemStack>],
+              after: &[Option<ItemStack>],
+          ) -> Vec<GameEvent> {
+              before
+                  .iter()
+                  .zip(after)
+                  .enumerate()
+                  .filter_map(|(slot, (before, after))| {
+                      (before != after).then(|| GameEvent::InventorySlotChanged {
+                          uuid,
+                          slot,
+                          stack: after.clone(),
+                      })
+                  })
+                  .collect()
+          }
+          '''
+          new = '''fn slot_diff_events(
+              uuid: PlayerUuid,
+              before: &[Option<ItemStack>],
+              after: &[Option<ItemStack>],
+          ) -> Vec<GameEvent> {
+              before
+                  .iter()
+                  .zip(after)
+                  .enumerate()
+                  .filter(|(_, (before, after))| before != after)
+                  .map(|(slot, (_, after))| GameEvent::InventorySlotChanged {
+                      uuid,
+                      slot,
+                      stack: after.clone(),
+                  })
+                  .collect()
+          }
+          '''
+          old = '\n'.join(line[10:] if line.startswith('          ') else line for line in old.splitlines()) + '\n'
+          new = '\n'.join(line[10:] if line.startswith('          ') else line for line in new.splitlines()) + '\n'
+          if old not in text:
+              raise SystemExit('slot_diff_events cleanup target not found')
+          state.write_text(text.replace(old, new, 1))
           PYCODE
-            cargo fmt --all
-            cargo fmt --all --check
-            cargo clippy --workspace --all-targets -- -D warnings
-            cargo test --workspace
-          } >"$LOG" 2>&1
-          STATUS=$?
+
+          rm -rf .github/agent-inventory-payload
+          rm -f .github/agent-inventory-trigger-04.txt
+          rm -f .github/workflows/agent-complete-inventory-debug.yml
+          rm -f .github/workflows/agent-complete-inventory.yml
+          rm -f .github/workflows/agent-inventory-registered-runner.yml
+          rm -f sitecustomize.py
+          rm -f crates/ferrum-game/build.rs
+          rm -f crates/ferrum-rompack/build.rs
+          rm -f crates/ferrum-server/build.rs
+          rm -f crates/rom-bootstrap/build.rs
+
+          cat > .github/workflows/ci.yml <<'YAML'
+          name: CI
+
+          on:
+            push:
+            pull_request:
+
+          jobs:
+            test:
+              strategy:
+                matrix:
+                  os: [ubuntu-latest, windows-latest, macos-latest]
+              runs-on: ${{ matrix.os }}
+              steps:
+                - uses: actions/checkout@v4
+                - uses: dtolnay/rust-toolchain@stable
+                  with:
+                    components: rustfmt, clippy
+                - run: cargo fmt --all --check
+                - run: cargo clippy --workspace --all-targets -- -D warnings
+                - name: Run workspace tests
+                  shell: bash
+                  run: |
+                    set -o pipefail
+                    cargo test --workspace 2>&1 | tee test.log
+                - name: Upload test diagnostics
+                  if: failure()
+                  uses: actions/upload-artifact@v4
+                  with:
+                    name: test-diagnostics-${{ matrix.os }}
+                    path: test.log
+          YAML
+
+          cargo fmt --all
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          if [ "$STATUS" -eq 0 ]; then
-            rm -f .github/agent-complete-inventory-error.log
-            git add crates Cargo.lock
-            if git diff --cached --quiet; then
-              echo 'No source changes were produced.' > .github/agent-complete-inventory-error.log
-              git add .github/agent-complete-inventory-error.log
-              git commit -m 'Record empty inventory implementation result'
-              git push origin HEAD:agent/complete-inventory-containers
-              exit 1
-            fi
-            git commit -m 'Complete authoritative inventory and containers'
-            git push origin HEAD:agent/complete-inventory-containers
-            cat "$LOG"
-            exit 0
-          fi
-          {
-            echo 'Complete inventory implementation failed.'
-            echo
-            tail -n 4000 "$LOG"
-          } > .github/agent-complete-inventory-error.log
-          git add .github/agent-complete-inventory-error.log
-          git commit -m 'Record inventory implementation diagnostics'
+          git add -A
+          git diff --cached --stat
+          git commit -m 'Finalize inventory and container implementation'
           git push origin HEAD:agent/complete-inventory-containers
-          cat "$LOG"
-          exit "$STATUS"
