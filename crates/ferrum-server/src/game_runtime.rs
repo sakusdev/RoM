@@ -10,8 +10,8 @@ use std::{
 };
 
 use ferrum_game::{
-    CommandError, CommandOutcome, CommandSource, GameEvent, GameSnapshot, GameState,
-    GameStateError, PersistenceError, PlayerUuid, Transform, execute_command,
+    CommandError, CommandOutcome, CommandSource, ContainerClick, GameEvent, GameSnapshot,
+    GameState, GameStateError, ItemStack, PersistenceError, PlayerUuid, Transform, execute_command,
 };
 use thiserror::Error;
 
@@ -116,6 +116,35 @@ impl SharedGameRuntime {
         selected_hotbar: u8,
     ) -> Result<Vec<GameEvent>, GameRuntimeError> {
         let events = self.write()?.select_hotbar(uuid, selected_hotbar)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn click_container(
+        &self,
+        uuid: PlayerUuid,
+        click: ContainerClick,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self.write()?.click_container(uuid, click)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn close_container(&self, uuid: PlayerUuid) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self.write()?.close_container(uuid)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn set_creative_inventory_slot(
+        &self,
+        uuid: PlayerUuid,
+        slot: i16,
+        stack: Option<ItemStack>,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self
+            .write()?
+            .set_creative_inventory_slot(uuid, slot, stack)?;
         self.publish(&events)?;
         Ok(events)
     }

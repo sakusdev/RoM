@@ -253,7 +253,9 @@ mod tests {
                     PlayOutput::KeepAliveRequest(id) => writer.write_all(&id.to_be_bytes())?,
                     PlayOutput::SystemChat { .. }
                     | PlayOutput::PlayerTeleport { .. }
-                    | PlayOutput::SetPlayerInventory { .. } => {}
+                    | PlayOutput::SetPlayerInventory { .. }
+                    | PlayOutput::SetContainerContent { .. }
+                    | PlayOutput::SetContainerSlot { .. } => {}
                     PlayOutput::Disconnect(_) => return Ok(PlayWriterDirective::Stop),
                 }
                 Ok(PlayWriterDirective::Continue)
@@ -348,7 +350,9 @@ mod tests {
                 | PlayOutput::KeepAliveRequest(_)
                 | PlayOutput::SystemChat { .. }
                 | PlayOutput::PlayerTeleport { .. }
-                | PlayOutput::SetPlayerInventory { .. } => Ok(PlayWriterDirective::Continue),
+                | PlayOutput::SetPlayerInventory { .. }
+                | PlayOutput::SetContainerContent { .. }
+                | PlayOutput::SetContainerSlot { .. } => Ok(PlayWriterDirective::Continue),
                 PlayOutput::Disconnect(reason) => {
                     assert_eq!(reason, "done");
                     Ok(PlayWriterDirective::Stop)

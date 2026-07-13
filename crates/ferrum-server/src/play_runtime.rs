@@ -6,11 +6,12 @@ use crate::codec::{PacketReader, build_packet, read_packet};
 use anyhow::{Context, Result, bail};
 use ferrum_game::{CommandSource, PlayerUuid as GamePlayerUuid, Transform};
 use ferrum_play::{
-    BlockPosition, PlayerMovement, PlayerState, decode_player_action, decode_use_item_on_block,
-    encode_block_changed_ack, encode_block_update, encode_chunk_batch_finished,
-    encode_chunk_batch_start, encode_forget_level_chunk, encode_keep_alive,
-    encode_level_chunk_with_light, encode_set_chunk_cache_center, encode_system_chat,
-    player_action_to_world_event, use_item_on_block_to_world_event,
+    BlockPosition, ItemProtocolRegistry, PlayerMovement, PlayerState, decode_close_container,
+    decode_container_click, decode_creative_slot_update, decode_player_action,
+    decode_use_item_on_block, encode_block_changed_ack, encode_block_update,
+    encode_chunk_batch_finished, encode_chunk_batch_start, encode_forget_level_chunk,
+    encode_keep_alive, encode_level_chunk_with_light, encode_set_chunk_cache_center,
+    encode_system_chat, player_action_to_world_event, use_item_on_block_to_world_event,
 };
 use ferrum_protocol::{
     PacketDirection, PacketKind, ProtocolPhase, ProtocolProfile, ProtocolSession,
@@ -55,14 +56,20 @@ type LocalWorldRuntime = DeterministicRuntime<ChunkStore, WorldEvent>;
 pub(super) struct GameplaySync<'a> {
     runtime: &'a SharedGameRuntime,
     player_uuid: GamePlayerUuid,
+    items: &'a ItemProtocolRegistry,
 }
 
 impl<'a> GameplaySync<'a> {
     #[must_use]
-    pub(super) const fn new(runtime: &'a SharedGameRuntime, player_uuid: GamePlayerUuid) -> Self {
+    pub(super) const fn new(
+        runtime: &'a SharedGameRuntime,
+        player_uuid: GamePlayerUuid,
+        items: &'a ItemProtocolRegistry,
+    ) -> Self {
         Self {
             runtime,
             player_uuid,
+            items,
         }
     }
 
@@ -109,6 +116,25 @@ impl<'a> GameplaySync<'a> {
     fn select_hotbar(self, selected_hotbar: u8) -> Result<()> {
         self.runtime
             .select_hotbar(self.player_uuid, selected_hotbar)?;
+        Ok(())
+    }
+
+    fn click_container(self, payload: &[u8]) -> Result<()> {
+        let click = decode_container_click(payload, self.items)?;
+        self.runtime.click_container(self.player_uuid, click)?;
+        Ok(())
+    }
+
+    fn close_container(self, payload: &[u8]) -> Result<()> {
+        let _container_id = decode_close_container(payload)?;
+        self.runtime.close_container(self.player_uuid)?;
+        Ok(())
+    }
+
+    fn set_creative_slot(self, payload: &[u8]) -> Result<()> {
+        let (slot, stack) = decode_creative_slot_update(payload, self.items)?;
+        self.runtime
+            .set_creative_inventory_slot(self.player_uuid, slot, stack)?;
         Ok(())
     }
 }
@@ -608,6 +634,21 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
                     let selected_hotbar = decode_hotbar_selection(&mut packet_reader)?;
                     if let Some(gameplay) = gameplay {
                         gameplay.select_hotbar(selected_hotbar)?;
+                    }
+                }
+                Some(PacketKind::ContainerClick) => {
+                    if let Some(gameplay) = gameplay {
+                        gameplay.click_container(packet_reader.take_remaining())?;
+                    }
+                }
+                Some(PacketKind::CloseContainer) => {
+                    if let Some(gameplay) = gameplay {
+                        gameplay.close_container(packet_reader.take_remaining())?;
+                    }
+                }
+                Some(PacketKind::SetCreativeModeSlot) => {
+                    if let Some(gameplay) = gameplay {
+                        gameplay.set_creative_slot(packet_reader.take_remaining())?;
                     }
                 }
                 Some(PacketKind::PlayerAction) => {

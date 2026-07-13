@@ -4,8 +4,9 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    Difficulty, EntityError, EntityId, EntityStore, EntityType, EntityUuid, GameMode,
-    InventoryError, ItemStack, PlayerError, PlayerState, PlayerUuid, Transform,
+    ContainerClick, ContainerError, ContainerMutation, ContainerSnapshot, Difficulty, EntityError,
+    EntityId, EntityStore, EntityType, EntityUuid, GameMode, InventoryError, ItemStack,
+    PlayerError, PlayerState, PlayerUuid, Transform,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -69,6 +70,19 @@ pub enum GameEvent {
         uuid: PlayerUuid,
         slot: usize,
         stack: Option<ItemStack>,
+    },
+    ContainerContentChanged {
+        uuid: PlayerUuid,
+        snapshot: ContainerSnapshot,
+    },
+    InventoryInteractionRejected {
+        uuid: PlayerUuid,
+        reason: String,
+        snapshot: ContainerSnapshot,
+    },
+    ItemsDropped {
+        uuid: PlayerUuid,
+        stacks: Vec<ItemStack>,
     },
     SelectedHotbarChanged {
         uuid: PlayerUuid,
@@ -316,6 +330,126 @@ impl GameState {
         Ok((remainder, events))
     }
 
+    pub fn click_container(
+        &mut self,
+        uuid: PlayerUuid,
+        click: ContainerClick,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
+        let player = self
+            .players
+            .get_mut(&uuid)
+            .ok_or(GameStateError::UnknownPlayer { uuid })?;
+        let creative = player.game_mode == GameMode::Creative;
+        let mutation = player
+            .inventory_session
+            .click(&mut player.inventory, click, creative)?;
+        Ok(container_events(uuid, &player.inventory, mutation))
+    }
+
+    pub fn close_container(&mut self, uuid: PlayerUuid) -> Result<Vec<GameEvent>, GameStateError> {
+        let player = self
+            .players
+            .get_mut(&uuid)
+            .ok_or(GameStateError::UnknownPlayer { uuid })?;
+        let mutation = player
+            .inventory_session
+            .close_container(&mut player.inventory);
+        Ok(container_events(uuid, &player.inventory, mutation))
+    }
+
+    pub fn open_container(
+        &mut self,
+        uuid: PlayerUuid,
+        container_id: i32,
+        slots: Vec<Option<ItemStack>>,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
+        let player = self
+            .players
+            .get_mut(&uuid)
+            .ok_or(GameStateError::UnknownPlayer { uuid })?;
+        let snapshot =
+            player
+                .inventory_session
+                .open_container(container_id, slots, &player.inventory)?;
+        Ok(vec![GameEvent::ContainerContentChanged { uuid, snapshot }])
+    }
+
+    pub fn set_creative_inventory_slot(
+        &mut self,
+        uuid: PlayerUuid,
+        slot: i16,
+        stack: Option<ItemStack>,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
+        let player = self
+            .players
+            .get_mut(&uuid)
+            .ok_or(GameStateError::UnknownPlayer { uuid })?;
+        let mutation = player.inventory_session.set_creative_slot(
+            &mut player.inventory,
+            slot,
+            stack,
+            player.game_mode == GameMode::Creative,
+        )?;
+        Ok(container_events(uuid, &player.inventory, mutation))
+    }
+
+    pub fn clear_inventory(&mut self, uuid: PlayerUuid) -> Result<Vec<GameEvent>, GameStateError> {
+        let player = self
+            .players
+            .get_mut(&uuid)
+            .ok_or(GameStateError::UnknownPlayer { uuid })?;
+        let before = player.inventory.slots().to_vec();
+        player.inventory.clear();
+        let mut events = slot_diff_events(uuid, &before, player.inventory.slots());
+        events.push(GameEvent::ContainerContentChanged {
+            uuid,
+            snapshot: player.inventory_session.snapshot(&player.inventory),
+        });
+        Ok(events)
+    }
+
+    pub fn swap_inventory_slots(
+        &mut self,
+        uuid: PlayerUuid,
+        first: usize,
+        second: usize,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
+        let player = self
+            .players
+            .get_mut(&uuid)
+            .ok_or(GameStateError::UnknownPlayer { uuid })?;
+        let before = player.inventory.slots().to_vec();
+        player.inventory.swap_slots(first, second)?;
+        let mut events = slot_diff_events(uuid, &before, player.inventory.slots());
+        events.push(GameEvent::ContainerContentChanged {
+            uuid,
+            snapshot: player.inventory_session.snapshot(&player.inventory),
+        });
+        Ok(events)
+    }
+
+    pub fn remove_inventory_item(
+        &mut self,
+        uuid: PlayerUuid,
+        item: &str,
+        count: u32,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
+        let player = self
+            .players
+            .get_mut(&uuid)
+            .ok_or(GameStateError::UnknownPlayer { uuid })?;
+        let before = player.inventory.slots().to_vec();
+        player.inventory.remove_item(item, count);
+        let mut events = slot_diff_events(uuid, &before, player.inventory.slots());
+        if !events.is_empty() {
+            events.push(GameEvent::ContainerContentChanged {
+                uuid,
+                snapshot: player.inventory_session.snapshot(&player.inventory),
+            });
+        }
+        Ok(events)
+    }
+
     pub fn select_hotbar(
         &mut self,
         uuid: PlayerUuid,
@@ -338,12 +472,29 @@ impl GameState {
     }
 
     pub fn kill_player(&mut self, uuid: PlayerUuid) -> Result<Vec<GameEvent>, GameStateError> {
+        let keep_inventory = matches!(
+            self.game_rules.get("keepInventory"),
+            Some(GameRuleValue::Boolean(true))
+        );
         let player = self
             .players
             .get_mut(&uuid)
             .ok_or(GameStateError::UnknownPlayer { uuid })?;
         player.vitals.health = 0.0;
-        Ok(vec![GameEvent::PlayerKilled { uuid }])
+        let mut events = vec![GameEvent::PlayerKilled { uuid }];
+        if !keep_inventory {
+            let before = player.inventory.slots().to_vec();
+            let stacks = player.inventory.drain();
+            events.extend(slot_diff_events(uuid, &before, player.inventory.slots()));
+            if !stacks.is_empty() {
+                events.push(GameEvent::ItemsDropped { uuid, stacks });
+            }
+            events.push(GameEvent::ContainerContentChanged {
+                uuid,
+                snapshot: player.inventory_session.snapshot(&player.inventory),
+            });
+        }
+        Ok(events)
     }
 
     pub fn set_day_time(&mut self, day_time: i64) -> Vec<GameEvent> {
@@ -428,6 +579,63 @@ impl GameState {
     }
 }
 
+fn container_events(
+    uuid: PlayerUuid,
+    inventory: &crate::Inventory,
+    mutation: ContainerMutation,
+) -> Vec<GameEvent> {
+    let mut events = mutation
+        .changed_player_slots
+        .iter()
+        .map(|&slot| GameEvent::InventorySlotChanged {
+            uuid,
+            slot,
+            stack: inventory.slots()[slot].clone(),
+        })
+        .collect::<Vec<_>>();
+    if mutation.accepted {
+        events.push(GameEvent::ContainerContentChanged {
+            uuid,
+            snapshot: mutation.snapshot,
+        });
+    } else {
+        events.push(GameEvent::InventoryInteractionRejected {
+            uuid,
+            reason: mutation
+                .reason
+                .unwrap_or_else(|| "inventory interaction rejected".to_owned()),
+            snapshot: mutation.snapshot,
+        });
+    }
+    if !mutation.dropped.is_empty() {
+        events.push(GameEvent::ItemsDropped {
+            uuid,
+            stacks: mutation.dropped,
+        });
+    }
+    events
+}
+
+#[allow(clippy::filter_map_bool_then)]
+fn slot_diff_events(
+    uuid: PlayerUuid,
+    before: &[Option<ItemStack>],
+    after: &[Option<ItemStack>],
+) -> Vec<GameEvent> {
+    before
+        .iter()
+        .zip(after)
+        .enumerate()
+        .filter_map(|(slot, (before, after))| {
+            (before != after).then(|| GameEvent::InventorySlotChanged {
+                uuid,
+                slot,
+                stack: after.clone(),
+            })
+        })
+        .collect()
+}
+
 fn normalize_player_name(name: &str) -> String {
     name.to_ascii_lowercase()
 }
@@ -440,6 +648,8 @@ pub enum GameStateError {
     Player(#[from] PlayerError),
     #[error(transparent)]
     Inventory(#[from] InventoryError),
+    #[error(transparent)]
+    Container(#[from] ContainerError),
     #[error("invalid game dimension {dimension}")]
     InvalidDimension { dimension: String },
     #[error("player name {name} is already used by another UUID")]

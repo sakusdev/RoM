@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{EntityId, Inventory, validate_resource_location};
+use crate::{EntityId, Inventory, InventorySession, validate_resource_location};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -180,6 +180,8 @@ pub struct PlayerState {
     pub previous_game_mode: Option<GameMode>,
     pub dimension: String,
     pub inventory: Inventory,
+    #[serde(skip, default)]
+    pub inventory_session: InventorySession,
     pub abilities: Abilities,
     pub vitals: Vitals,
     pub experience: Experience,
@@ -208,6 +210,7 @@ impl PlayerState {
             previous_game_mode: None,
             dimension,
             inventory: Inventory::new(),
+            inventory_session: InventorySession::default(),
             abilities: Abilities::for_game_mode(GameMode::Survival),
             vitals: Vitals::default(),
             experience: Experience::default(),
@@ -237,11 +240,13 @@ impl PlayerState {
     pub fn disconnect(&mut self) {
         self.connected = false;
         self.entity_id = None;
+        self.inventory_session.reset();
     }
 
     pub fn reconnect(&mut self, entity_id: EntityId) {
         self.connected = true;
         self.entity_id = Some(entity_id);
+        self.inventory_session.reset();
     }
 }
 

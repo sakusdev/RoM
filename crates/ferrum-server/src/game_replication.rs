@@ -49,6 +49,9 @@ pub struct GameReplicationExit {
     pub deferred_outputs: u64,
     pub dropped_outputs: u64,
     pub disconnected_connections: u64,
+    pub inventory_snapshots: u64,
+    pub rejected_inventory_interactions: u64,
+    pub dropped_item_stacks: u64,
 }
 
 #[derive(Debug)]
@@ -332,12 +335,17 @@ fn process_commands(
                                     slots.len()
                                 ));
                             }
-                            for (slot, stack) in slots.into_iter().enumerate() {
-                                connection.queue(
-                                    PlayOutput::SetPlayerInventory { slot, stack },
-                                    exit,
-                                );
-                            }
+                            connection.queue(
+                                PlayOutput::SetContainerContent {
+                                    container_id: ferrum_game::PLAYER_CONTAINER_ID,
+                                    state_id: 0,
+                                    slots,
+                                    carried: None,
+                                },
+                                exit,
+                            );
+                            exit.inventory_snapshots =
+                                exit.inventory_snapshots.saturating_add(1);
                             Ok(())
                         })
                 } else {
@@ -411,6 +419,57 @@ fn dispatch_event(
             if let Some(connection) = connections.get_mut(&uuid) {
                 connection.queue(PlayOutput::SetPlayerInventory { slot, stack }, exit);
             }
+        }
+        GameEvent::ContainerContentChanged { uuid, snapshot } => {
+            if let Some(connection) = connections.get_mut(&uuid) {
+                connection.queue(
+                    PlayOutput::SetContainerContent {
+                        container_id: snapshot.container_id,
+                        state_id: snapshot.state_id,
+                        slots: snapshot.slots,
+                        carried: snapshot.carried,
+                    },
+                    exit,
+                );
+                exit.inventory_snapshots = exit.inventory_snapshots.saturating_add(1);
+            }
+        }
+        GameEvent::InventoryInteractionRejected {
+            uuid,
+            reason,
+            snapshot,
+        } => {
+            if let Some(connection) = connections.get_mut(&uuid) {
+                connection.queue(
+                    PlayOutput::SetContainerContent {
+                        container_id: snapshot.container_id,
+                        state_id: snapshot.state_id,
+                        slots: snapshot.slots,
+                        carried: snapshot.carried,
+                    },
+                    exit,
+                );
+                connection.queue(
+                    PlayOutput::SystemChat {
+                        message: format!("Inventory resynchronized: {reason}"),
+                        overlay: true,
+                    },
+                    exit,
+                );
+                exit.inventory_snapshots = exit.inventory_snapshots.saturating_add(1);
+                exit.rejected_inventory_interactions =
+                    exit.rejected_inventory_interactions.saturating_add(1);
+            }
+        }
+        GameEvent::ItemsDropped { uuid, stacks } => {
+            exit.dropped_item_stacks = exit.dropped_item_stacks.saturating_add(stacks.len() as u64);
+            target_chat(
+                connections,
+                uuid,
+                format!("Dropped {} item stack(s)", stacks.len()),
+                true,
+                exit,
+            );
         }
         GameEvent::PlayerKilled { uuid } => {
             target_chat(connections, uuid, "You died".to_owned(), false, exit)
@@ -561,8 +620,18 @@ mod tests {
             PlayOutput::PlayerTeleport { teleport_id: 2, transform }
                 if transform.position == [4.0, 70.0, 8.0]
         ));
+        let alex_output = recv_output(&alex_writer, &mut workers, &mut inputs);
+        let alex_output = match alex_output {
+            PlayOutput::SystemChat {
+                message,
+                overlay: false,
+            } if message == "Steve joined the game" => {
+                recv_output(&alex_writer, &mut workers, &mut inputs)
+            }
+            output => output,
+        };
         assert!(matches!(
-            recv_output(&alex_writer, &mut workers, &mut inputs),
+            alex_output,
             PlayOutput::SystemChat { message, overlay: false } if message == "[Server] hello"
         ));
         assert!(alex_writer.try_recv_output().is_err());
@@ -586,12 +655,15 @@ mod tests {
         service.control().register(steve, reader).unwrap();
         game.connect_player(steve, "Steve", spawn()).unwrap();
         service.control().sync_inventory(steve).unwrap();
-        for slot in 0..PLAYER_INVENTORY_SLOTS {
-            assert_eq!(
-                recv_output(&writer, &mut workers, &mut inputs),
-                PlayOutput::SetPlayerInventory { slot, stack: None }
-            );
-        }
+        assert!(matches!(
+            recv_output(&writer, &mut workers, &mut inputs),
+            PlayOutput::SetContainerContent {
+                container_id: 0,
+                state_id: 0,
+                slots,
+                carried: None,
+            } if slots.len() == PLAYER_INVENTORY_SLOTS && slots.iter().all(Option::is_none)
+        ));
 
         game.execute_command(&CommandSource::console(), "/give Steve minecraft:stone 1")
             .unwrap();

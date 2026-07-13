@@ -9,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub const ROMPACK_SCHEMA_VERSION: u32 = 6;
+pub const ROMPACK_SCHEMA_VERSION: u32 = 7;
 const ROMPACK_MAGIC: &[u8; 8] = b"ROMPACK\0";
 const HEADER_BYTES: usize = ROMPACK_MAGIC.len() + 4 + 8;
 const TRAILER_BYTES: usize = 32;
@@ -20,6 +20,7 @@ pub struct RomPackLimits {
     pub max_json_bytes: u64,
     pub max_packets: usize,
     pub max_items: usize,
+    pub max_data_components: usize,
     pub max_sections: usize,
     pub max_registries: usize,
     pub max_entries_per_registry: usize,
@@ -36,6 +37,7 @@ impl Default for RomPackLimits {
             max_json_bytes: 32 * 1024 * 1024,
             max_packets: 4_096,
             max_items: 100_000,
+            max_data_components: 100_000,
             max_sections: 1_024,
             max_registries: 1_024,
             max_entries_per_registry: 1_000_000,
@@ -57,6 +59,8 @@ pub struct RomPack {
     pub world: RomPackWorld,
     /// Static item registry IDs used by Play-state ItemStack codecs.
     pub items: Vec<RomPackItem>,
+    /// Static data-component-type IDs used by version-aware ItemStack codecs.
+    pub data_components: Vec<RomPackDataComponent>,
     pub registries: Vec<RomPackRegistry>,
     pub resources: Vec<RomPackResource>,
 }
@@ -121,6 +125,12 @@ pub struct RomPackItem {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RomPackDataComponent {
+    pub component: String,
+    pub protocol_id: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RomPackRegistry {
     pub id: String,
     pub entries: Vec<String>,
@@ -141,6 +151,7 @@ pub struct RomPackSummary {
     pub packet_count: usize,
     pub packet_catalog_count: usize,
     pub item_count: usize,
+    pub data_component_count: usize,
     pub registry_count: usize,
     pub registry_entry_count: usize,
     pub resource_count: usize,
@@ -427,6 +438,35 @@ pub fn validate_rompack(pack: &RomPack, limits: RomPackLimits) -> Result<()> {
         }
     }
 
+    if pack.data_components.len() > limits.max_data_components {
+        bail!("version pack contains too many data-component registry records");
+    }
+    let mut previous_component: Option<&str> = None;
+    let mut component_protocol_ids = BTreeSet::new();
+    for component in &pack.data_components {
+        validate_resource_location(
+            "data component ID",
+            &component.component,
+            limits.max_identifier_bytes,
+        )?;
+        if previous_component.is_some_and(|previous| previous >= component.component.as_str()) {
+            bail!("version-pack data components must be strictly sorted and unique");
+        }
+        previous_component = Some(&component.component);
+        if component.protocol_id < 0 {
+            bail!(
+                "data component {} protocol ID cannot be negative",
+                component.component
+            );
+        }
+        if !component_protocol_ids.insert(component.protocol_id) {
+            bail!(
+                "duplicate data component protocol ID {}",
+                component.protocol_id
+            );
+        }
+    }
+
     if pack.registries.len() > limits.max_registries {
         bail!("version pack contains too many registries");
     }
@@ -497,6 +537,7 @@ fn summary(path: PathBuf, bytes: &[u8], pack: &RomPack) -> RomPackSummary {
         packet_count: pack.packets.len(),
         packet_catalog_count: pack.packet_catalog.len(),
         item_count: pack.items.len(),
+        data_component_count: pack.data_components.len(),
         registry_count: pack.registries.len(),
         registry_entry_count: pack
             .registries
@@ -631,6 +672,7 @@ mod tests {
                     protocol_id: 1,
                 },
             ],
+            data_components: Vec::new(),
             packet_catalog: vec![
                 PacketDescriptor::new(
                     ferrum_protocol::ProtocolPhase::Handshake,

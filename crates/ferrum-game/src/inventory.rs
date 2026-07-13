@@ -86,6 +86,21 @@ impl ItemStack {
         self
     }
 
+    pub fn copy_with_count(&self, count: u32) -> Result<Self, InventoryError> {
+        if count == 0 || count > self.max_count {
+            return Err(InventoryError::InvalidStackCount {
+                count,
+                max_count: self.max_count,
+            });
+        }
+        Ok(Self {
+            item: self.item.clone(),
+            count,
+            max_count: self.max_count,
+            components: self.components.clone(),
+        })
+    }
+
     #[must_use]
     pub fn item(&self) -> &str {
         &self.item
@@ -228,6 +243,49 @@ impl Inventory {
 
     pub fn clear(&mut self) {
         self.slots.fill(None);
+    }
+
+    pub fn drain(&mut self) -> Vec<ItemStack> {
+        self.slots.iter_mut().filter_map(Option::take).collect()
+    }
+
+    pub fn swap_slots(&mut self, first: usize, second: usize) -> Result<(), InventoryError> {
+        if first >= self.slots.len() {
+            return Err(InventoryError::SlotOutOfRange { index: first });
+        }
+        if second >= self.slots.len() {
+            return Err(InventoryError::SlotOutOfRange { index: second });
+        }
+        self.slots.swap(first, second);
+        Ok(())
+    }
+
+    pub fn remove_item(&mut self, item: &str, mut count: u32) -> Vec<usize> {
+        let mut changed = Vec::new();
+        for (index, slot) in self.slots.iter_mut().enumerate() {
+            if count == 0 {
+                break;
+            }
+            let Some(stack) = slot.as_ref() else {
+                continue;
+            };
+            if stack.item() != item {
+                continue;
+            }
+            let removed = count.min(stack.count());
+            count -= removed;
+            if removed == stack.count() {
+                *slot = None;
+            } else {
+                *slot = Some(
+                    stack
+                        .copy_with_count(stack.count() - removed)
+                        .expect("remaining stack count is valid"),
+                );
+            }
+            changed.push(index);
+        }
+        changed
     }
 
     pub fn insert(&mut self, stack: ItemStack) -> Option<ItemStack> {

@@ -329,6 +329,7 @@ dependencies = [
  "ferrum-game",
  "ferrum-nbt",
  "ferrum-world",
+ "serde_json",
  "thiserror",
 ]
 

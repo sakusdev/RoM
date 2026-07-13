@@ -10,4 +10,5 @@ rust-version.workspace = true
 ferrum-game = { path = "../ferrum-game" }
 ferrum-nbt = { path = "../ferrum-nbt" }
 ferrum-world = { path = "../ferrum-world" }
+serde_json.workspace = true
 thiserror.workspace = true

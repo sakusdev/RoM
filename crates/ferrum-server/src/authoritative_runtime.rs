@@ -40,6 +40,20 @@ pub enum PlayOutput {
         slot: usize,
         stack: Option<ItemStack>,
     },
+    /// Replace the complete contents and carried stack for one container.
+    SetContainerContent {
+        container_id: i32,
+        state_id: i32,
+        slots: Vec<Option<ItemStack>>,
+        carried: Option<ItemStack>,
+    },
+    /// Replace one slot in an open container.
+    SetContainerSlot {
+        container_id: i32,
+        state_id: i32,
+        slot: i16,
+        stack: Option<ItemStack>,
+    },
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

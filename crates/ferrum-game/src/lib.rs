@@ -6,6 +6,7 @@
 //! Minecraft version.
 
 pub mod command;
+pub mod container;
 pub mod entity;
 pub mod inventory;
 pub mod persistence;
@@ -15,11 +16,16 @@ mod state;
 pub use command::{
     CommandError, CommandOutcome, CommandSource, GameCommand, execute_command, parse_command,
 };
+pub use container::{
+    ContainerClick, ContainerClickKind, ContainerError, ContainerMutation, ContainerSnapshot,
+    InventorySession, MAX_CONTAINER_SLOTS, OUTSIDE_SLOT, PLAYER_CONTAINER_ID,
+};
 pub use entity::{
     Entity, EntityError, EntityId, EntityStore, EntityType, EntityUuid, Transform, Velocity,
 };
 pub use inventory::{
-    EquipmentSlot, HOTBAR_SLOTS, Inventory, InventoryError, ItemStack, MAX_VANILLA_STACK_SIZE,
+    EquipmentSlot, HOTBAR_END, HOTBAR_SLOTS, HOTBAR_START, Inventory, InventoryError, ItemStack,
+    MAIN_INVENTORY_END, MAIN_INVENTORY_START, MAX_VANILLA_STACK_SIZE, OFFHAND_SLOT,
     PLAYER_INVENTORY_SLOTS,
 };
 pub use persistence::{GameSnapshot, PersistenceError};
