@@ -15,6 +15,8 @@ This document tracks the boundary between implemented core infrastructure and pr
 - World startup restore, periodic autosave, `save-all`, and final shutdown save
 - Native numbered Releases for Windows, Linux, Android/Termux, and macOS
 
+World snapshot format and lifecycle details are documented in [`WORLD_PERSISTENCE.md`](WORLD_PERSISTENCE.md).
+
 ## Current completion work
 
 Durable world persistence is connected to the server lifecycle. Client-visible entity replication is the next protocol-level subsystem; packet layouts must be derived from the exact 26.1.2 implementation rather than guessed.
