@@ -12,11 +12,12 @@ This document tracks the boundary between implemented core infrastructure and pr
 - Entity storage and gameplay-state snapshots
 - Atomic gameplay autosave and shutdown save
 - Deterministic world chunk snapshots with validation
+- World startup restore, periodic autosave, `save-all`, and final shutdown save
 - Native numbered Releases for Windows, Linux, Android/Termux, and macOS
 
 ## Current completion work
 
-The active core-completion branch connects world snapshots to startup restore, periodic autosave, `save-all`, and shutdown. Client-visible entity replication is the next protocol-level subsystem; packet layouts must be derived from the exact 26.1.2 implementation rather than guessed.
+Durable world persistence is connected to the server lifecycle. Client-visible entity replication is the next protocol-level subsystem; packet layouts must be derived from the exact 26.1.2 implementation rather than guessed.
 
 ## Production boundary
 
