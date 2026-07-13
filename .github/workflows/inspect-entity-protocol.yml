@@ -96,6 +96,13 @@ jobs:
             'net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket$Action'
             'net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket$Entry'
             'net.minecraft.network.protocol.game.ClientboundPlayerInfoRemovePacket'
+            'net.minecraft.network.FriendlyByteBuf'
+            'net.minecraft.network.codec.ByteBufCodecs'
+            'net.minecraft.world.phys.Vec3'
+            'net.minecraft.world.entity.PositionMoveRotation'
+            'net.minecraft.world.entity.Relative'
+            'net.minecraft.world.level.GameType'
+            'net.minecraft.util.Mth'
           )
           : > entity-protocol/class-status.tsv
           for target in "${targets[@]}"; do
