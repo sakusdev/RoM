@@ -203,11 +203,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
           sdkmanager 'ndk;27.2.12479018'
           echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/27.2.12479018" >> "$GITHUB_ENV"
 
       - name: Build native server and Bootstrap
-        if: matrix.target != 'aarch64-unknown-linux-gnu' && !matrix.android
+        if: matrix.target != 'aarch64-unknown-linux-gnu' && matrix.android == false
         run: cargo build --locked --release -p ferrum-server -p rom-bootstrap --target ${{ matrix.target }}
 
       - name: Build Linux ARM64 server and Bootstrap
@@ -224,6 +225,7 @@ jobs:
           set -euo pipefail
           toolchain="${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/bin"
           export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="${toolchain}/aarch64-linux-android24-clang"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_AR="${toolchain}/llvm-ar"
           export CC_aarch64_linux_android="${toolchain}/aarch64-linux-android24-clang"
           export AR_aarch64_linux_android="${toolchain}/llvm-ar"
           cargo build --locked --release -p ferrum-server -p rom-bootstrap --target "${{ matrix.target }}"
@@ -420,9 +422,9 @@ jobs:
 
           This build includes the current authoritative inventory and container transaction implementation, synchronized registries, login and Configuration, world bootstrap, player synchronization, chat, and Keep Alive.
 
-          Standalone `ferrum-server` and `rom-bootstrap` executables are provided for Windows x86_64, Linux x86_64, Linux AArch64, Android/Termux AArch64, macOS x86_64, and macOS AArch64. Platform archives include configuration, documentation, `VERSION`, and `BUILD_INFO` files.
+          Standalone ferrum-server and rom-bootstrap executables are provided for Windows x86_64, Linux x86_64, Linux AArch64, Android/Termux AArch64, macOS x86_64, and macOS AArch64. Platform archives include configuration, documentation, VERSION, and BUILD_INFO files.
 
-          Android users can download and run `install-termux.sh`. Pixel Terminal users can download and run `install-pixel-terminal.sh`. Verify all downloads with the per-file checksum or `SHA256SUMS`.
+          Android users can download and run install-termux.sh. Pixel Terminal users can download and run install-pixel-terminal.sh. Verify all downloads with the per-file checksum or SHA256SUMS.
           EOF
 
       - name: Create or update release and upload assets
