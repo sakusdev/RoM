@@ -215,6 +215,12 @@ struct Handshake {
     next_state: i32,
 }
 
+#[derive(Debug, Clone, Default)]
+struct PersistenceConfig {
+    game: GameServiceConfig,
+    world: WorldServiceConfig,
+}
+
 #[derive(Debug)]
 struct ServerState {
     online_players: AtomicI32,
@@ -245,8 +251,7 @@ impl ServerState {
             config.play_policy.clone(),
             None,
             None,
-            GameServiceConfig::default(),
-            WorldServiceConfig::default(),
+            PersistenceConfig::default(),
         )
         .expect("built-in world profile must initialize")
     }
@@ -258,8 +263,7 @@ impl ServerState {
         play_policy: PlayPolicy,
         loaded_chunks: Option<ChunkStore>,
         game_state: Option<GameState>,
-        game_service_config: GameServiceConfig,
-        world_service_config: WorldServiceConfig,
+        persistence: PersistenceConfig,
     ) -> Result<Self> {
         let center = play_runtime::spawn_chunk(&world);
         let game_state = match game_state {
@@ -276,7 +280,7 @@ impl ServerState {
             None => GameState::new(world.dimension.clone())?,
         };
         let game_runtime = SharedGameRuntime::new(game_state);
-        let game_service = spawn_game_service(game_runtime.clone(), game_service_config)?;
+        let game_service = spawn_game_service(game_runtime.clone(), persistence.game)?;
         let shared_runtime_config = shared_play_runtime_config(&play_policy)?;
         let shared_world = Arc::new(match loaded_chunks {
             Some(store) => {
@@ -317,8 +321,7 @@ impl ServerState {
             play_policy,
             Some(store),
             None,
-            GameServiceConfig::default(),
-            WorldServiceConfig::default(),
+            PersistenceConfig::default(),
         )
     }
 
@@ -575,10 +578,13 @@ fn run(cli: Cli) -> Result<()> {
             .then(|| Duration::from_secs(cli.autosave_seconds)),
         ..GameServiceConfig::default()
     };
-    let world_service_config = WorldServiceConfig::new(
-        world_state_path,
-        (cli.autosave_seconds > 0).then(|| Duration::from_secs(cli.autosave_seconds)),
-    );
+    let persistence = PersistenceConfig {
+        game: game_service_config,
+        world: WorldServiceConfig::new(
+            world_state_path,
+            (cli.autosave_seconds > 0).then(|| Duration::from_secs(cli.autosave_seconds)),
+        ),
+    };
     let state = Arc::new(ServerState::with_runtime(
         config.online_players,
         world_profile,
@@ -586,8 +592,7 @@ fn run(cli: Cli) -> Result<()> {
         config.play_policy.clone(),
         loaded_chunks,
         Some(game_state),
-        game_service_config,
-        world_service_config,
+        persistence,
     )?);
     let listener = TcpListener::bind(&config.bind)
         .with_context(|| format!("cannot bind Minecraft status listener on {}", config.bind))?;
