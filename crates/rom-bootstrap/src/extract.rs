@@ -1,13 +1,13 @@
 use super::{
     BOOTSTRAP_SCHEMA_VERSION, BootstrapManifest, BootstrapStage, absolute_path, eula_is_accepted,
-    packet_report::read_packet_report, registry_report::read_item_registry_report, verify_file,
-    write_json,
+    packet_report::read_packet_report,
+    registry_report::{RegistryProtocolReport, read_registry_protocol_report},
+    verify_file, write_json,
 };
 use anyhow::{Context, Result, bail};
 use ferrum_protocol::{PacketCatalog, PacketDescriptor, PacketKind, canonical_packet_name};
 use ferrum_rompack::{
-    ROMPACK_SCHEMA_VERSION, RomPack, RomPackBiomes, RomPackBlockStates, RomPackItem,
-    RomPackMetadata, RomPackPacket, RomPackRegistry, RomPackResource, RomPackSource,
+    ROMPACK_SCHEMA_VERSION, RomPack, RomPackBiomes, RomPackBlockStates, RomPackMetadata, RomPackPacket, RomPackRegistry, RomPackResource, RomPackSource,
     RomPackSummary, RomPackWorld, read_rompack, sha256_hex, write_rompack,
 };
 use ferrum_version_26_1_2 as version_26_1_2;
@@ -168,7 +168,10 @@ pub fn generate_version_pack(options: &GenerateOptions) -> Result<GenerateReport
     let game_jar = resolve_game_jar(&official_jar)?;
     let (registries, resources) = extract_registry_inventory(&game_jar.bytes)?;
     let packet_catalog = resolve_packet_catalog(&instance, options.packet_report.as_deref())?;
-    let items = resolve_item_registry(&instance, options.registry_report.as_deref())?;
+    let protocol_registries =
+        resolve_protocol_registries(&instance, options.registry_report.as_deref())?;
+    let items = protocol_registries.items;
+    let data_components = protocol_registries.data_components;
     let packets = typed_packet_inventory(&packet_catalog)?;
     let world = builtin_world_metadata();
     validate_against_builtin_profile(
@@ -198,6 +201,7 @@ pub fn generate_version_pack(options: &GenerateOptions) -> Result<GenerateReport
         packet_catalog: packet_catalog.entries().to_vec(),
         world,
         items,
+        data_components,
         registries,
         resources,
     };
@@ -609,9 +613,12 @@ fn resolve_packet_catalog(instance: &Path, requested: Option<&Path>) -> Result<P
     builtin_packet_catalog()
 }
 
-fn resolve_item_registry(instance: &Path, requested: Option<&Path>) -> Result<Vec<RomPackItem>> {
+fn resolve_protocol_registries(
+    instance: &Path,
+    requested: Option<&Path>,
+) -> Result<RegistryProtocolReport> {
     if let Some(path) = requested {
-        return read_item_registry_report(path);
+        return read_registry_protocol_report(path);
     }
     for candidate in [
         instance.join("generated/reports/registries.json"),
@@ -619,10 +626,13 @@ fn resolve_item_registry(instance: &Path, requested: Option<&Path>) -> Result<Ve
         instance.join("reports/registries.json"),
     ] {
         if candidate.is_file() {
-            return read_item_registry_report(&candidate);
+            return read_registry_protocol_report(&candidate);
         }
     }
-    Ok(Vec::new())
+    Ok(RegistryProtocolReport {
+        items: Vec::new(),
+        data_components: Vec::new(),
+    })
 }
 
 fn builtin_packet_catalog() -> Result<PacketCatalog> {

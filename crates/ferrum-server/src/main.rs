@@ -16,12 +16,12 @@ use ferrum_configuration::{
 use ferrum_game::{CommandSource, GameState, PlayerUuid as GamePlayerUuid, Transform};
 use ferrum_nbt::{Tag, encode_anonymous};
 use ferrum_play::{
-    BlockPosition, CommonPlayerSpawnInfo, DefaultSpawnPosition, GlobalPosition,
-    ItemProtocolRegistry, JoinGame, PlayerPosition, PositionMoveRotation,
+    BlockPosition, CommonPlayerSpawnInfo, DataComponentProtocolRegistry, DefaultSpawnPosition,
+    GlobalPosition, ItemProtocolRegistry, JoinGame, PlayerPosition, PositionMoveRotation,
     encode_chunk_batch_finished, encode_chunk_batch_start, encode_default_spawn_position,
     encode_join_game, encode_level_chunk_with_light, encode_play_disconnect,
-    encode_player_position, encode_set_chunk_cache_center, encode_set_player_inventory,
-    encode_system_chat,
+    encode_player_position, encode_set_chunk_cache_center, encode_set_container_content,
+    encode_set_container_slot, encode_set_player_inventory_with_components, encode_system_chat,
 };
 use ferrum_protocol::{HandshakeIntent, PacketKind, PacketTable, ProtocolProfile, ProtocolSession};
 use ferrum_rompack::{RomPack, RomPackPacket, RomPackRegistry, RomPackWorld, read_rompack};
@@ -142,6 +142,7 @@ struct ServerConfig {
     packets: PacketIds,
     runtime_profile: Option<ProtocolProfile>,
     item_protocol_ids: ItemProtocolRegistry,
+    data_component_protocol_ids: DataComponentProtocolRegistry,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -500,33 +501,41 @@ fn run(cli: Cli) -> Result<()> {
         .unwrap_or_else(|| Path::new("."))
         .join("game-state.json");
     let game_state_path = cli.game_state.clone().unwrap_or(default_state_path);
-    let (runtime_profile, world_profile, registry_payloads, item_protocol_ids) =
-        if let Some(version_pack) = &cli.version_pack {
-            let loaded = load_version_pack(version_pack, &config)?;
-            (
-                loaded.profile,
-                loaded.world,
-                loaded.registry_payloads,
-                loaded.item_protocol_ids,
-            )
-        } else {
-            let registry_payloads =
-                if config.profile_name.as_deref() == Some(version_26_1_2::PROFILE_NAME) {
-                    builtin_26_1_2_registry_payloads()?
-                } else {
-                    Vec::new()
-                };
-            (
-                config
-                    .protocol_profile()
-                    .context("cannot build configured protocol profile")?,
-                play_runtime::builtin_world_profile(),
-                registry_payloads,
-                ItemProtocolRegistry::default(),
-            )
-        };
+    let (
+        runtime_profile,
+        world_profile,
+        registry_payloads,
+        item_protocol_ids,
+        data_component_protocol_ids,
+    ) = if let Some(version_pack) = &cli.version_pack {
+        let loaded = load_version_pack(version_pack, &config)?;
+        (
+            loaded.profile,
+            loaded.world,
+            loaded.registry_payloads,
+            loaded.item_protocol_ids,
+            loaded.data_component_protocol_ids,
+        )
+    } else {
+        let registry_payloads =
+            if config.profile_name.as_deref() == Some(version_26_1_2::PROFILE_NAME) {
+                builtin_26_1_2_registry_payloads()?
+            } else {
+                Vec::new()
+            };
+        (
+            config
+                .protocol_profile()
+                .context("cannot build configured protocol profile")?,
+            play_runtime::builtin_world_profile(),
+            registry_payloads,
+            ItemProtocolRegistry::default(),
+            DataComponentProtocolRegistry::default(),
+        )
+    };
     config.runtime_profile = Some(runtime_profile);
     config.item_protocol_ids = item_protocol_ids;
+    config.data_component_protocol_ids = data_component_protocol_ids;
     let game_state = load_game_state(&game_state_path, &world_profile.dimension)?;
     let loaded_chunks = load_configured_world_chunks(&config.world, &world_profile)?;
     let game_service_config = GameServiceConfig {
@@ -662,6 +671,7 @@ struct LoadedVersionPack {
     world: RomPackWorld,
     registry_payloads: Vec<Vec<u8>>,
     item_protocol_ids: ItemProtocolRegistry,
+    data_component_protocol_ids: DataComponentProtocolRegistry,
 }
 
 fn load_version_pack(path: &Path, config: &ServerConfig) -> Result<LoadedVersionPack> {
@@ -693,6 +703,12 @@ fn load_version_pack(path: &Path, config: &ServerConfig) -> Result<LoadedVersion
             .map(|item| (item.item.clone(), item.protocol_id)),
     )
     .context("cannot build item protocol registry from version pack")?;
+    let data_component_protocol_ids = DataComponentProtocolRegistry::new(
+        pack.data_components
+            .iter()
+            .map(|component| (component.component.clone(), component.protocol_id)),
+    )
+    .context("cannot build data component protocol registry from version pack")?;
     println!(
         "loaded RoM version pack {} (SHA-256 {}, {} typed packets / {} catalog entries, {} items, data version {}, {} sections, {} registries / {} entries)",
         canonical.display(),
@@ -710,6 +726,7 @@ fn load_version_pack(path: &Path, config: &ServerConfig) -> Result<LoadedVersion
         world: pack.world,
         registry_payloads,
         item_protocol_ids,
+        data_component_protocol_ids,
     })
 }
 
@@ -1068,6 +1085,7 @@ impl Default for ServerConfig {
             packets: PacketIds::default(),
             runtime_profile: None,
             item_protocol_ids: ItemProtocolRegistry::default(),
+            data_component_protocol_ids: DataComponentProtocolRegistry::default(),
         }
     }
 }
@@ -2018,6 +2036,7 @@ fn handle_play_protocol<R: Read, W: Write>(
             live_writer,
             profile,
             &config.item_protocol_ids,
+            &config.data_component_protocol_ids,
         )?),
         None => None,
     };
@@ -2026,8 +2045,11 @@ fn handle_play_protocol<R: Read, W: Write>(
         control: context.state.game_replication.control(),
         uuid: online_player.player_uuid(),
     });
-    let gameplay =
-        play_runtime::GameplaySync::new(&context.state.game_runtime, online_player.player_uuid());
+    let gameplay = play_runtime::GameplaySync::new(
+        &context.state.game_runtime,
+        online_player.player_uuid(),
+        &config.item_protocol_ids,
+    );
     let result = run_static_play_session_with_bridge(
         reader,
         writer,
@@ -2073,6 +2095,7 @@ fn spawn_live_play_writer(
     writer: SharedWriter<TcpStream>,
     profile: &ProtocolProfile,
     item_protocol_ids: &ItemProtocolRegistry,
+    data_component_protocol_ids: &DataComponentProtocolRegistry,
 ) -> Result<PlayWriterWorker<SharedWriter<TcpStream>>> {
     let packet_ids = PlayOutputPacketIds {
         keep_alive_request: profile.packets().require(PacketKind::KeepAliveRequest)?,
@@ -2081,16 +2104,23 @@ fn spawn_live_play_writer(
         player_position: profile.packets().require(PacketKind::PlayerPosition)?,
     };
     let set_player_inventory = profile.packets().id(PacketKind::SetPlayerInventory);
+    let set_container_content = profile.packets().id(PacketKind::SetContainerContent);
+    let set_container_slot = profile.packets().id(PacketKind::SetContainerSlot);
     let item_protocol_ids = item_protocol_ids.clone();
+    let data_component_protocol_ids = data_component_protocol_ids.clone();
     spawn_play_writer(
         endpoint,
         writer,
         Duration::from_millis(PLAY_WRITER_WAIT_MILLIS),
-        move |writer, output| {
-            if let PlayOutput::SetPlayerInventory { slot, stack } = output {
+        move |writer, output| match output {
+            PlayOutput::SetPlayerInventory { slot, stack } => {
                 if let Some(packet_id) = set_player_inventory
-                    && let Some(payload) =
-                        encode_set_player_inventory(slot, stack.as_ref(), &item_protocol_ids)?
+                    && let Some(payload) = encode_set_player_inventory_with_components(
+                        slot,
+                        stack.as_ref(),
+                        &item_protocol_ids,
+                        &data_component_protocol_ids,
+                    )?
                 {
                     write_packet(
                         writer,
@@ -2101,9 +2131,63 @@ fn spawn_live_play_writer(
                     )?;
                     writer.flush()?;
                 }
-                return Ok(PlayWriterDirective::Continue);
+                Ok(PlayWriterDirective::Continue)
             }
-            write_live_play_output(writer, packet_ids, output)
+            PlayOutput::SetContainerContent {
+                container_id,
+                state_id,
+                slots,
+                carried,
+            } => {
+                if let Some(packet_id) = set_container_content
+                    && let Some(payload) = encode_set_container_content(
+                        container_id,
+                        state_id,
+                        &slots,
+                        carried.as_ref(),
+                        &item_protocol_ids,
+                        &data_component_protocol_ids,
+                    )?
+                {
+                    write_packet(
+                        writer,
+                        &build_packet(packet_id, |body| {
+                            body.extend_from_slice(&payload);
+                            Ok(())
+                        })?,
+                    )?;
+                    writer.flush()?;
+                }
+                Ok(PlayWriterDirective::Continue)
+            }
+            PlayOutput::SetContainerSlot {
+                container_id,
+                state_id,
+                slot,
+                stack,
+            } => {
+                if let Some(packet_id) = set_container_slot
+                    && let Some(payload) = encode_set_container_slot(
+                        container_id,
+                        state_id,
+                        slot,
+                        stack.as_ref(),
+                        &item_protocol_ids,
+                        &data_component_protocol_ids,
+                    )?
+                {
+                    write_packet(
+                        writer,
+                        &build_packet(packet_id, |body| {
+                            body.extend_from_slice(&payload);
+                            Ok(())
+                        })?,
+                    )?;
+                    writer.flush()?;
+                }
+                Ok(PlayWriterDirective::Continue)
+            }
+            output => write_live_play_output(writer, packet_ids, output),
         },
     )
 }
@@ -2161,7 +2245,9 @@ fn write_live_play_output<W: Write>(
             )?;
             PlayWriterDirective::Continue
         }
-        PlayOutput::SetPlayerInventory { .. } => {
+        PlayOutput::SetPlayerInventory { .. }
+        | PlayOutput::SetContainerContent { .. }
+        | PlayOutput::SetContainerSlot { .. } => {
             bail!("inventory output requires the version-aware live Play writer")
         }
         PlayOutput::PlayerTeleport {

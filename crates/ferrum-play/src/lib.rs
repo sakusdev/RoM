@@ -13,7 +13,13 @@ pub use block_interaction::{
     player_action_to_world_event, use_item_on_block_to_world_event,
 };
 pub use chunk_stream::encode_forget_level_chunk;
-pub use inventory::{InventoryEncodeError, ItemProtocolRegistry, encode_set_player_inventory};
+pub use inventory::{
+    DataComponentProtocolRegistry, InventoryDecodeError, InventoryEncodeError,
+    ItemProtocolRegistry, decode_close_container, decode_container_click,
+    decode_creative_slot_update, encode_item_stack, encode_set_container_content,
+    encode_set_container_slot, encode_set_player_inventory,
+    encode_set_player_inventory_with_components,
+};
 pub use movement::{
     MAX_PLAYER_COORDINATE, MovementDecodeError, MovementFlags, PlayerMovement, PlayerState,
     decode_move_player_position, decode_move_player_position_rotation, decode_move_player_rotation,
