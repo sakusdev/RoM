@@ -20,31 +20,22 @@ jobs:
         with:
           components: rustfmt
       - name: Normalize relative versions.list paths
+        id: patch
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
+          exec > >(tee bundler-patch.log) 2>&1
           python - <<'PY'
           from pathlib import Path
 
           path = Path('crates/rom-bootstrap/src/extract.rs')
           text = path.read_text()
-          old = '''        let path = fields[2];
-                  validate_zip_path(path)?;
-                  if !path.starts_with("META-INF/versions/") || !path.ends_with(".jar") {
-                      bail!("invalid embedded game JAR path in versions.list: {path}");
-                  }
-                  let sha256 = fields[0];
-                  let digest = if sha256.len() == 64 && sha256.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-                      Some(sha256.to_ascii_lowercase())
-                  } else {
-                      None
-                  };
-                  candidates.push(GameJarCandidate {
-                      path: path.to_owned(),
-                      sha256: digest,
-                  });
-          '''.replace('          ', '')
-          new = '''        let listed_path = fields[2];
+          if 'let listed_path = fields[2];' not in text:
+              start = text.index('        let path = fields[2];')
+              end_marker = '        });\n'
+              end = text.index(end_marker, start) + len(end_marker)
+              new_block = '''        let listed_path = fields[2];
                   validate_zip_path(listed_path)?;
                   let path = if listed_path.starts_with("META-INF/versions/") {
                       listed_path.to_owned()
@@ -66,13 +57,6 @@ jobs:
                       sha256: digest,
                   });
           '''.replace('          ', '')
-          if 'let listed_path = fields[2];' not in text:
-              start = text.index('        let path = fields[2];')
-              end_marker = '        });\n'
-              end = text.index(end_marker, start) + len(end_marker)
-              current = text[start:end]
-              # Keep exact Rust indentation while replacing the complete record parser block.
-              new_block = new
               text = text[:start] + new_block + text[end:]
 
           text = text.replace(
@@ -94,13 +78,8 @@ jobs:
           workflow = Path('.github/workflows/inspect-entity-protocol.yml')
           text = workflow.read_text()
           if 'listed_path="$(unzip -p' not in text:
-              old = '''          inner_path="$(unzip -p "$server_jar" META-INF/versions.list 2>/dev/null | tr -d '\\r' | awk -F '\\t' 'NF == 3 { print $3; exit }')"
-                        if [[ -n "$inner_path" ]]; then
-                          unzip -p "$server_jar" "$inner_path" > game-server.jar
-                        else
-                          cp "$server_jar" game-server.jar
-                        fi
-              '''.replace('              ', '')
+              start = text.index('          inner_path="$(unzip -p')
+              end = text.index('          jar tf game-server.jar', start)
               new = '''          listed_path="$(unzip -p "$server_jar" META-INF/versions.list 2>/dev/null | tr -d '\\r' | awk -F '\\t' 'NF == 3 { print $3; exit }')"
                         if [[ -n "$listed_path" ]]; then
                           if [[ "$listed_path" == META-INF/versions/* ]]; then
@@ -114,8 +93,6 @@ jobs:
                           cp "$server_jar" game-server.jar
                         fi
               '''.replace('              ', '')
-              start = text.index('          inner_path="$(unzip -p')
-              end = text.index('          jar tf game-server.jar', start)
               text = text[:start] + new + text[end:]
           workflow.write_text(text)
           PY
@@ -128,3 +105,12 @@ jobs:
             git commit -m 'Support relative embedded server JAR paths'
             git push origin HEAD:agent/finish-rom-core
           fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bundler-path-diagnostics
+          path: bundler-patch.log
+          if-no-files-found: ignore
+      - name: Fail when patching failed
+        if: steps.patch.outcome != 'success'
+        run: exit 1
