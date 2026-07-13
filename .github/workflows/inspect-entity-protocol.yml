@@ -1,0 +1,132 @@
+name: Inspect official entity protocol
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    if: github.head_ref == 'agent/finish-rom-core'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/finish-rom-core
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Download verified official source and mappings
+        shell: bash
+        run: |
+          set -euo pipefail
+          instance="$RUNNER_TEMP/rom-entity-inspect"
+          cargo run --locked --release -p rom-bootstrap -- prepare \
+            --instance "$instance" \
+            --version 26.1.2 \
+            --accept-minecraft-eula \
+            --json > prepare.json
+          server_jar="$(jq -r '.official_server_jar' prepare.json)"
+          test -f "$server_jar"
+
+          curl --fail --location --silent --show-error \
+            https://piston-meta.mojang.com/mc/game/version_manifest_v2.json \
+            -o version-manifest.json
+          version_url="$(jq -r '.versions[] | select(.id == "26.1.2") | .url' version-manifest.json)"
+          test -n "$version_url"
+          curl --fail --location --silent --show-error "$version_url" -o version.json
+          mappings_url="$(jq -r '.downloads.server_mappings.url' version.json)"
+          curl --fail --location --silent --show-error "$mappings_url" -o server-mappings.txt
+
+          inner_path="$(unzip -p "$server_jar" META-INF/versions.list | awk -F '\t' 'NF == 3 { print $3; exit }')"
+          if [[ -n "$inner_path" ]]; then
+            unzip -p "$server_jar" "$inner_path" > game-server.jar
+          else
+            cp "$server_jar" game-server.jar
+          fi
+          jar tf game-server.jar >/dev/null
+          printf '%s\n' "$server_jar" > official-server-path.txt
+          printf '%s\n' "$inner_path" > embedded-server-path.txt
+
+      - name: Generate official packet and registry reports
+        shell: bash
+        run: |
+          set -euo pipefail
+          server_jar="$(cat official-server-path.txt)"
+          mkdir official-reports
+          cd official-reports
+          timeout 900 java -DbundlerMainClass=net.minecraft.data.Main -jar "$server_jar" --reports
+          find . -maxdepth 4 -type f | sort > report-files.txt
+          find . -path '*/reports/packets.json' -type f -print -quit | xargs -r -I{} cp '{}' ../packets.json
+          find . -path '*/reports/registries.json' -type f -print -quit | xargs -r -I{} cp '{}' ../registries.json
+          cd ..
+          test -s packets.json
+          test -s registries.json
+          jq '."minecraft:entity_type".entries."minecraft:player"' registries.json > player-entity-type.json
+          jq '{clientbound: .configuration.clientbound // .play.clientbound // empty}' packets.json > packet-report-shape.json || true
+
+      - name: Disassemble mapped entity packet classes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p entity-protocol
+          python - <<'PY'
+          from pathlib import Path
+
+          targets = [
+              'net.minecraft.network.protocol.game.ClientboundAddEntityPacket',
+              'net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket',
+              'net.minecraft.network.protocol.game.ClientboundMoveEntityPacket',
+              'net.minecraft.network.protocol.game.ClientboundMoveEntityPacket$Pos',
+              'net.minecraft.network.protocol.game.ClientboundMoveEntityPacket$PosRot',
+              'net.minecraft.network.protocol.game.ClientboundMoveEntityPacket$Rot',
+              'net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket',
+              'net.minecraft.network.protocol.game.ClientboundRotateHeadPacket',
+              'net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket',
+              'net.minecraft.network.protocol.game.ClientboundSetEquipmentPacket',
+              'net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket',
+              'net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket$Action',
+              'net.minecraft.network.protocol.game.ClientboundPlayerInfoUpdatePacket$Entry',
+              'net.minecraft.network.protocol.game.ClientboundPlayerInfoRemovePacket',
+          ]
+          lines = Path('server-mappings.txt').read_text().splitlines()
+          mapped = {}
+          for line in lines:
+              if line.startswith(' ') or ' -> ' not in line or not line.endswith(':'):
+                  continue
+              named, obfuscated = line[:-1].split(' -> ', 1)
+              if named in targets:
+                  mapped[named] = obfuscated
+          missing = [target for target in targets if target not in mapped]
+          Path('entity-protocol/class-map.tsv').write_text(
+              ''.join(f'{named}\t{mapped.get(named, "MISSING")}\n' for named in targets)
+          )
+          if missing:
+              print('Missing mapped classes:', *missing, sep='\n- ')
+          PY
+
+          while IFS=$'\t' read -r named obfuscated; do
+            [[ "$obfuscated" != 'MISSING' ]] || continue
+            output="entity-protocol/${named//[.$]/_}.txt"
+            {
+              echo "NAMED_CLASS=$named"
+              echo "OBFUSCATED_CLASS=$obfuscated"
+              javap -classpath game-server.jar -p -c -s -constants "$obfuscated"
+            } > "$output"
+          done < entity-protocol/class-map.tsv
+
+          cp player-entity-type.json entity-protocol/
+          cp packets.json entity-protocol/
+          cp registries.json entity-protocol/
+          cp server-mappings.txt entity-protocol/
+          cp official-reports/report-files.txt entity-protocol/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: official-26.1.2-entity-protocol
+          path: entity-protocol
+          retention-days: 14
