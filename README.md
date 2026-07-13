@@ -53,6 +53,20 @@ The installer selects the Linux AArch64 or x86_64 build from the detected CPU ar
 
 Set `ROM_INSTALL_DIR` to choose another installation directory. Set `ROM_VERSION` when using a source copy of either installer to pin a specific release.
 
+### Server console
+
+While `ferrum-server` is running interactively, enter commands without a leading slash:
+
+```text
+help
+list
+say Server maintenance starts soon
+save-all
+stop
+```
+
+`?` is an alias for `help`. `exit` and `quit` are safe aliases for `stop`; they request a final gameplay/world save before shutdown. A bare `say` is invalid because a message is required.
+
 ## What works now
 
 ### Bootstrap and version data
@@ -76,7 +90,7 @@ RoM does not redistribute the official server JAR. The JAR remains in the user's
 - Development offline-mode login with Java-compatible offline UUIDs
 - Login Acknowledged and Configuration transitions
 - Known Packs negotiation for `minecraft/core/26.1.2`
-- Feature Flags, all synchronized registry data, Tags, and Finish Configuration
+- Feature Flags, all synchronized registry data, the complete official 26.1.2 network tag manifest, and Finish Configuration
 - Join Game, initial chunks, player position, teleport acknowledgement, and dynamic chunk views
 - Configurable Keep Alive and disconnect encoding
 - Live online-player count in status responses
@@ -98,6 +112,28 @@ Handshake
 → Bounded Chunk View
 → Gameplay
 ```
+
+### “Network protocol error” during Configuration
+
+A client that closes immediately after login can leave this server-side message:
+
+```text
+cannot read configuration acknowledged packet: failed to fill whole buffer
+```
+
+This means the client disconnected before acknowledging the end of Configuration; it is not an EULA or TCP bind failure. Builds containing the complete 26.1.2 network tag manifest fix the known empty-Tags cause. Update both `rom-bootstrap` and `ferrum-server`, reinstall the native server into the instance, and regenerate version metadata when moving from an older build:
+
+```bash
+rom-bootstrap setup \
+  --instance ~/rom-instance \
+  --version 26.1.2 \
+  --accept-minecraft-eula \
+  --force-generate
+rom-bootstrap doctor --instance ~/rom-instance
+rom-bootstrap run --instance ~/rom-instance
+```
+
+If it still disconnects, keep the exact client error and the final `connection closed:` server line together when reporting the issue.
 
 ### World and movement
 
@@ -151,7 +187,7 @@ RoM is usable for local development and protocol/gameplay experimentation. The f
 - Entity spawning, metadata, movement, tracking, combat, mobs, and item entities
 - Complete Vanilla block behavior, tools, mining rules, placement contexts, fluids, redstone, and scheduled block ticks
 - Crafting, recipes, furnaces, enchanting, brewing, anvil, smithing, and the complete menu catalog
-- Durable world and player persistence, Anvil region saving, crash recovery, and transactional storage
+- Anvil region writing, transactional storage, and stronger crash recovery beyond the current validated JSON gameplay/world snapshots
 - Procedural world generation and multiple dimensions
 - Full data-component semantic validation for every Vanilla component type
 - Commands, permissions, operators, bans, whitelist, and administration parity
