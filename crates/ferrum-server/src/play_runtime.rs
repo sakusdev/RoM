@@ -6,9 +6,9 @@ use crate::codec::{PacketReader, build_packet, read_packet};
 use anyhow::{Context, Result, bail};
 use ferrum_game::{CommandSource, PlayerUuid as GamePlayerUuid, Transform};
 use ferrum_play::{
-    BlockPosition, ItemProtocolRegistry, PlayerMovement,
-    PlayerState, decode_close_container, decode_container_click, decode_creative_slot_update,
-    decode_player_action, decode_use_item_on_block, encode_block_changed_ack, encode_block_update,
+    BlockPosition, ItemProtocolRegistry, PlayerMovement, PlayerState, decode_close_container,
+    decode_container_click, decode_creative_slot_update, decode_player_action,
+    decode_use_item_on_block, encode_block_changed_ack, encode_block_update,
     encode_chunk_batch_finished, encode_chunk_batch_start, encode_forget_level_chunk,
     encode_keep_alive, encode_level_chunk_with_light, encode_set_chunk_cache_center,
     encode_system_chat, player_action_to_world_event, use_item_on_block_to_world_event,
@@ -65,7 +65,7 @@ impl<'a> GameplaySync<'a> {
         runtime: &'a SharedGameRuntime,
         player_uuid: GamePlayerUuid,
         items: &'a ItemProtocolRegistry,
-        ) -> Self {
+    ) -> Self {
         Self {
             runtime,
             player_uuid,
