@@ -1,0 +1,76 @@
+name: Diagnose entity palette
+
+on:
+  pull_request:
+    branches: [master]
+
+jobs:
+  diagnose:
+    if: github.head_ref == 'agent/finish-rom-core'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/finish-rom-core
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Apply palette transform
+        id: transform
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          python - <<'PYCODE' 2>&1 | tee transform.log
+          from pathlib import Path
+          import textwrap
+          import traceback
+
+          lines = Path('.github/workflows/implement-entity-palette.yml').read_text().splitlines()
+          start = next(i for i, line in enumerate(lines) if "python - <<'PY'" in line)
+          end = next(i for i in range(start + 1, len(lines)) if lines[i].strip() == 'PY')
+          script = textwrap.dedent('\n'.join(lines[start + 1:end]))
+          try:
+              exec(compile(script, 'entity-palette-transform.py', 'exec'))
+          except BaseException:
+              traceback.print_exc()
+              raise
+          PYCODE
+      - name: Format transformed tree
+        id: format
+        if: steps.transform.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: cargo fmt --all 2>&1 | tee format.log
+      - name: Check transformed workspace
+        id: check
+        if: steps.format.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: cargo check --workspace --all-targets 2>&1 | tee check.log
+      - name: Clippy transformed workspace
+        id: clippy
+        if: steps.check.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tee clippy.log
+      - name: Test transformed workspace
+        id: tests
+        if: steps.clippy.outcome == 'success'
+        continue-on-error: true
+        shell: bash
+        run: cargo test --workspace 2>&1 | tee test.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: entity-palette-diagnostics
+          path: |
+            transform.log
+            format.log
+            check.log
+            clippy.log
+            test.log
+          if-no-files-found: ignore
+      - name: Fail on any diagnostic failure
+        if: steps.transform.outcome != 'success' || steps.format.outcome == 'failure' || steps.check.outcome == 'failure' || steps.clippy.outcome == 'failure' || steps.tests.outcome == 'failure'
+        run: exit 1
