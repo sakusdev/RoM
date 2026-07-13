@@ -54,7 +54,6 @@ jobs:
           entity.write_text(text)
           PY
           cargo fmt --all
-          cargo test -p ferrum-play --lib
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add crates/ferrum-play/src/lib.rs crates/ferrum-play/src/entity.rs
@@ -62,3 +61,19 @@ jobs:
             git commit -m 'Restore existing Play codecs and add entity module'
             git push origin HEAD:agent/finish-rom-core
           fi
+      - name: Diagnose entity codec tests
+        id: tests
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test -p ferrum-play --lib 2>&1 | tee entity-codec-test.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: entity-codec-diagnostics
+          path: entity-codec-test.log
+          if-no-files-found: ignore
+      - name: Fail when entity codec tests fail
+        if: steps.tests.outcome != 'success'
+        run: exit 1
