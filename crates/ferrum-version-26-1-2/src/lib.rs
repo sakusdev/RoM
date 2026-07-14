@@ -59,9 +59,7 @@ const SERVER_ONLY_TAG_REGISTRIES: &[&str] = &[
 pub fn configuration_tags() -> Vec<TagRegistry> {
     tags::configuration_tags()
         .into_iter()
-        .filter(|registry| {
-            !SERVER_ONLY_TAG_REGISTRIES.contains(&registry.id.as_str())
-        })
+        .filter(|registry| !SERVER_ONLY_TAG_REGISTRIES.contains(&registry.id.as_str()))
         .collect()
 }
 
@@ -305,7 +303,10 @@ mod tests {
             NETWORK_TAG_ENTRY_COUNT
         );
         for id in SERVER_ONLY_TAG_REGISTRIES {
-            assert!(!registries.iter().any(|registry| registry.id == *id), "{id}");
+            assert!(
+                !registries.iter().any(|registry| registry.id == *id),
+                "{id}"
+            );
         }
         assert!(
             registries
