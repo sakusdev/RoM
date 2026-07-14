@@ -54,25 +54,38 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python tools/integrate_admin_gui.py
-          cargo fmt --all
-          cargo check -p ferrum-server
+          if ! {
+            python tools/integrate_admin_gui.py
+            python tools/harden_admin_gui.py
+            cargo fmt --all
+            cargo check --quiet -p ferrum-server
+          } >integration.log 2>&1; then
+            tail -120 integration.log
+            exit 1
+          fi
+          cat integration.log
       - name: Audit complete workspace
         shell: bash
         run: |
           set -euo pipefail
-          cargo fmt --all --check
-          cargo check --workspace --all-targets --all-features
-          cargo clippy --workspace --all-targets --all-features -- -D warnings
-          cargo test --workspace --all-features
-          RUSTDOCFLAGS='-D warnings' cargo doc --workspace --all-features --no-deps
+          if ! {
+            cargo fmt --all --check
+            cargo check --quiet --workspace --all-targets --all-features
+            cargo clippy --quiet --workspace --all-targets --all-features -- -D warnings
+            cargo test --quiet --workspace --all-features
+            RUSTDOCFLAGS='-D warnings' cargo doc --quiet --workspace --all-features --no-deps
+          } >audit.log 2>&1; then
+            tail -160 audit.log
+            exit 1
+          fi
+          tail -40 audit.log
       - name: Commit validated source-only diff
         shell: bash
         run: |
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          rm -f tools/integrate_admin_gui.py .github/workflows/integrate-admin-gui.yml
+          rm -f tools/integrate_admin_gui.py tools/harden_admin_gui.py .github/workflows/integrate-admin-gui.yml
           git checkout origin/master -- .github/workflows/ci.yml
           git add -A
           git commit -m 'Integrate local admin web GUI'
