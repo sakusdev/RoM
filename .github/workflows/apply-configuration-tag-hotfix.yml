@@ -1,3 +1,4 @@
+# One-shot source transformation for PR #60. Removed before merge.
 name: Apply configuration tag registry hotfix
 
 on:
