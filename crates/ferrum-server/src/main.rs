@@ -616,8 +616,10 @@ fn run(cli: Cli) -> Result<()> {
     while !state.shutdown_requested() {
         match listener.accept() {
             Ok((mut stream, _address)) => {
-                let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
-                let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
+                if let Err(error) = configure_client_stream(&stream) {
+                    eprintln!("cannot configure accepted client socket: {error}");
+                    continue;
+                }
                 let config = config.clone();
                 let state = Arc::clone(&state);
                 clients.push(thread::spawn(move || {
@@ -644,6 +646,16 @@ fn run(cli: Cli) -> Result<()> {
         "game service stopped after {} ticks ({} dropped), {} autosaves, {} requested/final saves",
         exit.ticks, exit.dropped_ticks, exit.autosaves, exit.requested_saves
     );
+    Ok(())
+}
+
+fn configure_client_stream(stream: &TcpStream) -> io::Result<()> {
+    // On Windows, a socket accepted from a non-blocking listener can retain
+    // non-blocking mode. The protocol handlers use blocking reads with bounded
+    // timeouts, so normalize every accepted connection explicitly.
+    stream.set_nonblocking(false)?;
+    stream.set_read_timeout(Some(Duration::from_secs(10)))?;
+    stream.set_write_timeout(Some(Duration::from_secs(10)))?;
     Ok(())
 }
 
