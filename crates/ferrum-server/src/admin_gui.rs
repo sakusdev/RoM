@@ -3,10 +3,7 @@ use std::{
     io::{self, ErrorKind, Read, Write},
     net::{SocketAddr, TcpListener, TcpStream},
     path::{Path, PathBuf},
-    sync::{
-        Arc,
-        atomic::Ordering,
-    },
+    sync::{Arc, atomic::Ordering},
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
@@ -75,10 +72,7 @@ impl AdminGuiHandle {
     }
 }
 
-pub fn spawn_admin_gui(
-    config: AdminGuiConfig,
-    state: Arc<ServerState>,
-) -> Result<AdminGuiHandle> {
+pub fn spawn_admin_gui(config: AdminGuiConfig, state: Arc<ServerState>) -> Result<AdminGuiHandle> {
     config.validate()?;
     let listener = TcpListener::bind(config.bind)
         .with_context(|| format!("cannot bind admin GUI on {}", config.bind))?;
@@ -163,14 +157,22 @@ fn handle_connection(
     }
 }
 
-fn handle_command(stream: &mut TcpStream, request: &HttpRequest, state: &ServerState) -> Result<()> {
+fn handle_command(
+    stream: &mut TcpStream,
+    request: &HttpRequest,
+    state: &ServerState,
+) -> Result<()> {
     if !request.has_json_content_type() {
         return write_json_error(stream, 415, "Content-Type must be application/json");
     }
     let value: Value = match serde_json::from_slice(&request.body) {
         Ok(value) => value,
         Err(error) => {
-            return write_json_error(stream, 400, &format!("command body is invalid JSON: {error}"));
+            return write_json_error(
+                stream,
+                400,
+                &format!("command body is invalid JSON: {error}"),
+            );
         }
     };
     let command = match value.get("command").and_then(Value::as_str) {
@@ -363,10 +365,9 @@ struct HttpRequest {
 impl HttpRequest {
     fn has_json_content_type(&self) -> bool {
         self.headers.get("content-type").is_some_and(|value| {
-            value
-                .split(';')
-                .next()
-                .is_some_and(|media_type| media_type.trim().eq_ignore_ascii_case("application/json"))
+            value.split(';').next().is_some_and(|media_type| {
+                media_type.trim().eq_ignore_ascii_case("application/json")
+            })
         })
     }
 }
@@ -378,7 +379,9 @@ fn read_request<R: Read>(reader: &mut R) -> Result<HttpRequest> {
             bail!("HTTP request headers exceed the 16 KiB limit");
         }
         let mut chunk = [0_u8; 1_024];
-        let count = reader.read(&mut chunk).context("cannot read HTTP request")?;
+        let count = reader
+            .read(&mut chunk)
+            .context("cannot read HTTP request")?;
         if count == 0 {
             bail!("HTTP request ended before headers were complete");
         }
@@ -396,19 +399,28 @@ fn read_request<R: Read>(reader: &mut R) -> Result<HttpRequest> {
     let mut lines = header_text.split("\r\n");
     let request_line = lines.next().context("HTTP request line is missing")?;
     let mut request_parts = request_line.split_whitespace();
-    let method = request_parts.next().context("HTTP method is missing")?;
-    let path = request_parts.next().context("HTTP path is missing")?;
+    let method = request_parts
+        .next()
+        .context("HTTP method is missing")?
+        .to_owned();
+    let path = request_parts
+        .next()
+        .context("HTTP path is missing")?
+        .to_owned();
     let version = request_parts.next().context("HTTP version is missing")?;
     if request_parts.next().is_some() || version != "HTTP/1.1" {
         bail!("only well-formed HTTP/1.1 requests are supported");
     }
-    if !matches!(method, "GET" | "POST") {
+    if !matches!(method.as_str(), "GET" | "POST") {
         bail!("HTTP method {method} is not supported");
     }
     if !path.starts_with('/') {
         bail!("HTTP path must use origin-form");
     }
-    if path.contains(['\r', '\n', '\0']) {
+    if path
+        .bytes()
+        .any(|byte| matches!(byte, b'\r' | b'\n' | b'\0'))
+    {
         bail!("HTTP path contains invalid characters");
     }
 
@@ -417,7 +429,7 @@ fn read_request<R: Read>(reader: &mut R) -> Result<HttpRequest> {
         if line.is_empty() {
             continue;
         }
-        if line.starts_with([' ', '\t']) {
+        if line.starts_with(' ') || line.starts_with('\t') {
             bail!("folded HTTP headers are not supported");
         }
         let (name, value) = line
@@ -427,10 +439,16 @@ fn read_request<R: Read>(reader: &mut R) -> Result<HttpRequest> {
         if name.is_empty() || !name.bytes().all(is_http_token_byte) {
             bail!("HTTP header name is invalid");
         }
-        if value.contains(['\r', '\n', '\0']) {
+        if value
+            .bytes()
+            .any(|byte| matches!(byte, b'\r' | b'\n' | b'\0'))
+        {
             bail!("HTTP header value contains invalid characters");
         }
-        if headers.insert(name.clone(), value.trim().to_owned()).is_some() {
+        if headers
+            .insert(name.clone(), value.trim().to_owned())
+            .is_some()
+        {
             bail!("duplicate HTTP header {name}");
         }
     }
@@ -646,7 +664,8 @@ mod tests {
     fn rejects_duplicate_or_chunked_headers() {
         let duplicate = b"GET /api/status HTTP/1.1\r\nHost: localhost\r\nHost: other\r\n\r\n";
         assert!(read_request(&mut Cursor::new(duplicate)).is_err());
-        let chunked = b"POST /api/command HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n";
+        let chunked =
+            b"POST /api/command HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n";
         assert!(read_request(&mut Cursor::new(chunked)).is_err());
     }
 

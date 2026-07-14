@@ -1,9 +1,11 @@
 use anyhow::{Context, Result, bail};
 use clap::Parser;
+mod admin_gui;
 mod codec;
 mod identity;
 mod play_runtime;
 mod world_service;
+use admin_gui::{AdminGuiConfig, spawn_admin_gui};
 #[cfg(test)]
 use codec::read_varint_io;
 use codec::{
@@ -59,7 +61,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
     io::{self, BufRead, ErrorKind, Read, Write},
-    net::{TcpListener, TcpStream},
+    net::{SocketAddr, TcpListener, TcpStream},
     num::{NonZeroU32, NonZeroUsize},
     path::{Path, PathBuf},
     sync::{
@@ -124,6 +126,18 @@ struct Cli {
     /// Disable the interactive server console on standard input.
     #[arg(long)]
     no_console: bool,
+
+    /// Disable the local web administration dashboard.
+    #[arg(long)]
+    no_admin_gui: bool,
+
+    /// Address for the web administration dashboard.
+    #[arg(long, default_value = "127.0.0.1:25575")]
+    admin_bind: SocketAddr,
+
+    /// Bearer token required by dashboard API requests. Required for non-loopback binds.
+    #[arg(long)]
+    admin_token: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -599,6 +613,27 @@ fn run(cli: Cli) -> Result<()> {
     listener
         .set_nonblocking(true)
         .context("cannot configure non-blocking Minecraft listener")?;
+    let admin_gui = if cli.no_admin_gui {
+        None
+    } else {
+        let disk_path = config_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .to_path_buf();
+        let handle = spawn_admin_gui(
+            AdminGuiConfig {
+                bind: cli.admin_bind,
+                token: cli.admin_token.clone(),
+                disk_path,
+                version_name: config.version_name.clone(),
+                protocol: config.protocol,
+                max_players: config.max_players,
+            },
+            Arc::clone(&state),
+        )?;
+        println!("admin GUI listening on http://{}", handle.local_addr());
+        Some(handle)
+    };
     if !cli.no_console {
         spawn_server_console(
             state.game_runtime.clone(),
@@ -639,6 +674,7 @@ fn run(cli: Cli) -> Result<()> {
     for client in clients {
         let _ = client.join();
     }
+    let admin_gui_error = admin_gui.and_then(|handle| handle.join().err());
     let state = Arc::try_unwrap(state)
         .map_err(|_| anyhow::anyhow!("server state is still referenced during shutdown"))?;
     let exit = state.shutdown()?;
@@ -646,6 +682,9 @@ fn run(cli: Cli) -> Result<()> {
         "game service stopped after {} ticks ({} dropped), {} autosaves, {} requested/final saves",
         exit.ticks, exit.dropped_ticks, exit.autosaves, exit.requested_saves
     );
+    if let Some(error) = admin_gui_error {
+        return Err(error);
+    }
     Ok(())
 }
 

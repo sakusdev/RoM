@@ -4,9 +4,6 @@ on:
   push:
   pull_request:
 
-permissions:
-  contents: write
-
 jobs:
   test:
     strategy:
@@ -38,70 +35,3 @@ jobs:
           path: |
             clippy.log
             test.log
-
-  integrate-admin-gui:
-    if: github.head_ref == 'agent/admin-web-gui' && github.actor != 'github-actions[bot]'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: agent/admin-web-gui
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - name: Integrate GUI and update lockfile
-        shell: bash
-        run: |
-          set -euo pipefail
-          if ! (
-            set -e
-            python tools/integrate_admin_gui.py
-            python tools/harden_admin_gui.py
-            cargo fmt --all
-            cargo check --quiet -p ferrum-server
-          ) >integration.log 2>&1; then
-            tail -120 integration.log
-            exit 1
-          fi
-          cat integration.log
-      - name: Upload integration failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gui-integration-error
-          path: integration.log
-      - name: Audit complete workspace
-        shell: bash
-        run: |
-          set -euo pipefail
-          if ! (
-            set -e
-            cargo fmt --all --check
-            cargo check --quiet --workspace --all-targets --all-features
-            cargo clippy --quiet --workspace --all-targets --all-features -- -D warnings
-            cargo test --quiet --workspace --all-features
-            RUSTDOCFLAGS='-D warnings' cargo doc --quiet --workspace --all-features --no-deps
-          ) >audit.log 2>&1; then
-            tail -160 audit.log
-            exit 1
-          fi
-          tail -40 audit.log
-      - name: Upload audit failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gui-audit-error
-          path: audit.log
-          if-no-files-found: ignore
-      - name: Commit validated source-only diff
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          rm -f tools/integrate_admin_gui.py tools/harden_admin_gui.py .github/workflows/integrate-admin-gui.yml .github/gui-integration-error.log
-          git fetch origin master --depth=1
-          git checkout FETCH_HEAD -- .github/workflows/ci.yml
-          git add -A
-          git commit -m 'Integrate local admin web GUI'
-          git push origin HEAD:agent/admin-web-gui
