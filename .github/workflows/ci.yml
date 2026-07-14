@@ -63,17 +63,12 @@ jobs:
             exit 1
           fi
           cat integration.log
-      - name: Save integration failure
+      - name: Upload integration failure
         if: failure()
-        shell: bash
-        run: |
-          set -euo pipefail
-          tail -120 integration.log > .github/gui-integration-error.log
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add .github/gui-integration-error.log
-          git commit -m 'Record admin GUI integration failure'
-          git push origin HEAD:agent/admin-web-gui
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-integration-error
+          path: integration.log
       - name: Audit complete workspace
         shell: bash
         run: |
@@ -89,19 +84,13 @@ jobs:
             exit 1
           fi
           tail -40 audit.log
-      - name: Save audit failure
+      - name: Upload audit failure
         if: failure()
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ -f audit.log ]; then
-            tail -160 audit.log > .github/gui-integration-error.log
-            git config user.name github-actions[bot]
-            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-            git add .github/gui-integration-error.log
-            git commit -m 'Record full workspace audit failure'
-            git push origin HEAD:agent/admin-web-gui
-          fi
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-audit-error
+          path: audit.log
+          if-no-files-found: ignore
       - name: Commit validated source-only diff
         shell: bash
         run: |
