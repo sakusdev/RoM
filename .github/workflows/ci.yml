@@ -53,12 +53,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if ! {
+          if ! (
+            set -e
             python tools/integrate_admin_gui.py
             python tools/harden_admin_gui.py
             cargo fmt --all
             cargo check --quiet -p ferrum-server
-          } >integration.log 2>&1; then
+          ) >integration.log 2>&1; then
             tail -120 integration.log
             exit 1
           fi
@@ -73,13 +74,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if ! {
+          if ! (
+            set -e
             cargo fmt --all --check
             cargo check --quiet --workspace --all-targets --all-features
             cargo clippy --quiet --workspace --all-targets --all-features -- -D warnings
             cargo test --quiet --workspace --all-features
             RUSTDOCFLAGS='-D warnings' cargo doc --quiet --workspace --all-features --no-deps
-          } >audit.log 2>&1; then
+          ) >audit.log 2>&1; then
             tail -160 audit.log
             exit 1
           fi
