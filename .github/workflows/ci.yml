@@ -4,36 +4,7 @@ on:
   push:
   pull_request:
 
-permissions:
-  contents: write
-
 jobs:
-  format-tag-hotfix:
-    if: github.head_ref == 'hotfix/configuration-tag-registry-filter'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: hotfix/configuration-tag-registry-filter
-          fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - name: Format and commit the source fix
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo fmt --all
-          if git diff --quiet -- crates/ferrum-version-26-1-2/src/lib.rs; then
-            echo 'Source already formatted'
-            exit 0
-          fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add crates/ferrum-version-26-1-2/src/lib.rs
-          git commit -m 'Format configuration tag registry filter'
-          git push origin HEAD:hotfix/configuration-tag-registry-filter
-
   test:
     strategy:
       fail-fast: false
