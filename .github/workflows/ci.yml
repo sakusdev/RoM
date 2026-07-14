@@ -35,3 +35,72 @@ jobs:
           path: |
             clippy.log
             test.log
+
+  full-source-audit:
+    if: github.event_name == 'pull_request' && github.head_ref == 'agent/admin-web-gui'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Build audit report
+        shell: bash
+        run: |
+          set -u
+          mkdir -p audit
+          {
+            echo '# RoM full source audit'
+            echo
+            echo '## Commit'
+            git rev-parse HEAD
+            echo
+            echo '## Production-target strict Clippy'
+            cargo clippy --workspace --lib --bins --all-features -- \
+              -W clippy::unwrap_used \
+              -W clippy::expect_used \
+              -W clippy::panic \
+              -W clippy::todo \
+              -W clippy::unimplemented \
+              -W clippy::exit \
+              -W clippy::mem_forget \
+              -W clippy::large_stack_arrays \
+              -W clippy::large_futures 2>&1 || true
+            echo
+            echo '## Unsafe Rust outside generated files and tests'
+            rg -n --glob '*.rs' --glob '!target/**' --glob '!**/tests/**' --glob '!**/generated/**' \
+              '\bunsafe\b' crates tools || true
+            echo
+            echo '## Panic-like calls outside test modules (raw inventory)'
+            rg -n --glob '*.rs' --glob '!target/**' \
+              '(^|[^A-Za-z_])(unwrap|expect|panic|todo|unimplemented)!?\s*\(' crates tools || true
+            echo
+            echo '## TODO markers'
+            rg -n --hidden --glob '!target/**' --glob '!.git/**' \
+              'TODO|FIXME|XXX|HACK' . || true
+            echo
+            echo '## External process execution'
+            rg -n --glob '*.rs' --glob '!target/**' \
+              'std::process|process::Command|Command::new' crates tools || true
+            echo
+            echo '## Potential unbounded reads and allocations'
+            rg -n --glob '*.rs' --glob '!target/**' \
+              'read_to_end|read_to_string|collect::<Vec|Vec::with_capacity|set_len\(' crates tools || true
+            echo
+            echo '## Network listeners and blocking modes'
+            rg -n --glob '*.rs' --glob '!target/**' \
+              'TcpListener|UdpSocket|set_nonblocking|set_read_timeout|set_write_timeout' crates tools || true
+            echo
+            echo '## Ignored Results'
+            rg -n --glob '*.rs' --glob '!target/**' \
+              'let _ =|\.ok\(\);' crates tools || true
+            echo
+            echo '## Duplicate dependency versions'
+            cargo tree -d 2>&1 || true
+          } > audit/audit-report.txt
+          tar --exclude=.git --exclude=target --exclude=audit -czf audit/source.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: full-source-audit
+          path: audit/
+          retention-days: 7
