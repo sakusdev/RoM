@@ -34,6 +34,7 @@ impl CommandSource {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GameCommand {
+    Help,
     List,
     Say {
         message: String,
@@ -83,6 +84,7 @@ pub fn parse_command(input: &str) -> Result<GameCommand, CommandError> {
     }
     let parts = input.split_whitespace().collect::<Vec<_>>();
     match parts.as_slice() {
+        ["help"] | ["?"] => Ok(GameCommand::Help),
         ["list"] => Ok(GameCommand::List),
         ["say", message @ ..] if !message.is_empty() => Ok(GameCommand::Say {
             message: message.join(" "),
@@ -128,7 +130,7 @@ pub fn parse_command(input: &str) -> Result<GameCommand, CommandError> {
             target: Some((*target).to_owned()),
         }),
         ["save-all"] | ["save-all", "flush"] => Ok(GameCommand::SaveAll),
-        ["stop"] => Ok(GameCommand::Stop),
+        ["stop"] | ["exit"] | ["quit"] => Ok(GameCommand::Stop),
         _ => Err(CommandError::InvalidSyntax {
             input: input.to_owned(),
         }),
@@ -150,6 +152,15 @@ pub fn execute_parsed_command(
     command: GameCommand,
 ) -> Result<CommandOutcome, CommandError> {
     match command {
+        GameCommand::Help => {
+            require_permission(source, 0)?;
+            Ok(CommandOutcome {
+        feedback: "Commands: help, list, say <message>, gamemode <mode> [player], tp [player] <x> <y> <z>, give <player> <item> [count], time set <value>, difficulty <value>, gamerule <name> <value>, kill [player], save-all [flush], stop (aliases: exit, quit)".to_owned(),
+        events: Vec::new(),
+        save_requested: false,
+        shutdown_requested: false,
+    })
+        }
         GameCommand::List => {
             require_permission(source, 0)?;
             let names = state
@@ -421,7 +432,7 @@ pub enum CommandError {
     Entity(#[from] crate::EntityError),
     #[error("command is empty")]
     EmptyCommand,
-    #[error("invalid command syntax: {input}")]
+    #[error("invalid command syntax: {input}; use help to list commands")]
     InvalidSyntax { input: String },
     #[error("invalid numeric value {value}")]
     InvalidNumber { value: String },
@@ -456,6 +467,7 @@ mod tests {
 
     #[test]
     fn parses_supported_vanilla_commands() {
+        assert_eq!(parse_command("help").unwrap(), GameCommand::Help);
         assert_eq!(parse_command("/list").unwrap(), GameCommand::List);
         assert_eq!(
             parse_command("gamemode creative Steve").unwrap(),
@@ -508,6 +520,20 @@ mod tests {
         assert!(outcome.save_requested);
         assert!(!outcome.shutdown_requested);
         assert_eq!(outcome.events, [GameEvent::SaveRequested]);
+    }
+
+    #[test]
+    fn help_lists_commands_and_exit_alias_stops() {
+        let mut state = GameState::default();
+        let source = CommandSource::console();
+        let help = execute_command(&mut state, &source, "help").unwrap();
+        assert!(help.feedback.contains("say <message>"));
+        assert!(!help.shutdown_requested);
+        for alias in ["exit", "quit"] {
+            let outcome = execute_command(&mut state, &source, alias).unwrap();
+            assert!(outcome.save_requested);
+            assert!(outcome.shutdown_requested);
+        }
     }
 
     #[test]

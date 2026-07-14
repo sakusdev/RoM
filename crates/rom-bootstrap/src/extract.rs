@@ -429,10 +429,16 @@ fn read_versions_list<R: Read + Seek>(
         if fields.len() != 3 {
             bail!("invalid META-INF/versions.list record");
         }
-        let path = fields[2];
-        validate_zip_path(path)?;
-        if !path.starts_with("META-INF/versions/") || !path.ends_with(".jar") {
-            bail!("invalid embedded game JAR path in versions.list: {path}");
+        let listed_path = fields[2];
+        validate_zip_path(listed_path)?;
+        let path = if listed_path.starts_with("META-INF/versions/") {
+            listed_path.to_owned()
+        } else {
+            format!("META-INF/versions/{listed_path}")
+        };
+        validate_zip_path(&path)?;
+        if !path.ends_with(".jar") {
+            bail!("invalid embedded game JAR path in versions.list: {listed_path}");
         }
         let sha256 = fields[0];
         let digest = if sha256.len() == 64 && sha256.bytes().all(|byte| byte.is_ascii_hexdigit()) {
@@ -441,7 +447,7 @@ fn read_versions_list<R: Read + Seek>(
             None
         };
         candidates.push(GameJarCandidate {
-            path: path.to_owned(),
+            path,
             sha256: digest,
         });
     }
@@ -850,13 +856,10 @@ mod tests {
                 .start_file("META-INF/versions.list", options)
                 .unwrap();
             writer
-                .write_all(
-                    format!("{digest}\tserver-26.1.2\tMETA-INF/versions/26.1.2/server.jar\n")
-                        .as_bytes(),
-                )
+                .write_all(format!("{digest}\t26.1.2\t26.1.2/server-26.1.2.jar\n").as_bytes())
                 .unwrap();
             writer
-                .start_file("META-INF/versions/26.1.2/server.jar", options)
+                .start_file("META-INF/versions/26.1.2/server-26.1.2.jar", options)
                 .unwrap();
             writer.write_all(game_jar).unwrap();
             writer.finish().unwrap();
@@ -877,7 +880,7 @@ mod tests {
                 .write_all(b"not a valid versions.list row\n")
                 .unwrap();
             writer
-                .start_file("META-INF/versions/26.1.2/server.jar", options)
+                .start_file("META-INF/versions/26.1.2/server-26.1.2.jar", options)
                 .unwrap();
             writer.write_all(game_jar).unwrap();
             writer.finish().unwrap();
@@ -907,7 +910,7 @@ mod tests {
         let path = directory.path().join("server.jar");
         fs::write(&path, outer).unwrap();
         let resolved = resolve_game_jar(&path).unwrap();
-        assert_eq!(resolved.path, "META-INF/versions/26.1.2/server.jar");
+        assert_eq!(resolved.path, "META-INF/versions/26.1.2/server-26.1.2.jar");
         assert_eq!(resolved.sha256, sha256_hex(&game_jar));
         assert_eq!(resolved.bytes, game_jar);
     }
@@ -920,7 +923,7 @@ mod tests {
         let path = directory.path().join("server.jar");
         fs::write(&path, outer).unwrap();
         let resolved = resolve_game_jar(&path).unwrap();
-        assert_eq!(resolved.path, "META-INF/versions/26.1.2/server.jar");
+        assert_eq!(resolved.path, "META-INF/versions/26.1.2/server-26.1.2.jar");
         assert_eq!(resolved.sha256, sha256_hex(&game_jar));
         assert_eq!(resolved.bytes, game_jar);
     }

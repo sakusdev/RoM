@@ -1,76 +1,99 @@
 # RoM
 
-**RoM is an experimental Minecraft Java Edition-compatible server written in Rust.**
+**RoM is an experimental, native Minecraft Java Edition-compatible server written in Rust.**
 
 > **NOT AN OFFICIAL MINECRAFT PRODUCT.**  
 > **NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.**
 
-RoM is distributed as a native executable rather than a JAR and does not require Java or a JVM at runtime. The current target is **Minecraft Java Edition 26.1.2** using protocol **775**.
+RoM runs as a native executable rather than a JAR and does not require Java or a JVM at runtime. The current compatibility target is **Minecraft Java Edition 26.1.2**, protocol **775**.
 
-> [!WARNING]
-> The supported 26.1.2 Bootstrap flow is complete and produces a runnable local development instance. RoM gameplay remains experimental and is not yet a replacement for a production Minecraft server.
+> [!IMPORTANT]
+> RoM is an active alpha. Bootstrap, login, world delivery, movement, block interaction, authoritative player inventory, and container transactions are implemented, but the server is not yet a production replacement for Vanilla, Paper, or Fabric servers.
 
-## Distribution model
+## Install a release
 
-RoM follows a Fabric-installer-style bootstrap model while preserving its native Rust architecture:
+The newest automatically numbered build is available on the [GitHub Releases page](https://github.com/sakusdev/RoM/releases/latest). Every successful `master` release publishes native `ferrum-server` and `rom-bootstrap` binaries, platform archives, checksums, `VERSION`, and `BUILD_INFO` metadata.
 
-1. RoM releases contain original RoM code and documentation only.
-2. `rom-bootstrap` resolves the selected Minecraft version from official metadata.
-3. The official server JAR is downloaded directly on the user's machine from an official Mojang/Microsoft HTTPS endpoint.
-4. Its size and SHA-1 are checked against official metadata.
-5. The JAR remains in a local cache and is not bundled into RoM releases.
-6. RoM scans only synchronized-registry JSON resources from the locally obtained game JAR.
-7. A deterministic, integrity-protected `.rompack` records registry IDs, source-resource hashes, source hashes, and patch-set identity.
-8. The native `ferrum-server` validates that pack against its built-in 26.1.2 generation profile before starting.
+### Desktop and normal Linux
 
-The supported Bootstrap workflow is ready-to-run: `setup` performs source preparation, version-pack generation, native installation, and readiness validation. It does not decompile, translate, execute, bytecode-patch, or redistribute the official server JAR. The generated pack contains derived registry identifiers and source-resource hashes, not copied JSON payloads.
+Download the archive for your platform, extract it, and run:
 
-See [`docs/BOOTSTRAP.md`](docs/BOOTSTRAP.md) and [`NOTICE.md`](NOTICE.md).
+```bash
+./rom-bootstrap setup \
+  --instance ./rom-instance \
+  --version 26.1.2 \
+  --accept-minecraft-eula
+./rom-bootstrap doctor --instance ./rom-instance
+./rom-bootstrap run --instance ./rom-instance
+```
 
-## Current status
+On Windows, use `rom-bootstrap.exe` and `ferrum-server.exe`.
 
-The native server currently supports:
+### Android Termux
 
-- Handshake, server-list status, and ping/pong
-- Strict protocol validation for Minecraft Java Edition 26.1.2
-- Offline-mode login with Java-compatible offline UUIDs
-- Login Acknowledged and Configuration-state transitions
-- Vanilla `minecraft/core/26.1.2` Known Packs negotiation
-- Packet IDs, world height, dimension/bootstrap metadata, flat-world block-state IDs, biome ID, and Configuration registry payloads loaded from the generated schema-v4 `.rompack` during Bootstrap startup
-- All 28 synchronized 26.1.2 registries with 382 vanilla entries
-- Feature Flags, Tags, and Finish Configuration
-- Join Game for a deterministic flat overworld
-- Default spawn and absolute player-position synchronization
-- Teleport acknowledgement validation
-- All four serverbound movement forms
-- Finite coordinate, coordinate-range, movement-flag, and exact-payload validation
-- Bounded single-packet player movement delta validation
-- Flat-floor penetration rejection for position movement
-- Bounded protocol-775 Player Action and Use Item On decoding
-- Use Item On cursor finite and in-block range validation
-- Basic player-eye-to-block-center reach validation for block interactions
-- Non-air validation for simplified block breaking
-- Bedrock protection for simplified block breaking
-- Air-only validation for simplified block placement
-- Ack-only handling for world-height-outside block interactions
-- Shared in-memory world state across Play connections
-- Initial and dynamic chunks serialized from authoritative world snapshots
-- Simplified block breaking and adjacent-face stone placement
-- Block Update and Block Changed Ack responses
-- Bounded per-connection peer update queues with same-position coalescing
-- Peer block-update draining after inbound Play packets and transient read timeouts
-- Bounded configurable chunk views
-- Dynamic chunk loading and unloading
+Download `install-termux.sh` from the selected Release and run:
+
+```bash
+chmod +x install-termux.sh
+./install-termux.sh
+```
+
+The installer selects the Android Bionic AArch64 build, verifies SHA-256 checksums, and installs `rom-bootstrap` and `ferrum-server` into the Termux prefix.
+
+### Pixel Terminal
+
+Download `install-pixel-terminal.sh` from the selected Release and run:
+
+```bash
+chmod +x install-pixel-terminal.sh
+./install-pixel-terminal.sh
+```
+
+The installer selects the Linux AArch64 or x86_64 build from the detected CPU architecture, verifies checksums, and installs into `~/.local/bin` by default.
+
+Set `ROM_INSTALL_DIR` to choose another installation directory. Set `ROM_VERSION` when using a source copy of either installer to pin a specific release.
+
+### Server console
+
+While `ferrum-server` is running interactively, enter commands without a leading slash:
+
+```text
+help
+list
+say Server maintenance starts soon
+save-all
+stop
+```
+
+`?` is an alias for `help`. `exit` and `quit` are safe aliases for `stop`; they request a final gameplay/world save before shutdown. A bare `say` is invalid because a message is required.
+
+## What works now
+
+### Bootstrap and version data
+
+- One-command, idempotent `rom-bootstrap setup`
+- Official Mojang/Microsoft version metadata resolution
+- Direct official server JAR download on the user's machine
+- Official size and SHA-1 verification
+- Bounded extraction of synchronized registry resources
+- Deterministic and integrity-protected schema-v7 `.rompack` generation
+- Generated packet catalog, packet IDs, item IDs, data-component IDs, registries, world metadata, block states, and biome metadata
+- Runtime validation of the generated pack against the built-in 26.1.2 profile
+- `doctor`, `status`, JSON output, local install, and managed server launch
+
+RoM does not redistribute the official server JAR. The JAR remains in the user's local cache and is used only as a verified source for generated compatibility metadata.
+
+### Connection and protocol flow
+
+- Handshake, status, ping, and pong
+- Strict protocol-775 validation
+- Development offline-mode login with Java-compatible offline UUIDs
+- Login Acknowledged and Configuration transitions
+- Known Packs negotiation for `minecraft/core/26.1.2`
+- Feature Flags, all synchronized registry data, the complete official 26.1.2 network tag manifest, and Finish Configuration
+- Join Game, initial chunks, player position, teleport acknowledgement, and dynamic chunk views
+- Configurable Keep Alive and disconnect encoding
 - Live online-player count in status responses
-- Configurable system chat and Keep Alive validation
-- Version-neutral 20 TPS scheduling and bounded deterministic input primitives
-- Generic bounded worker command channels and independently bounded non-blocking connection outputs
-- Dedicated live Play writer workers
-- Protocol-aware Keep Alive and disconnect encoding for live Play writer outputs
-- Authoritative runtime Keep Alive requests routed through semantic Play output queues
-- Optional loading of Minecraft Anvil region files and region directories
-
-The implemented connection flow is:
 
 ```text
 Handshake
@@ -86,55 +109,113 @@ Handshake
 → Initial Chunk Batch
 → Player Position
 → Teleport Acknowledgement
-→ Configured Bounded Chunk View
-→ Player Movement
-→ Dynamic Chunk Load / Unload
-→ Block Break / Simplified Placement
-→ Block Update / Prediction Ack
-→ Keep Alive
+→ Bounded Chunk View
+→ Gameplay
 ```
 
-## Current limitations
+### “Network protocol error” during Configuration
 
-The world is intentionally small and deterministic while the gameplay foundation is being built.
+A client that closes immediately after login can leave this server-side message:
 
-Not implemented yet:
+```text
+cannot read configuration acknowledged packet: failed to fill whole buffer
+```
 
-- Microsoft account authentication and encrypted online mode
-- Full collision, full movement-speed, and full reach enforcement
-- Full item, inventory, replaceability, collision, and game-mode validation
-- Entities and entity tracking
-- Inventory and container behavior
-- Procedural world generation
-- World persistence and Anvil region saving
-- Multi-version gameplay compatibility
-- Fabric, Bukkit, Spigot, or Paper plugin compatibility
-
-> [!CAUTION]
-> The default configuration binds to loopback and uses development-only offline login. Do not expose that configuration to the public internet. It does not prove that a connecting user owns Minecraft.
-
-## Quick start with RoM Bootstrap
-
-`setup` is the preferred path. It is idempotent: verified downloads and generated packs are reused unless their force flags are supplied.
-
-### Extracted native release
-
-The release archive places `rom-bootstrap` and `ferrum-server` beside each other, so the server binary is detected automatically:
+This means the client disconnected before acknowledging the end of Configuration; it is not an EULA or TCP bind failure. Builds containing the complete 26.1.2 network tag manifest fix the known empty-Tags cause. Update both `rom-bootstrap` and `ferrum-server`, reinstall the native server into the instance, and regenerate version metadata when moving from an older build:
 
 ```bash
-./rom-bootstrap setup \
-  --instance ./rom-instance \
+rom-bootstrap setup \
+  --instance ~/rom-instance \
   --version 26.1.2 \
-  --accept-minecraft-eula
-./rom-bootstrap doctor --instance ./rom-instance
-./rom-bootstrap run --instance ./rom-instance
+  --accept-minecraft-eula \
+  --force-generate
+rom-bootstrap doctor --instance ~/rom-instance
+rom-bootstrap run --instance ~/rom-instance
 ```
 
-On Windows, use `rom-bootstrap.exe` and `ferrum-server.exe`.
+If it still disconnects, keep the exact client error and the final `connection closed:` server line together when reporting the issue.
 
-### Source checkout
+### World and movement
 
-Build both native programs, then let Bootstrap install the server from the workspace:
+- Authoritative shared in-memory world state
+- Deterministic flat overworld
+- Optional loading of Anvil region files and region directories
+- Initial and dynamic chunk serialization
+- Bounded per-player chunk loading and unloading
+- All four serverbound movement packet forms
+- Finite-coordinate, range, movement-flag, and exact-payload validation
+- Bounded movement delta validation
+- Flat-floor penetration rejection
+- Simplified block breaking and adjacent-face stone placement
+- Basic reach validation, bedrock protection, replaceability checks, Block Update, and prediction acknowledgement
+- Bounded peer update queues with same-position coalescing
+
+### Inventory and containers
+
+- Authoritative 46-slot player inventory
+- Full inventory snapshot after Play bootstrap
+- Exact changed-slot replication for server-side mutations such as `/give`
+- Version-aware ItemStack encoding from generated item and data-component palettes
+- Serverbound container click decoding and transaction processing
+- Pickup, quick move, swap, clone, throw, quick craft, and pickup-all click modes
+- Cursor/carried stack state
+- External container sessions and state IDs
+- `SetContainerContent` and `SetContainerSlot` synchronization
+- Creative slot updates with validation
+- Stale or invalid transaction rejection followed by authoritative resynchronization
+- Inventory mutation APIs for insert, remove, clear, swap, consume, drop, and death handling
+- `keepInventory` handling
+- Synchronization, rejection, snapshot, and drop metrics
+
+### Runtime architecture
+
+- Version-neutral 20 TPS scheduling primitives
+- Deterministic mutation ordering
+- Bounded worker command channels
+- Independently bounded non-blocking connection outputs
+- Dedicated live Play writer workers
+- Semantic Play outputs separated from version-specific packet IDs
+- Cross-platform workspace tests on Ubuntu, Windows, and macOS
+- Numbered native Releases for Windows, Linux, Android/Termux, and macOS
+
+## Current boundaries
+
+RoM is usable for local development and protocol/gameplay experimentation. The following areas are still incomplete:
+
+- Microsoft account authentication, encryption, session-server verification, and secure online mode
+- Full Vanilla collision shapes, movement-speed enforcement, reach rules, and anti-cheat behavior
+- Entity spawning, metadata, movement, tracking, combat, mobs, and item entities
+- Complete Vanilla block behavior, tools, mining rules, placement contexts, fluids, redstone, and scheduled block ticks
+- Crafting, recipes, furnaces, enchanting, brewing, anvil, smithing, and the complete menu catalog
+- Anvil region writing, transactional storage, and stronger crash recovery beyond the current validated JSON gameplay/world snapshots
+- Procedural world generation and multiple dimensions
+- Full data-component semantic validation for every Vanilla component type
+- Commands, permissions, operators, bans, whitelist, and administration parity
+- Multi-version compatibility
+- Fabric, Bukkit, Spigot, Paper, or proxy plugin compatibility
+- Production hardening, denial-of-service testing, long-running soak testing, and public-server security review
+
+> [!CAUTION]
+> The default configuration binds to loopback and uses development-only offline login. Do not expose it directly to the public internet. Offline mode does not prove that a connecting user owns Minecraft or the claimed username.
+
+## Distribution model
+
+RoM follows a native, installer-style bootstrap model:
+
+1. Releases contain only RoM's original binaries, scripts, and documentation.
+2. `rom-bootstrap` resolves the selected Minecraft version from official metadata.
+3. The official server JAR is downloaded directly from an official HTTPS endpoint.
+4. Its size and SHA-1 are checked against official metadata.
+5. The JAR remains in the local cache and is never bundled into a RoM Release.
+6. RoM reads only the bounded resources required to generate compatibility metadata.
+7. The deterministic `.rompack` records source hashes, packet and registry metadata, item and component palettes, and patch-set identity.
+8. `ferrum-server` validates the pack before accepting connections.
+
+The Bootstrap process does not execute, decompile, translate, bytecode-patch, or redistribute the official server JAR. See [`docs/BOOTSTRAP.md`](docs/BOOTSTRAP.md), [`docs/RELEASES.md`](docs/RELEASES.md), and [`NOTICE.md`](NOTICE.md).
+
+## Build from source
+
+The workspace requires Rust **1.85 or newer**.
 
 ```bash
 cargo build --locked --release -p rom-bootstrap -p ferrum-server
@@ -147,27 +228,15 @@ cargo build --locked --release -p rom-bootstrap -p ferrum-server
 ./target/release/rom-bootstrap run --instance ./rom-instance
 ```
 
-`doctor` prints every missing or invalid component and exits unsuccessfully until the instance is runnable. Use `--json` with `setup`, `doctor`, or `status` for automation. The individual `prepare`, `generate`, and `install-local` stages remain available for debugging and advanced workflows; see [`docs/BOOTSTRAP.md`](docs/BOOTSTRAP.md).
-
-The generated default configuration binds to `127.0.0.1:25565`, uses offline-mode development login, a bounded chunk view, and the deterministic local world. Connect a matching Minecraft Java Edition 26.1.2 client for local testing.
-
-## Direct developer start
-
-The native server can still be built and run directly when working on RoM itself:
+Run the full validation suite with:
 
 ```bash
-cargo build --locked --release -p ferrum-server
-./target/release/ferrum-server --config examples/server-26.1.2.toml
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
 ```
 
-On Windows:
-
-```powershell
-cargo build --locked --release -p ferrum-server
-.\target\release\ferrum-server.exe --config examples\server-26.1.2.toml
-```
-
-## Bootstrap instance layout
+## Instance layout
 
 ```text
 rom-instance/
@@ -187,48 +256,36 @@ rom-instance/
 └── server.toml
 ```
 
-The cache and generated instance data are local artifacts. Do not commit or redistribute instance directories containing official Minecraft files.
+Generated instance data and the official game cache are local artifacts. Do not commit or redistribute instance directories containing official Minecraft files.
 
-## Native releases
+## Release targets
 
-`ferrum-server` and `rom-bootstrap` are released as platform-native executables for:
+Each numbered Release provides raw executables and archives for:
 
 - Windows x86_64
 - Linux x86_64
-- Linux ARM64
+- Linux AArch64 using glibc
+- Android/Termux AArch64 using Android Bionic
 - macOS x86_64
-- macOS ARM64
+- macOS AArch64
 
-Each release archive contains both binaries, `server.toml`, the Bootstrap guide, README, NOTICE, LICENSE, and VERSION. Standalone binaries are also published separately. Official Minecraft files and locally generated `.rompack` files are never bundled.
+Release downloads include per-file `.sha256` files and a combined `SHA256SUMS`. See [`docs/RELEASES.md`](docs/RELEASES.md) for numbering and artifact policy.
 
-Preferred first-run usage from an extracted release archive:
+## Workspace architecture
 
-```bash
-./rom-bootstrap setup --instance ./rom-instance --version 26.1.2 --accept-minecraft-eula
-./rom-bootstrap doctor --instance ./rom-instance
-./rom-bootstrap run --instance ./rom-instance
-```
+RoM separates version-independent gameplay/runtime logic from version-specific wire metadata.
 
-`setup` automatically detects the adjacent `ferrum-server` executable. Pass `--server-binary` only when the binary is stored elsewhere.
-
-Expected direct server usage:
-
-```bash
-ferrum-server.exe --config server.toml
-./ferrum-server --config server.toml
-```
-
-## Architecture
-
-RoM separates version-independent server behavior from version-specific wire metadata.
-
-Core crates:
-
-- `rom-bootstrap` — one-command setup, readiness diagnostics, official-source verification, bounded local extraction, and instance management
-- `ferrum-rompack` — deterministic packet/profile metadata encoding, integrity validation, and bounded decoding
-- `ferrum-server` — native TCP server and connection runtime
-- `ferrum-runtime` — fixed-rate ticks, bounded inputs, deterministic mutation ordering, and bounded worker channels
-- `ferrum-protocol` — packet tables, phases, and connection-state validation
+- `rom-bootstrap` — official-source verification, `.rompack` generation, diagnostics, installation, and instance management
+- `ferrum-rompack` — deterministic compatibility-pack encoding, integrity validation, and bounded decoding
+- `ferrum-server` — native TCP server, connection lifecycle, replication, and gameplay integration
+- `ferrum-runtime` — fixed-rate scheduling, bounded inputs, workers, and deterministic mutation ordering
+- `ferrum-protocol` — state machine, packet tables, typed packet catalog, and framing
 - `ferrum-configuration` — Configuration-state payload codecs
-- `ferrum-play` — bounded Play-state wire codecs and movement decoding
-- `ferrum-world` — version-neutral chunks, player views, Anvil loading, and world primitives
+- `ferrum-play` — Play-state packet decoding and encoding, movement, ItemStack, inventory, and container codecs
+- `ferrum-game` — authoritative players, inventory, container transactions, mutations, and game events
+- `ferrum-world` — chunks, views, Anvil loading, and world primitives
+- `ferrum-version-26-1-2` — generated and hand-audited compatibility profile for Minecraft 26.1.2
+
+## License
+
+RoM is licensed under the MIT License. See [`LICENSE`](LICENSE). Third-party and Minecraft-related notices are documented in [`NOTICE.md`](NOTICE.md).

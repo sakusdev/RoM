@@ -5,10 +5,14 @@
 //! Gameplay state remains separate from version data.
 
 mod registries;
+mod tags;
 
 pub use registries::{
     OFFICIAL_SERVER_SHA1, REGISTRY_COUNT, REGISTRY_ENTRY_COUNT, REGISTRY_MANIFEST_SHA256,
     RegistryManifest, SYNCHRONIZED_REGISTRIES, configuration_registries,
+};
+pub use tags::{
+    TAG_COUNT, TAG_ENTRY_COUNT, TAG_MANIFEST_SHA256, TAG_REGISTRY_COUNT, configuration_tags,
 };
 
 use ferrum_configuration::KnownPack;

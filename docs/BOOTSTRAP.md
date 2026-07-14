@@ -26,7 +26,7 @@ For Minecraft 26.1.2, Bootstrap supports the complete ready-to-run workflow:
 9. Compare the resulting 28 registries and 382 identifiers with the built-in 26.1.2 manifest.
 10. Add the world data version, overworld section range, required flat-world block-state IDs, and plains biome ID.
 11. Add the dimension ID, dimension-type ID, sea level, flat floor, and deterministic spawn coordinates consumed by Play bootstrap.
-12. Write a deterministic schema-v4 `.rompack` with a container SHA-256 trailer and provenance metadata.
+12. Write a deterministic schema-v7 `.rompack` with a container SHA-256 trailer and provenance metadata.
 13. Install the native `ferrum-server` executable from a supplied binary, an adjacent release binary, or a local workspace build.
 14. Diagnose the manifest, EULA marker, source artifact, version pack, executable, and configuration before launch.
 15. Revalidate the pack before `rom-bootstrap run`; the native server then builds its `ProtocolProfile`, Configuration registry payloads, Join Game metadata, spawn packets, movement floor, and initial shared world from pack metadata.
@@ -93,7 +93,7 @@ The command refuses unsupported Minecraft versions and download URLs outside off
   --instance ./rom-instance
 ```
 
-Use `--force` to regenerate an already valid pack. Generation is deterministic for the same verified source JAR and extractor version. Schema-v1, schema-v2, and schema-v3 packs are intentionally rejected after the packet-table, world-metadata, and Play-bootstrap migrations and must be regenerated.
+Use `--force` to regenerate an already valid pack. Generation is deterministic for the same verified source JAR and extractor version. Packs from earlier schemas are intentionally rejected after packet-catalog, world-metadata, item/component-palette, and inventory migrations and must be regenerated.
 
 ### Install the local native server
 

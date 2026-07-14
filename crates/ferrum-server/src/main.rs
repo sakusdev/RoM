@@ -3,6 +3,7 @@ use clap::Parser;
 mod codec;
 mod identity;
 mod play_runtime;
+mod world_service;
 #[cfg(test)]
 use codec::read_varint_io;
 use codec::{
@@ -68,6 +69,9 @@ use std::{
     thread,
     time::Duration,
 };
+use world_service::{
+    WorldService, WorldServiceConfig, WorldServiceControl, load_world_state, spawn_world_service,
+};
 
 const DEFAULT_BIND: &str = "127.0.0.1:25565";
 const DEFAULT_VERSION_NAME: &str = "Minecraft Java Edition 26.*.*";
@@ -108,6 +112,10 @@ struct Cli {
     /// Persistent gameplay snapshot. Defaults to game-state.json beside server.toml.
     #[arg(long, value_name = "PATH")]
     game_state: Option<PathBuf>,
+
+    /// Persistent world snapshot. Defaults to world-state.json beside server.toml.
+    #[arg(long, value_name = "PATH")]
+    world_state: Option<PathBuf>,
 
     /// Autosave interval in seconds. Zero disables periodic saves; shutdown still saves.
     #[arg(long, default_value_t = 30)]
@@ -207,15 +215,22 @@ struct Handshake {
     next_state: i32,
 }
 
+#[derive(Debug, Clone, Default)]
+struct PersistenceConfig {
+    game: GameServiceConfig,
+    world: WorldServiceConfig,
+}
+
 #[derive(Debug)]
 struct ServerState {
     online_players: AtomicI32,
     next_connection_id: AtomicU64,
-    world: play_runtime::SharedWorld,
+    world: Arc<play_runtime::SharedWorld>,
     registry_payloads: Vec<Vec<u8>>,
     shared_play_runtime: SharedPlayRuntime,
     game_runtime: SharedGameRuntime,
     game_service: GameService,
+    world_service: WorldService,
     game_replication: GameReplicationService,
     shutdown: Arc<AtomicBool>,
 }
@@ -236,7 +251,7 @@ impl ServerState {
             config.play_policy.clone(),
             None,
             None,
-            GameServiceConfig::default(),
+            PersistenceConfig::default(),
         )
         .expect("built-in world profile must initialize")
     }
@@ -248,7 +263,7 @@ impl ServerState {
         play_policy: PlayPolicy,
         loaded_chunks: Option<ChunkStore>,
         game_state: Option<GameState>,
-        game_service_config: GameServiceConfig,
+        persistence: PersistenceConfig,
     ) -> Result<Self> {
         let center = play_runtime::spawn_chunk(&world);
         let game_state = match game_state {
@@ -265,14 +280,15 @@ impl ServerState {
             None => GameState::new(world.dimension.clone())?,
         };
         let game_runtime = SharedGameRuntime::new(game_state);
-        let game_service = spawn_game_service(game_runtime.clone(), game_service_config)?;
+        let game_service = spawn_game_service(game_runtime.clone(), persistence.game)?;
         let shared_runtime_config = shared_play_runtime_config(&play_policy)?;
-        let shared_world = match loaded_chunks {
+        let shared_world = Arc::new(match loaded_chunks {
             Some(store) => {
                 play_runtime::SharedWorld::from_store_with_policy(store, world, play_policy)?
             }
             None => play_runtime::SharedWorld::new_with_policy(center, world, play_policy)?,
-        };
+        });
+        let world_service = spawn_world_service(Arc::clone(&shared_world), persistence.world)?;
         let shared_play_runtime = spawn_shared_play_runtime(shared_runtime_config)?;
         let game_replication =
             spawn_game_replication(&game_runtime, GameReplicationConfig::default())?;
@@ -284,6 +300,7 @@ impl ServerState {
             shared_play_runtime,
             game_runtime,
             game_service,
+            world_service,
             game_replication,
             shutdown: Arc::new(AtomicBool::new(false)),
         })
@@ -304,7 +321,7 @@ impl ServerState {
             play_policy,
             Some(store),
             None,
-            GameServiceConfig::default(),
+            PersistenceConfig::default(),
         )
     }
 
@@ -375,6 +392,10 @@ impl ServerState {
         self.game_service.control()
     }
 
+    fn world_control(&self) -> WorldServiceControl {
+        self.world_service.control()
+    }
+
     fn shutdown_signal(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.shutdown)
     }
@@ -391,6 +412,11 @@ impl ServerState {
             replication.sent_outputs,
             replication.deferred_outputs,
             replication.dropped_outputs
+        );
+        let world = self.world_service.shutdown()?;
+        println!(
+            "world service stopped after {} autosaves and {} requested/final saves",
+            world.autosaves, world.requested_saves
         );
         self.game_service.shutdown()
     }
@@ -501,6 +527,11 @@ fn run(cli: Cli) -> Result<()> {
         .unwrap_or_else(|| Path::new("."))
         .join("game-state.json");
     let game_state_path = cli.game_state.clone().unwrap_or(default_state_path);
+    let default_world_path = config_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("world-state.json");
+    let world_state_path = cli.world_state.clone().unwrap_or(default_world_path);
     let (
         runtime_profile,
         world_profile,
@@ -537,12 +568,22 @@ fn run(cli: Cli) -> Result<()> {
     config.item_protocol_ids = item_protocol_ids;
     config.data_component_protocol_ids = data_component_protocol_ids;
     let game_state = load_game_state(&game_state_path, &world_profile.dimension)?;
-    let loaded_chunks = load_configured_world_chunks(&config.world, &world_profile)?;
+    let loaded_chunks = match load_world_state(&world_state_path, &world_profile)? {
+        Some(store) => Some(store),
+        None => load_configured_world_chunks(&config.world, &world_profile)?,
+    };
     let game_service_config = GameServiceConfig {
         snapshot_path: Some(game_state_path.clone()),
         autosave_interval: (cli.autosave_seconds > 0)
             .then(|| Duration::from_secs(cli.autosave_seconds)),
         ..GameServiceConfig::default()
+    };
+    let persistence = PersistenceConfig {
+        game: game_service_config,
+        world: WorldServiceConfig::new(
+            world_state_path,
+            (cli.autosave_seconds > 0).then(|| Duration::from_secs(cli.autosave_seconds)),
+        ),
     };
     let state = Arc::new(ServerState::with_runtime(
         config.online_players,
@@ -551,7 +592,7 @@ fn run(cli: Cli) -> Result<()> {
         config.play_policy.clone(),
         loaded_chunks,
         Some(game_state),
-        game_service_config,
+        persistence,
     )?);
     let listener = TcpListener::bind(&config.bind)
         .with_context(|| format!("cannot bind Minecraft status listener on {}", config.bind))?;
@@ -562,6 +603,7 @@ fn run(cli: Cli) -> Result<()> {
         spawn_server_console(
             state.game_runtime.clone(),
             state.game_control(),
+            state.world_control(),
             state.shutdown_signal(),
         )?;
     }
@@ -620,6 +662,7 @@ fn reap_finished_clients(clients: &mut Vec<thread::JoinHandle<()>>) {
 fn spawn_server_console(
     runtime: SharedGameRuntime,
     game_control: GameServiceControl,
+    world_control: WorldServiceControl,
     shutdown: Arc<AtomicBool>,
 ) -> Result<thread::JoinHandle<()>> {
     thread::Builder::new()
@@ -652,6 +695,15 @@ fn spawn_server_console(
                                     report.entities
                                 ),
                                 Err(error) => eprintln!("game save failed: {error:#}"),
+                            }
+                            match world_control.save_now() {
+                                Ok(report) => println!(
+                                    "saved world state to {} ({} bytes, {} chunks)",
+                                    report.path.display(),
+                                    report.bytes,
+                                    report.chunks
+                                ),
+                                Err(error) => eprintln!("world save failed: {error:#}"),
                             }
                         }
                         if outcome.shutdown_requested {
@@ -1969,7 +2021,12 @@ fn handle_configuration_protocol<R: Read, W: Write>(
     send_registry_data(writer, context.state.registry_payloads(), profile)?;
 
     if let Some(packet_id) = profile.packets().id(PacketKind::UpdateTags) {
-        let body = encode_tags(&[])?;
+        let tags = if config.profile_name.as_deref() == Some(version_26_1_2::PROFILE_NAME) {
+            version_26_1_2::configuration_tags()
+        } else {
+            Vec::new()
+        };
+        let body = encode_tags(&tags)?;
         write_packet(
             writer,
             &build_packet(packet_id, |output| {
@@ -3955,7 +4012,12 @@ mod tests {
         let tags = read_packet(&mut cursor).unwrap();
         let mut tags_reader = PacketReader::new(&tags);
         assert_eq!(tags_reader.read_varint().unwrap(), 0x0d);
-        assert_eq!(tags_reader.read_varint().unwrap(), 0);
+        assert_eq!(
+            tags_reader.take_remaining(),
+            encode_tags(&version_26_1_2::configuration_tags())
+                .unwrap()
+                .as_slice()
+        );
 
         let finish = read_packet(&mut cursor).unwrap();
         assert_eq!(PacketReader::new(&finish).read_varint().unwrap(), 0x03);

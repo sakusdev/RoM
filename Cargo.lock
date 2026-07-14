@@ -394,6 +394,8 @@ dependencies = [
  "ferrum-nbt",
  "ferrum-runtime",
  "flate2",
+ "serde",
+ "serde_json",
  "thiserror",
 ]
 

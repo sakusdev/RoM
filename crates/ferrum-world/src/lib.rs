@@ -6,8 +6,13 @@
 
 pub mod anvil;
 mod chunk_view;
+pub mod persistence;
 
 pub use chunk_view::{ChunkView, ChunkViewDelta, ChunkViewError};
+pub use persistence::{
+    ChunkSectionSnapshot, ChunkSnapshot, WORLD_SNAPSHOT_SCHEMA_VERSION, WorldPersistenceError,
+    WorldSnapshot,
+};
 
 use std::collections::BTreeMap;
 use thiserror::Error;

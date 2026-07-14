@@ -4,6 +4,7 @@
 
 mod block_interaction;
 mod chunk_stream;
+mod entity;
 mod inventory;
 mod movement;
 
@@ -13,6 +14,12 @@ pub use block_interaction::{
     player_action_to_world_event, use_item_on_block_to_world_event,
 };
 pub use chunk_stream::encode_forget_level_chunk;
+pub use entity::{
+    EncodedEntityMovement, EntityEncodeError, EntityMovementKind, EntityProtocolRegistry,
+    PlayerInfoEntry, encode_add_entity, encode_empty_entity_data, encode_entity_movement,
+    encode_player_info_remove, encode_player_info_update, encode_remove_entities,
+    encode_rotate_head, encode_teleport_entity,
+};
 pub use inventory::{
     DataComponentProtocolRegistry, InventoryDecodeError, InventoryEncodeError,
     ItemProtocolRegistry, decode_close_container, decode_container_click,
