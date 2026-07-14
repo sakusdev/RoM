@@ -40,13 +40,12 @@ jobs:
             test.log
 
   integrate-admin-gui:
-    if: github.head_ref == 'agent/admin-web-gui'
+    if: github.head_ref == 'agent/admin-web-gui' && github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: agent/admin-web-gui
-          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -64,6 +63,17 @@ jobs:
             exit 1
           fi
           cat integration.log
+      - name: Save integration failure
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          tail -120 integration.log > .github/gui-integration-error.log
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .github/gui-integration-error.log
+          git commit -m 'Record admin GUI integration failure'
+          git push origin HEAD:agent/admin-web-gui
       - name: Audit complete workspace
         shell: bash
         run: |
@@ -79,14 +89,28 @@ jobs:
             exit 1
           fi
           tail -40 audit.log
+      - name: Save audit failure
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f audit.log ]; then
+            tail -160 audit.log > .github/gui-integration-error.log
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git add .github/gui-integration-error.log
+            git commit -m 'Record full workspace audit failure'
+            git push origin HEAD:agent/admin-web-gui
+          fi
       - name: Commit validated source-only diff
         shell: bash
         run: |
           set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          rm -f tools/integrate_admin_gui.py tools/harden_admin_gui.py .github/workflows/integrate-admin-gui.yml
-          git checkout origin/master -- .github/workflows/ci.yml
+          rm -f tools/integrate_admin_gui.py tools/harden_admin_gui.py .github/workflows/integrate-admin-gui.yml .github/gui-integration-error.log
+          git fetch origin master --depth=1
+          git checkout FETCH_HEAD -- .github/workflows/ci.yml
           git add -A
           git commit -m 'Integrate local admin web GUI'
           git push origin HEAD:agent/admin-web-gui
