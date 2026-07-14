@@ -24,25 +24,31 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
 
           path = Path('crates/ferrum-server/src/main.rs')
           text = path.read_text()
-          old = '''            Ok((mut stream, _address)) => {
-                      let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
-                      let _ = stream.set_write_timeout(Some(Duration::from_secs(10)));
-          '''
-          new = '''            Ok((mut stream, _address)) => {
-                      if let Err(error) = configure_client_stream(&stream) {
-                          eprintln!("cannot configure accepted client socket: {error}");
-                          continue;
-                      }
-          '''
-          if old not in text:
-              raise SystemExit('accepted stream configuration anchor missing')
-          text = text.replace(old, new, 1)
+          pattern = re.compile(
+              r'(?m)^(?P<indent>\s*)Ok\(\(mut stream, _address\)\) => \{\n'
+              r'(?P=indent)    let _ = stream\.set_read_timeout\(Some\(Duration::from_secs\(10\)\)\);\n'
+              r'(?P=indent)    let _ = stream\.set_write_timeout\(Some\(Duration::from_secs\(10\)\)\);\n'
+          )
 
-          anchor = '''fn reap_finished_clients(clients: &mut Vec<thread::JoinHandle<()>>) {
-          '''
+          def replace_accept(match: re.Match[str]) -> str:
+              indent = match.group('indent')
+              return (
+                  f'{indent}Ok((mut stream, _address)) => {{\n'
+                  f'{indent}    if let Err(error) = configure_client_stream(&stream) {{\n'
+                  f'{indent}        eprintln!("cannot configure accepted client socket: {{error}}");\n'
+                  f'{indent}        continue;\n'
+                  f'{indent}    }}\n'
+              )
+
+          text, count = pattern.subn(replace_accept, text, count=1)
+          if count != 1:
+              raise SystemExit(f'accepted stream configuration replacement count was {count}')
+
+          anchor = 'fn reap_finished_clients(clients: &mut Vec<thread::JoinHandle<()>>) {\n'
           helper = '''fn configure_client_stream(stream: &TcpStream) -> io::Result<()> {
               // On Windows, a socket accepted from a non-blocking listener can retain
               // non-blocking mode. The protocol handlers use blocking reads with bounded
