@@ -1,0 +1,77 @@
+name: Complete player equipment replication
+
+on:
+  pull_request:
+    types: [reopened]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-complete-player-equipment-replication
+  cancel-in-progress: false
+
+jobs:
+  implement-and-validate:
+    if: >-
+      github.event.pull_request.number == 61 &&
+      github.event.pull_request.head.ref == 'agent/complete-server-features'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/complete-server-features
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Implement, validate, and commit
+        shell: bash
+        run: |
+          log=/tmp/player-equipment-validation.log
+          : > "$log"
+          status=0
+          set +e
+          python3 .github/scripts/agent_player_equipment.py 2>&1 | tee -a "$log"
+          status=${PIPESTATUS[0]}
+          if [ "$status" -eq 0 ]; then
+            cargo fmt --all 2>&1 | tee -a "$log"
+            status=${PIPESTATUS[0]}
+          fi
+          if [ "$status" -eq 0 ]; then
+            cargo fmt --all --check 2>&1 | tee -a "$log"
+            status=${PIPESTATUS[0]}
+          fi
+          if [ "$status" -eq 0 ]; then
+            cargo check --workspace --all-targets --all-features 2>&1 | tee -a "$log"
+            status=${PIPESTATUS[0]}
+          fi
+          if [ "$status" -eq 0 ]; then
+            cargo clippy --workspace --all-targets --all-features -- -D warnings 2>&1 | tee -a "$log"
+            status=${PIPESTATUS[0]}
+          fi
+          if [ "$status" -eq 0 ]; then
+            cargo test --workspace --all-features 2>&1 | tee -a "$log"
+            status=${PIPESTATUS[0]}
+          fi
+          set -e
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ "$status" -ne 0 ]; then
+            cp "$log" .github/player-equipment-diagnostic.txt
+            git add .github/player-equipment-diagnostic.txt
+            if ! git diff --cached --quiet; then
+              git commit -m "Record player equipment validation failure"
+              git push origin HEAD:agent/complete-server-features
+            fi
+            exit "$status"
+          fi
+
+          rm .github/scripts/agent_player_equipment.py
+          rm .github/workflows/agent-player-equipment.yml
+          rm -f .github/player-equipment-diagnostic.txt
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "Synchronize player equipment"
+          git push origin HEAD:agent/complete-server-features
