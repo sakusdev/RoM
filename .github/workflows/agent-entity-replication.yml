@@ -1,0 +1,49 @@
+name: Complete player entity replication
+
+on:
+  pull_request:
+    types: [reopened]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-complete-player-entity-replication
+  cancel-in-progress: false
+
+jobs:
+  implement-and-validate:
+    if: >-
+      github.event.pull_request.number == 61 &&
+      github.event.pull_request.head.ref == 'agent/complete-server-features'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/complete-server-features
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Apply entity replication implementation
+        run: python3 .github/scripts/agent_entity_replication.py
+      - name: Remove temporary automation
+        run: rm .github/scripts/agent_entity_replication.py .github/workflows/agent-entity-replication.yml
+      - name: Format
+        run: cargo fmt --all
+      - name: Validate formatting
+        run: cargo fmt --all --check
+      - name: Check workspace
+        run: cargo check --workspace --all-targets --all-features
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - name: Test workspace
+        run: cargo test --workspace --all-features
+      - name: Commit validated source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "Replicate live player entities"
+          git push origin HEAD:agent/complete-server-features
