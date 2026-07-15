@@ -1,1 +1,1 @@
-register spawn config: expected one anchor, found 5
+register spawn config: expected one command anchor, found 0
