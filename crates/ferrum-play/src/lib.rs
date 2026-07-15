@@ -37,6 +37,7 @@ pub use movement::{
 
 use std::collections::BTreeMap;
 
+use ferrum_game::EntityId;
 use ferrum_nbt::{Tag, encode_anonymous};
 use ferrum_world::{BlockStateId, ChunkSection, StaticChunk};
 use thiserror::Error;
@@ -64,6 +65,21 @@ pub struct CommonPlayerSpawnInfo {
     pub last_death_location: Option<GlobalPosition>,
     pub portal_cooldown: i32,
     pub sea_level: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum RespawnDataToKeep {
+    Nothing = 0,
+    Attributes = 1,
+    EntityData = 2,
+    All = 3,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Respawn {
+    pub spawn_info: CommonPlayerSpawnInfo,
+    pub data_to_keep: RespawnDataToKeep,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -163,6 +179,35 @@ pub fn encode_set_chunk_cache_center(x: i32, z: i32) -> Vec<u8> {
     write_varint(&mut output, x);
     write_varint(&mut output, z);
     output
+}
+
+pub fn encode_hurt_animation(entity_id: EntityId, yaw: f32) -> Result<Vec<u8>, PlayEncodeError> {
+    if !yaw.is_finite() {
+        return Err(PlayEncodeError::NonFinite { field: "hurt yaw" });
+    }
+    let mut output = Vec::new();
+    write_numeric_id(&mut output, "entity", entity_id.get())?;
+    output.extend_from_slice(&yaw.to_be_bytes());
+    Ok(output)
+}
+
+pub fn encode_player_combat_kill(
+    entity_id: EntityId,
+    message: &str,
+) -> Result<Vec<u8>, PlayEncodeError> {
+    let mut output = Vec::new();
+    write_numeric_id(&mut output, "entity", entity_id.get())?;
+    output.extend_from_slice(&encode_component(message)?);
+    Ok(output)
+}
+
+pub fn encode_respawn(packet: &Respawn) -> Result<Vec<u8>, PlayEncodeError> {
+    require_non_negative("dimension_type_id", packet.spawn_info.dimension_type_id)?;
+    require_non_negative("portal_cooldown", packet.spawn_info.portal_cooldown)?;
+    let mut output = Vec::new();
+    encode_common_spawn_info(&mut output, &packet.spawn_info)?;
+    output.push(packet.data_to_keep as u8);
+    Ok(output)
 }
 
 pub fn encode_system_chat(message: &str, overlay: bool) -> Result<Vec<u8>, PlayEncodeError> {
@@ -810,5 +855,44 @@ mod tests {
             }
         }
         panic!("invalid test VarInt")
+    }
+
+    #[test]
+    fn encodes_hurt_combat_kill_and_respawn_packets() {
+        let entity_id = EntityId::new(7).unwrap();
+        assert_eq!(
+            encode_hurt_animation(entity_id, 90.0).unwrap(),
+            [vec![7], 90.0_f32.to_be_bytes().to_vec()].concat()
+        );
+
+        let mut expected_kill = vec![7];
+        expected_kill.extend_from_slice(&encode_component("Steve died").unwrap());
+        assert_eq!(
+            encode_player_combat_kill(entity_id, "Steve died").unwrap(),
+            expected_kill
+        );
+
+        let packet = Respawn {
+            spawn_info: CommonPlayerSpawnInfo {
+                dimension_type_id: 0,
+                dimension: "minecraft:overworld".to_owned(),
+                seed: 0,
+                game_mode: 0,
+                previous_game_mode: 0,
+                is_debug: false,
+                is_flat: true,
+                last_death_location: None,
+                portal_cooldown: 0,
+                sea_level: 63,
+            },
+            data_to_keep: RespawnDataToKeep::Attributes,
+        };
+        let payload = encode_respawn(&packet).unwrap();
+        assert_eq!(payload.last(), Some(&(RespawnDataToKeep::Attributes as u8)));
+        assert!(
+            payload
+                .windows("minecraft:overworld".len())
+                .any(|window| { window == "minecraft:overworld".as_bytes() })
+        );
     }
 }

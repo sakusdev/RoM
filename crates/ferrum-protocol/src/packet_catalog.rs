@@ -297,6 +297,9 @@ pub fn known_packet_kind(
         (ProtocolPhase::Play, PacketDirection::Serverbound, "client_tick_end") => {
             Some(PacketKind::ClientTickEnd)
         }
+        (ProtocolPhase::Play, PacketDirection::Serverbound, "client_command") => {
+            Some(PacketKind::ClientCommand)
+        }
         (ProtocolPhase::Play, PacketDirection::Serverbound, "move_player_pos") => {
             Some(PacketKind::MovePlayerPosition)
         }
@@ -384,6 +387,13 @@ pub fn known_packet_kind(
         (ProtocolPhase::Play, PacketDirection::Clientbound, "set_health") => {
             Some(PacketKind::SetHealth)
         }
+        (ProtocolPhase::Play, PacketDirection::Clientbound, "hurt_animation") => {
+            Some(PacketKind::HurtAnimation)
+        }
+        (ProtocolPhase::Play, PacketDirection::Clientbound, "player_combat_kill") => {
+            Some(PacketKind::PlayerCombatKill)
+        }
+        (ProtocolPhase::Play, PacketDirection::Clientbound, "respawn") => Some(PacketKind::Respawn),
         (ProtocolPhase::Play, PacketDirection::Clientbound, "player_info_update") => {
             Some(PacketKind::PlayerInfoUpdate)
         }
@@ -429,6 +439,7 @@ pub const fn canonical_packet_name(kind: PacketKind) -> &'static str {
         PacketKind::PlayDisconnect => "minecraft:disconnect",
         PacketKind::KeepAliveRequest | PacketKind::KeepAliveResponse => "minecraft:keep_alive",
         PacketKind::ClientTickEnd => "minecraft:client_tick_end",
+        PacketKind::ClientCommand => "minecraft:client_command",
         PacketKind::MovePlayerPosition => "minecraft:move_player_pos",
         PacketKind::MovePlayerPositionRotation => "minecraft:move_player_pos_rot",
         PacketKind::MovePlayerRotation => "minecraft:move_player_rot",
@@ -458,6 +469,9 @@ pub const fn canonical_packet_name(kind: PacketKind) -> &'static str {
         PacketKind::SetEntityData => "minecraft:set_entity_data",
         PacketKind::SetEquipment => "minecraft:set_equipment",
         PacketKind::SetHealth => "minecraft:set_health",
+        PacketKind::HurtAnimation => "minecraft:hurt_animation",
+        PacketKind::PlayerCombatKill => "minecraft:player_combat_kill",
+        PacketKind::Respawn => "minecraft:respawn",
         PacketKind::PlayerInfoUpdate => "minecraft:player_info_update",
         PacketKind::PlayerInfoRemove => "minecraft:player_info_remove",
     }
@@ -608,5 +622,33 @@ mod tests {
             canonical_packet_name(PacketKind::SetHealth),
             "minecraft:set_health"
         );
+    }
+
+    #[test]
+    fn recognizes_respawn_combat_and_client_command_packets() {
+        for (direction, name, kind) in [
+            (
+                PacketDirection::Serverbound,
+                "client_command",
+                PacketKind::ClientCommand,
+            ),
+            (
+                PacketDirection::Clientbound,
+                "hurt_animation",
+                PacketKind::HurtAnimation,
+            ),
+            (
+                PacketDirection::Clientbound,
+                "player_combat_kill",
+                PacketKind::PlayerCombatKill,
+            ),
+            (PacketDirection::Clientbound, "respawn", PacketKind::Respawn),
+        ] {
+            assert_eq!(
+                known_packet_kind(ProtocolPhase::Play, direction, name),
+                Some(kind)
+            );
+            assert_eq!(canonical_packet_name(kind), format!("minecraft:{name}"));
+        }
     }
 }

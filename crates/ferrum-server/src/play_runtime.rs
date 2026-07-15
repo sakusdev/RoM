@@ -129,6 +129,19 @@ impl<'a> GameplaySync<'a> {
         Ok(())
     }
 
+    fn respawn(self, transform: Transform) -> Result<bool> {
+        let dead = self.runtime.with_state(|state| {
+            state
+                .player(self.player_uuid)
+                .is_some_and(|player| player.vitals.is_dead())
+        })?;
+        if !dead {
+            return Ok(false);
+        }
+        self.runtime.respawn_player(self.player_uuid, transform)?;
+        Ok(true)
+    }
+
     fn select_hotbar(self, selected_hotbar: u8) -> Result<()> {
         self.runtime
             .select_hotbar(self.player_uuid, selected_hotbar)?;
@@ -644,6 +657,34 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
                         bail!("teleport acknowledgement contains trailing bytes");
                     }
                 }
+                Some(PacketKind::ClientCommand) => {
+                    match decode_client_command(&mut packet_reader)? {
+                        ClientCommandAction::PerformRespawn => {
+                            if let Some(gameplay) = gameplay {
+                                let position = player_spawn_position(world_profile);
+                                let transform = Transform::new(position, 0.0, 0.0, false)?;
+                                if gameplay.respawn(transform)? {
+                                    player = PlayerState::new(position, 0.0, 0.0, false, false)?;
+                                    let respawn_chunk = player.chunk_pos();
+                                    if respawn_chunk != view.center() {
+                                        let delta = view.recenter(respawn_chunk)?;
+                                        shared_world.ensure_chunks_loaded(&delta.newly_visible)?;
+                                        send_chunk_view_delta(
+                                            writer,
+                                            profile,
+                                            shared_world,
+                                            respawn_chunk,
+                                            &delta,
+                                            play_reader,
+                                        )?;
+                                    }
+                                }
+                            }
+                        }
+                        ClientCommandAction::RequestStats
+                        | ClientCommandAction::RequestGameruleValues => {}
+                    }
+                }
                 Some(PacketKind::ChatCommand) => {
                     let command = decode_chat_command(&mut packet_reader)?;
                     if let Some(gameplay) = gameplay {
@@ -738,6 +779,26 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
             .checked_add(1)
             .context("keep alive id overflow")?;
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClientCommandAction {
+    PerformRespawn,
+    RequestStats,
+    RequestGameruleValues,
+}
+
+fn decode_client_command(reader: &mut PacketReader<'_>) -> Result<ClientCommandAction> {
+    let action = match reader.read_varint()? {
+        0 => ClientCommandAction::PerformRespawn,
+        1 => ClientCommandAction::RequestStats,
+        2 => ClientCommandAction::RequestGameruleValues,
+        value => bail!("unknown client command action {value}"),
+    };
+    if !reader.take_remaining().is_empty() {
+        bail!("client command packet contains trailing bytes");
+    }
+    Ok(action)
 }
 
 fn decode_chat_command(reader: &mut PacketReader<'_>) -> Result<String> {
@@ -2413,5 +2474,21 @@ mod tests {
             let z = i64::from(self.z) & 0x3ff_ffff;
             (x << 38) | (z << 12) | y
         }
+    }
+
+    #[test]
+    fn decodes_client_command_actions_and_rejects_invalid_payloads() {
+        for (payload, expected) in [
+            (&[0_u8][..], ClientCommandAction::PerformRespawn),
+            (&[1_u8][..], ClientCommandAction::RequestStats),
+            (&[2_u8][..], ClientCommandAction::RequestGameruleValues),
+        ] {
+            let mut reader = PacketReader::new(payload);
+            assert_eq!(decode_client_command(&mut reader).unwrap(), expected);
+        }
+        let mut unknown = PacketReader::new(&[3]);
+        assert!(decode_client_command(&mut unknown).is_err());
+        let mut trailing = PacketReader::new(&[0, 0]);
+        assert!(decode_client_command(&mut trailing).is_err());
     }
 }

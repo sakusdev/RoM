@@ -12,13 +12,15 @@ use ferrum_game::{
     PlayerUuid, Transform, Velocity, Vitals,
 };
 use ferrum_play::{
-    DataComponentProtocolRegistry, EncodedEntityMovement, EntityMovementKind,
-    EntityProtocolRegistry, EquipmentEntry, ItemProtocolRegistry, PlayerInfoEntry,
-    encode_add_entity, encode_empty_entity_data, encode_entity_movement, encode_player_info_remove,
-    encode_player_info_update, encode_remove_entities, encode_rotate_head, encode_set_equipment,
-    encode_set_health, encode_teleport_entity,
+    CommonPlayerSpawnInfo, DataComponentProtocolRegistry, EncodedEntityMovement,
+    EntityMovementKind, EntityProtocolRegistry, EquipmentEntry, ItemProtocolRegistry,
+    PlayerInfoEntry, Respawn, RespawnDataToKeep, encode_add_entity, encode_empty_entity_data,
+    encode_entity_movement, encode_hurt_animation, encode_player_combat_kill,
+    encode_player_info_remove, encode_player_info_update, encode_remove_entities, encode_respawn,
+    encode_rotate_head, encode_set_equipment, encode_set_health, encode_teleport_entity,
 };
 use ferrum_protocol::PacketKind;
+use ferrum_rompack::RomPackWorld;
 
 use crate::{
     authoritative_runtime::PlayOutput,
@@ -40,6 +42,7 @@ pub struct GameReplicationConfig {
     pub entity_protocol_ids: EntityProtocolRegistry,
     pub item_protocol_ids: ItemProtocolRegistry,
     pub data_component_protocol_ids: DataComponentProtocolRegistry,
+    pub world: Option<RomPackWorld>,
 }
 
 impl Default for GameReplicationConfig {
@@ -53,6 +56,7 @@ impl Default for GameReplicationConfig {
             entity_protocol_ids: EntityProtocolRegistry::default(),
             item_protocol_ids: ItemProtocolRegistry::default(),
             data_component_protocol_ids: DataComponentProtocolRegistry::default(),
+            world: None,
         }
     }
 }
@@ -646,14 +650,98 @@ fn dispatch_event(
                 exit,
             );
         }
-        GameEvent::PlayerDamaged { .. } => {}
+        GameEvent::PlayerDamaged {
+            uuid, entity_id, ..
+        } => {
+            let payload = encode_hurt_animation(entity_id, 0.0)
+                .context("cannot encode player hurt animation")?;
+            for (target, connection) in connections.iter_mut() {
+                if *target == uuid || connection.entities.contains_key(&uuid) {
+                    connection.queue(
+                        PlayOutput::ProtocolPacket {
+                            kind: PacketKind::HurtAnimation,
+                            payload: payload.clone(),
+                        },
+                        exit,
+                    );
+                }
+            }
+        }
         GameEvent::PlayerVitalsChanged { uuid, vitals } => {
             if let Some(connection) = connections.get_mut(&uuid) {
                 queue_set_health(connection, vitals, exit)?;
             }
         }
-        GameEvent::PlayerKilled { uuid } => {
-            target_chat(connections, uuid, "You died".to_owned(), false, exit)
+        GameEvent::PlayerKilled {
+            uuid,
+            entity_id,
+            name,
+        } => {
+            if let Some(connection) = connections.get_mut(&uuid) {
+                connection.queue(
+                    PlayOutput::ProtocolPacket {
+                        kind: PacketKind::PlayerCombatKill,
+                        payload: encode_player_combat_kill(entity_id, &format!("{name} died"))
+                            .context("cannot encode player combat death")?,
+                    },
+                    exit,
+                );
+            }
+        }
+        GameEvent::PlayerRespawned {
+            uuid,
+            entity_id,
+            transform,
+            game_mode,
+            previous_game_mode,
+        } => {
+            let world = config
+                .world
+                .as_ref()
+                .context("player respawn requires a replication world profile")?;
+            let respawn = Respawn {
+                spawn_info: CommonPlayerSpawnInfo {
+                    dimension_type_id: world.dimension_type_id,
+                    dimension: world.dimension.clone(),
+                    seed: 0,
+                    game_mode: protocol_game_mode(game_mode),
+                    previous_game_mode: protocol_game_mode(previous_game_mode),
+                    is_debug: false,
+                    is_flat: true,
+                    last_death_location: None,
+                    portal_cooldown: 0,
+                    sea_level: world.sea_level,
+                },
+                data_to_keep: RespawnDataToKeep::Attributes,
+            };
+            if let Some(connection) = connections.get_mut(&uuid) {
+                connection.queue(
+                    PlayOutput::ProtocolPacket {
+                        kind: PacketKind::Respawn,
+                        payload: encode_respawn(&respawn)
+                            .context("cannot encode player respawn")?,
+                    },
+                    exit,
+                );
+                connection.queue_teleport(transform, exit);
+            }
+            if entity_replication_enabled(&config.entity_protocol_ids) {
+                for (target, connection) in connections.iter_mut() {
+                    if *target == uuid {
+                        continue;
+                    }
+                    if let Some(mut tracked) = connection.entities.get(&uuid).cloned() {
+                        tracked.entity_id = entity_id;
+                        tracked.velocity = Velocity::default();
+                        queue_player_absolute_teleport(connection, &tracked, transform, exit)?;
+                        if let Some(snapshot) = connection.entities.get_mut(&uuid) {
+                            snapshot.entity_id = entity_id;
+                            snapshot.transform = transform;
+                            snapshot.velocity = Velocity::default();
+                        }
+                    }
+                }
+            }
         }
         GameEvent::SelectedHotbarChanged { uuid, current, .. } => {
             if entity_replication_enabled(&config.entity_protocol_ids) {
@@ -680,6 +768,15 @@ fn dispatch_event(
         }
     }
     Ok(())
+}
+
+const fn protocol_game_mode(game_mode: GameMode) -> i8 {
+    match game_mode {
+        GameMode::Survival => 0,
+        GameMode::Creative => 1,
+        GameMode::Adventure => 2,
+        GameMode::Spectator => 3,
+    }
 }
 
 fn entity_replication_enabled(registry: &EntityProtocolRegistry) -> bool {
@@ -1075,6 +1172,27 @@ mod tests {
         GameReplicationConfig {
             entity_protocol_ids: EntityProtocolRegistry::new([("minecraft:player", 148)]).unwrap(),
             item_protocol_ids: ItemProtocolRegistry::new([("minecraft:stone", 1)]).unwrap(),
+            world: Some(RomPackWorld {
+                data_version: ferrum_version_26_1_2::WORLD_VERSION,
+                overworld_min_section_y: ferrum_version_26_1_2::OVERWORLD_MIN_SECTION_Y,
+                overworld_section_count: ferrum_version_26_1_2::OVERWORLD_SECTION_COUNT,
+                dimension: ferrum_version_26_1_2::OVERWORLD_DIMENSION.to_owned(),
+                dimension_type_id: ferrum_version_26_1_2::OVERWORLD_DIMENSION_TYPE_ID,
+                sea_level: ferrum_version_26_1_2::OVERWORLD_SEA_LEVEL,
+                floor_y: ferrum_version_26_1_2::FLAT_WORLD_FLOOR_Y,
+                spawn_x: ferrum_version_26_1_2::FLAT_WORLD_SPAWN_X,
+                spawn_z: ferrum_version_26_1_2::FLAT_WORLD_SPAWN_Z,
+                block_states: ferrum_rompack::RomPackBlockStates {
+                    air: ferrum_version_26_1_2::AIR_BLOCK_STATE_ID,
+                    stone: ferrum_version_26_1_2::STONE_BLOCK_STATE_ID,
+                    grass: ferrum_version_26_1_2::GRASS_BLOCK_STATE_ID,
+                    dirt: ferrum_version_26_1_2::DIRT_BLOCK_STATE_ID,
+                    bedrock: ferrum_version_26_1_2::BEDROCK_BLOCK_STATE_ID,
+                },
+                biomes: ferrum_rompack::RomPackBiomes {
+                    plains: ferrum_version_26_1_2::PLAINS_BIOME_ID,
+                },
+            }),
             ..GameReplicationConfig::default()
         }
     }
@@ -1733,6 +1851,12 @@ mod tests {
         ));
 
         game.damage_player(steve, 4.0).unwrap();
+        recv_protocol(
+            &steve_writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::HurtAnimation,
+        );
         match recv_raw_output(&steve_writer, &mut workers, &mut inputs) {
             PlayOutput::ProtocolPacket {
                 kind: PacketKind::SetHealth,
@@ -1747,6 +1871,12 @@ mod tests {
         assert!(alex_writer.try_recv_output().is_err());
 
         game.damage_player(steve, 100.0).unwrap();
+        recv_protocol(
+            &steve_writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::HurtAnimation,
+        );
         assert!(matches!(
             recv_raw_output(&steve_writer, &mut workers, &mut inputs),
             PlayOutput::ProtocolPacket {
@@ -1754,9 +1884,93 @@ mod tests {
                 payload,
             } if f32::from_be_bytes(payload[0..4].try_into().unwrap()) == 0.0
         ));
+        recv_protocol(
+            &steve_writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::PlayerCombatKill,
+        );
         assert!(matches!(
             recv_output(&steve_writer, &mut workers, &mut inputs),
-            PlayOutput::SystemChat { message, overlay: false } if message == "You died"
+            PlayOutput::SetContainerContent {
+                container_id: 0,
+                ..
+            }
+        ));
+        service.shutdown().unwrap();
+    }
+
+    #[test]
+    fn sends_hurt_death_respawn_teleport_and_health_in_order() {
+        let game = SharedGameRuntime::vanilla_overworld();
+        let service = spawn_game_replication(&game, entity_config()).unwrap();
+        let steve = PlayerUuid::new(501);
+        let (connector, mut workers) = worker_channel(NonZeroUsize::new(128).unwrap());
+        let (reader, writer) = register_play_connection(
+            &connector,
+            ConnectionId::new(501),
+            NonZeroUsize::new(64).unwrap(),
+        )
+        .unwrap();
+        let mut inputs = BoundedInputQueue::try_new(128).unwrap();
+        ingest(&mut workers, &mut inputs);
+        service.control().register(steve, reader).unwrap();
+        game.connect_player(steve, "Steve", spawn()).unwrap();
+        assert!(matches!(
+            recv_raw_output(&writer, &mut workers, &mut inputs),
+            PlayOutput::ProtocolPacket {
+                kind: PacketKind::SetHealth,
+                ..
+            }
+        ));
+        recv_protocol(
+            &writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::PlayerInfoUpdate,
+        );
+
+        game.damage_player(steve, 20.0).unwrap();
+        recv_protocol(
+            &writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::HurtAnimation,
+        );
+        assert!(matches!(
+            recv_raw_output(&writer, &mut workers, &mut inputs),
+            PlayOutput::ProtocolPacket {
+                kind: PacketKind::SetHealth,
+                ..
+            }
+        ));
+        recv_protocol(
+            &writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::PlayerCombatKill,
+        );
+        assert!(matches!(
+            recv_output(&writer, &mut workers, &mut inputs),
+            PlayOutput::SetContainerContent {
+                container_id: 0,
+                ..
+            }
+        ));
+
+        let respawn = Transform::new([0.5, 64.0, 0.5], 0.0, 0.0, false).unwrap();
+        game.respawn_player(steve, respawn).unwrap();
+        recv_protocol(&writer, &mut workers, &mut inputs, PacketKind::Respawn);
+        assert!(matches!(
+            recv_output(&writer, &mut workers, &mut inputs),
+            PlayOutput::PlayerTeleport { transform, .. } if transform == respawn
+        ));
+        assert!(matches!(
+            recv_raw_output(&writer, &mut workers, &mut inputs),
+            PlayOutput::ProtocolPacket {
+                kind: PacketKind::SetHealth,
+                ..
+            }
         ));
         service.shutdown().unwrap();
     }

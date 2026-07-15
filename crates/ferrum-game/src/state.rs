@@ -102,6 +102,15 @@ pub enum GameEvent {
     },
     PlayerKilled {
         uuid: PlayerUuid,
+        entity_id: EntityId,
+        name: String,
+    },
+    PlayerRespawned {
+        uuid: PlayerUuid,
+        entity_id: EntityId,
+        transform: Transform,
+        game_mode: GameMode,
+        previous_game_mode: GameMode,
     },
     TimeChanged {
         day_time: i64,
@@ -517,7 +526,7 @@ impl GameState {
             },
         ];
         if !previous.is_dead() && current.is_dead() {
-            events.extend(self.finish_player_death(uuid)?);
+            events.extend(self.finish_player_death(uuid, entity_id)?);
         }
         Ok(events)
     }
@@ -550,7 +559,7 @@ impl GameState {
     }
 
     pub fn kill_player(&mut self, uuid: PlayerUuid) -> Result<Vec<GameEvent>, GameStateError> {
-        self.connected_entity_id(uuid)?;
+        let entity_id = self.connected_entity_id(uuid)?;
         let current = {
             let player = self
                 .players
@@ -566,11 +575,51 @@ impl GameState {
             uuid,
             vitals: current,
         }];
-        events.extend(self.finish_player_death(uuid)?);
+        events.extend(self.finish_player_death(uuid, entity_id)?);
         Ok(events)
     }
 
-    fn finish_player_death(&mut self, uuid: PlayerUuid) -> Result<Vec<GameEvent>, GameStateError> {
+    pub fn respawn_player(
+        &mut self,
+        uuid: PlayerUuid,
+        transform: Transform,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
+        let entity_id = self.connected_entity_id(uuid)?;
+        let (game_mode, previous_game_mode, vitals) = {
+            let player = self
+                .players
+                .get_mut(&uuid)
+                .ok_or(GameStateError::UnknownPlayer { uuid })?;
+            if !player.vitals.is_dead() {
+                return Err(GameStateError::PlayerAlive { uuid });
+            }
+            let previous_game_mode = player.game_mode;
+            player.vitals = Vitals::default();
+            (player.game_mode, previous_game_mode, player.vitals)
+        };
+        let entity = self
+            .entities
+            .get_mut(entity_id)
+            .ok_or(GameStateError::PlayerMissingEntity { uuid })?;
+        entity.transform = transform;
+        entity.velocity = crate::Velocity::default();
+        Ok(vec![
+            GameEvent::PlayerRespawned {
+                uuid,
+                entity_id,
+                transform,
+                game_mode,
+                previous_game_mode,
+            },
+            GameEvent::PlayerVitalsChanged { uuid, vitals },
+        ])
+    }
+
+    fn finish_player_death(
+        &mut self,
+        uuid: PlayerUuid,
+        entity_id: EntityId,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
         let keep_inventory = matches!(
             self.game_rules.get("keepInventory"),
             Some(GameRuleValue::Boolean(true))
@@ -579,7 +628,11 @@ impl GameState {
             .players
             .get_mut(&uuid)
             .ok_or(GameStateError::UnknownPlayer { uuid })?;
-        let mut events = vec![GameEvent::PlayerKilled { uuid }];
+        let mut events = vec![GameEvent::PlayerKilled {
+            uuid,
+            entity_id,
+            name: player.name.clone(),
+        }];
         if !keep_inventory {
             let before = player.inventory.slots().to_vec();
             let stacks = player.inventory.drain();
@@ -762,6 +815,8 @@ pub enum GameStateError {
     PlayerMissingEntity { uuid: PlayerUuid },
     #[error("player {uuid:?} is dead and must respawn before healing")]
     PlayerDead { uuid: PlayerUuid },
+    #[error("player {uuid:?} is alive and cannot respawn")]
+    PlayerAlive { uuid: PlayerUuid },
 }
 
 #[cfg(test)]
@@ -932,5 +987,39 @@ mod tests {
         state.set_game_mode(uuid, GameMode::Creative).unwrap();
         assert!(state.damage_player(uuid, 20.0).unwrap().is_empty());
         assert_eq!(state.player(uuid).unwrap().vitals.health, 20.0);
+    }
+
+    #[test]
+    fn respawn_resets_vitals_transform_and_velocity_without_reallocating_entity() {
+        let uuid = PlayerUuid::new(32);
+        let mut state = GameState::default();
+        state.connect_player(uuid, "Steve", spawn()).unwrap();
+        let entity_id = state.player(uuid).unwrap().entity_id.unwrap();
+        state.entities_mut().get_mut(entity_id).unwrap().velocity =
+            crate::Velocity([1.0, 2.0, 3.0]);
+        state.kill_player(uuid).unwrap();
+        let respawn = Transform::new([8.5, 70.0, -3.5], 45.0, 0.0, false).unwrap();
+        let events = state.respawn_player(uuid, respawn).unwrap();
+        assert!(matches!(
+            events.as_slice(),
+            [
+                GameEvent::PlayerRespawned {
+                    entity_id: event_entity_id,
+                    transform,
+                    ..
+                },
+                GameEvent::PlayerVitalsChanged { vitals, .. }
+            ] if *event_entity_id == entity_id
+                && *transform == respawn
+                && *vitals == Vitals::default()
+        ));
+        let entity = state.entities().get(entity_id).unwrap();
+        assert_eq!(entity.transform, respawn);
+        assert_eq!(entity.velocity, crate::Velocity::default());
+        assert_eq!(state.player(uuid).unwrap().vitals, Vitals::default());
+        assert!(matches!(
+            state.respawn_player(uuid, respawn),
+            Err(GameStateError::PlayerAlive { .. })
+        ));
     }
 }

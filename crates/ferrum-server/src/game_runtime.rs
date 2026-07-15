@@ -146,6 +146,16 @@ impl SharedGameRuntime {
         Ok(events)
     }
 
+    pub fn respawn_player(
+        &self,
+        uuid: PlayerUuid,
+        transform: Transform,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self.write()?.respawn_player(uuid, transform)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
     pub fn click_container(
         &self,
         uuid: PlayerUuid,

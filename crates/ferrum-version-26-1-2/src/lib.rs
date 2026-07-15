@@ -95,11 +95,15 @@ pub fn protocol_profile() -> Result<ProtocolProfile, ProfileError> {
         (PacketKind::PlayerPosition, 0x48),
         (PacketKind::SystemChat, 0x79),
         (PacketKind::SetHealth, 0x68),
+        (PacketKind::HurtAnimation, 0x2a),
+        (PacketKind::PlayerCombatKill, 0x44),
+        (PacketKind::Respawn, 0x52),
         (PacketKind::AcceptTeleportation, 0x00),
         (PacketKind::PlayDisconnect, 0x20),
         (PacketKind::KeepAliveRequest, 0x2c),
         (PacketKind::KeepAliveResponse, 0x1c),
         (PacketKind::ClientTickEnd, 0x0d),
+        (PacketKind::ClientCommand, 0x0c),
         (PacketKind::MovePlayerPosition, 0x1e),
         (PacketKind::MovePlayerPositionRotation, 0x1f),
         (PacketKind::MovePlayerRotation, 0x20),
@@ -172,6 +176,10 @@ mod tests {
         assert_eq!(packets.require(PacketKind::FeatureFlags).unwrap(), 0x0c);
         assert_eq!(packets.require(PacketKind::UpdateTags).unwrap(), 0x0d);
         assert_eq!(packets.require(PacketKind::SetHealth).unwrap(), 0x68);
+        assert_eq!(packets.require(PacketKind::HurtAnimation).unwrap(), 0x2a);
+        assert_eq!(packets.require(PacketKind::PlayerCombatKill).unwrap(), 0x44);
+        assert_eq!(packets.require(PacketKind::Respawn).unwrap(), 0x52);
+        assert_eq!(packets.require(PacketKind::ClientCommand).unwrap(), 0x0c);
         assert_eq!(packets.require(PacketKind::ChunkBatchStart).unwrap(), 0x0c);
         assert_eq!(
             packets.require(PacketKind::ChunkBatchFinished).unwrap(),

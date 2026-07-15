@@ -300,6 +300,7 @@ impl ServerState {
             data_component_protocol_ids,
         } = registries;
         let center = play_runtime::spawn_chunk(&world);
+        let replication_world = world.clone();
         let game_state = match game_state {
             Some(state) => {
                 if state.dimension() != world.dimension {
@@ -330,6 +331,7 @@ impl ServerState {
                 entity_protocol_ids,
                 item_protocol_ids,
                 data_component_protocol_ids,
+                world: Some(replication_world),
                 ..GameReplicationConfig::default()
             },
         )?;
