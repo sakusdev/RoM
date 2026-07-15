@@ -1,1295 +1,1048 @@
-constant_matches:
-net.minecraft.network.protocol.game.GamePacketTypes	damage_event,hurt_animation,player_combat_kill,respawn,set_health
-net.minecraft.server.level.ServerPlayer	respawn
-net.minecraft.server.network.ServerGamePacketListenerImpl	respawn
-net.minecraft.server.players.PlayerList	respawn
-net.minecraft.util.datafix.fixes.InlineBlockPosFormatFix	respawn
-net.minecraft.util.datafix.fixes.PlayerRespawnDataFix	respawn
-registration_contexts:
-===== net.minecraft.network.protocol.game.GamePacketTypes [damage_event,hurt_animation,player_combat_kill,respawn,set_health] =====
-Compiled from "GamePacketTypes.java"
-public class net.minecraft.network.protocol.game.GamePacketTypes {
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundBundlePacket> CLIENTBOUND_BUNDLE;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundBundleDelimiterPacket> CLIENTBOUND_BUNDLE_DELIMITER;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundAddEntityPacket> CLIENTBOUND_ADD_ENTITY;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundAnimatePacket> CLIENTBOUND_ANIMATE;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundAwardStatsPacket> CLIENTBOUND_AWARD_STATS;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundBlockChangedAckPacket> CLIENTBOUND_BLOCK_CHANGED_ACK;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundBlockDestructionPacket> CLIENTBOUND_BLOCK_DESTRUCTION;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket> CLIENTBOUND_BLOCK_ENTITY_DATA;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundBlockEventPacket> CLIENTBOUND_BLOCK_EVENT;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundBlockUpdatePacket> CLIENTBOUND_BLOCK_UPDATE;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundBossEventPacket> CLIENTBOUND_BOSS_EVENT;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundChangeDifficultyPacket> CLIENTBOUND_CHANGE_DIFFICULTY;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundChunkBatchFinishedPacket> CLIENTBOUND_CHUNK_BATCH_FINISHED;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundChunkBatchStartPacket> CLIENTBOUND_CHUNK_BATCH_START;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundChunksBiomesPacket> CLIENTBOUND_CHUNKS_BIOMES;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundClearTitlesPacket> CLIENTBOUND_CLEAR_TITLES;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundCommandSuggestionsPacket> CLIENTBOUND_COMMAND_SUGGESTIONS;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundCommandsPacket> CLIENTBOUND_COMMANDS;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundContainerClosePacket> CLIENTBOUND_CONTAINER_CLOSE;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundContainerSetContentPacket> CLIENTBOUND_CONTAINER_SET_CONTENT;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundContainerSetDataPacket> CLIENTBOUND_CONTAINER_SET_DATA;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundContainerSetSlotPacket> CLIENTBOUND_CONTAINER_SET_SLOT;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundCooldownPacket> CLIENTBOUND_COOLDOWN;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundCustomChatCompletionsPacket> CLIENTBOUND_CUSTOM_CHAT_COMPLETIONS;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundDamageEventPacket> CLIENTBOUND_DAMAGE_EVENT;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundDebugBlockValuePacket> CLIENTBOUND_DEBUG_BLOCK_VALUE;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundDebugChunkValuePacket> CLIENTBOUND_DEBUG_CHUNK_VALUE;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundDebugEntityValuePacket> CLIENTBOUND_DEBUG_ENTITY_VALUE;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundDebugEventPacket> CLIENTBOUND_DEBUG_EVENT;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundDebugSamplePacket> CLIENTBOUND_DEBUG_SAMPLE;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundDeleteChatPacket> CLIENTBOUND_DELETE_CHAT;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundDisguisedChatPacket> CLIENTBOUND_DISGUISED_CHAT;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundEntityEventPacket> CLIENTBOUND_ENTITY_EVENT;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundEntityPositionSyncPacket> CLIENTBOUND_ENTITY_POSITION_SYNC;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundExplodePacket> CLIENTBOUND_EXPLODE;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundForgetLevelChunkPacket> CLIENTBOUND_FORGET_LEVEL_CHUNK;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundGameEventPacket> CLIENTBOUND_GAME_EVENT;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundGameTestHighlightPosPacket> CLIENTBOUND_GAME_TEST_HIGHLIGHT_POS;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundMountScreenOpenPacket> CLIENTBOUND_MOUNT_SCREEN_OPEN;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundHurtAnimationPacket> CLIENTBOUND_HURT_ANIMATION;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundInitializeBorderPacket> CLIENTBOUND_INITIALIZE_BORDER;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundLevelChunkWithLightPacket> CLIENTBOUND_LEVEL_CHUNK_WITH_LIGHT;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundLevelEventPacket> CLIENTBOUND_LEVEL_EVENT;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundLevelParticlesPacket> CLIENTBOUND_LEVEL_PARTICLES;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundLightUpdatePacket> CLIENTBOUND_LIGHT_UPDATE;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundLoginPacket> CLIENTBOUND_LOGIN;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundLowDiskSpaceWarningPacket> CLIENTBOUND_LOW_DISK_SPACE_WARNING;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundMapItemDataPacket> CLIENTBOUND_MAP_ITEM_DATA;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundMerchantOffersPacket> CLIENTBOUND_MERCHANT_OFFERS;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundMoveEntityPacket$Pos> CLIENTBOUND_MOVE_ENTITY_POS;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundMoveEntityPacket$PosRot> CLIENTBOUND_MOVE_ENTITY_POS_ROT;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundMoveMinecartPacket> CLIENTBOUND_MOVE_MINECART_ALONG_TRACK;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundMoveEntityPacket$Rot> CLIENTBOUND_MOVE_ENTITY_ROT;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundMoveVehiclePacket> CLIENTBOUND_MOVE_VEHICLE;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundOpenBookPacket> CLIENTBOUND_OPEN_BOOK;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundOpenScreenPacket> CLIENTBOUND_OPEN_SCREEN;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundOpenSignEditorPacket> CLIENTBOUND_OPEN_SIGN_EDITOR;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundPlaceGhostRecipePacket> CLIENTBOUND_PLACE_GHOST_RECIPE;
-
-  public static final net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundPlayerAbilitiesPacket> CLIENTBOUND_PLAYER_ABILITIES;
-
-455-       128: ldc           #114                // String command_suggestions
-456-       130: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-457-       133: putstatic     #116                // Field CLIENTBOUND_COMMAND_SUGGESTIONS:Lnet/minecraft/network/protocol/PacketType;
-458-       136: ldc           #119                // String commands
-459-       138: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-460-       141: putstatic     #121                // Field CLIENTBOUND_COMMANDS:Lnet/minecraft/network/protocol/PacketType;
-461-       144: ldc           #124                // String container_close
-462-       146: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-463-       149: putstatic     #126                // Field CLIENTBOUND_CONTAINER_CLOSE:Lnet/minecraft/network/protocol/PacketType;
-464-       152: ldc           #129                // String container_set_content
-465-       154: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-466-       157: putstatic     #131                // Field CLIENTBOUND_CONTAINER_SET_CONTENT:Lnet/minecraft/network/protocol/PacketType;
-467-       160: ldc           #134                // String container_set_data
-468-       162: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-469-       165: putstatic     #136                // Field CLIENTBOUND_CONTAINER_SET_DATA:Lnet/minecraft/network/protocol/PacketType;
-470-       168: ldc           #139                // String container_set_slot
-471-       170: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-472-       173: putstatic     #141                // Field CLIENTBOUND_CONTAINER_SET_SLOT:Lnet/minecraft/network/protocol/PacketType;
-473-       176: ldc           #144                // String cooldown
-474-       178: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-475-       181: putstatic     #146                // Field CLIENTBOUND_COOLDOWN:Lnet/minecraft/network/protocol/PacketType;
-476-       184: ldc           #149                // String custom_chat_completions
-477-       186: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-478-       189: putstatic     #151                // Field CLIENTBOUND_CUSTOM_CHAT_COMPLETIONS:Lnet/minecraft/network/protocol/PacketType;
-479:       192: ldc           #154                // String damage_event
-480-       194: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-481-       197: putstatic     #156                // Field CLIENTBOUND_DAMAGE_EVENT:Lnet/minecraft/network/protocol/PacketType;
-482-       200: ldc           #159                // String debug/block_value
-483-       202: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-484-       205: putstatic     #161                // Field CLIENTBOUND_DEBUG_BLOCK_VALUE:Lnet/minecraft/network/protocol/PacketType;
-485-       208: ldc           #164                // String debug/chunk_value
-486-       210: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-487-       213: putstatic     #166                // Field CLIENTBOUND_DEBUG_CHUNK_VALUE:Lnet/minecraft/network/protocol/PacketType;
-488-       216: ldc           #169                // String debug/entity_value
-489-       218: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-490-       221: putstatic     #171                // Field CLIENTBOUND_DEBUG_ENTITY_VALUE:Lnet/minecraft/network/protocol/PacketType;
-491-       224: ldc           #174                // String debug/event
-492-       226: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-493-       229: putstatic     #176                // Field CLIENTBOUND_DEBUG_EVENT:Lnet/minecraft/network/protocol/PacketType;
-494-       232: ldc           #179                // String debug_sample
-495-       234: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-496-       237: putstatic     #181                // Field CLIENTBOUND_DEBUG_SAMPLE:Lnet/minecraft/network/protocol/PacketType;
-497-       240: ldc           #184                // String delete_chat
-498-       242: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-499-       245: putstatic     #186                // Field CLIENTBOUND_DELETE_CHAT:Lnet/minecraft/network/protocol/PacketType;
-500-       248: ldc           #189                // String disguised_chat
-501-       250: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-502-       253: putstatic     #191                // Field CLIENTBOUND_DISGUISED_CHAT:Lnet/minecraft/network/protocol/PacketType;
-503-       256: ldc           #194                // String entity_event
-504-       258: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-505-       261: putstatic     #196                // Field CLIENTBOUND_ENTITY_EVENT:Lnet/minecraft/network/protocol/PacketType;
-506-       264: ldc           #199                // String entity_position_sync
-507-       266: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-508-       269: putstatic     #201                // Field CLIENTBOUND_ENTITY_POSITION_SYNC:Lnet/minecraft/network/protocol/PacketType;
-509-       272: ldc           #204                // String explode
-510-       274: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-511-       277: putstatic     #206                // Field CLIENTBOUND_EXPLODE:Lnet/minecraft/network/protocol/PacketType;
-512-       280: ldc           #209                // String forget_level_chunk
-513-       282: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-514-       285: putstatic     #211                // Field CLIENTBOUND_FORGET_LEVEL_CHUNK:Lnet/minecraft/network/protocol/PacketType;
-515-       288: ldc           #214                // String game_event
-516-       290: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-517-       293: putstatic     #216                // Field CLIENTBOUND_GAME_EVENT:Lnet/minecraft/network/protocol/PacketType;
-518-       296: ldc           #219                // String game_test_highlight_pos
-519-       298: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-520-       301: putstatic     #221                // Field CLIENTBOUND_GAME_TEST_HIGHLIGHT_POS:Lnet/minecraft/network/protocol/PacketType;
-521-       304: ldc           #224                // String mount_screen_open
-522-       306: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-523-       309: putstatic     #226                // Field CLIENTBOUND_MOUNT_SCREEN_OPEN:Lnet/minecraft/network/protocol/PacketType;
-524:       312: ldc           #229                // String hurt_animation
-525-       314: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-526-       317: putstatic     #231                // Field CLIENTBOUND_HURT_ANIMATION:Lnet/minecraft/network/protocol/PacketType;
-527-       320: ldc           #234                // String initialize_border
-528-       322: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-529-       325: putstatic     #236                // Field CLIENTBOUND_INITIALIZE_BORDER:Lnet/minecraft/network/protocol/PacketType;
-530-       328: ldc           #239                // String level_chunk_with_light
-531-       330: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-532-       333: putstatic     #241                // Field CLIENTBOUND_LEVEL_CHUNK_WITH_LIGHT:Lnet/minecraft/network/protocol/PacketType;
-533-       336: ldc           #244                // String level_event
-534-       338: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-535-       341: putstatic     #246                // Field CLIENTBOUND_LEVEL_EVENT:Lnet/minecraft/network/protocol/PacketType;
-536-       344: ldc           #249                // String level_particles
-537-       346: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-538-       349: putstatic     #251                // Field CLIENTBOUND_LEVEL_PARTICLES:Lnet/minecraft/network/protocol/PacketType;
-539-       352: ldc           #254                // String light_update
-540-       354: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-541-       357: putstatic     #256                // Field CLIENTBOUND_LIGHT_UPDATE:Lnet/minecraft/network/protocol/PacketType;
-542-       360: ldc_w         #259                // String login
-543-       363: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-544-       366: putstatic     #261                // Field CLIENTBOUND_LOGIN:Lnet/minecraft/network/protocol/PacketType;
-545-       369: ldc_w         #264                // String low_disk_space_warning
-546-       372: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-547-       375: putstatic     #266                // Field CLIENTBOUND_LOW_DISK_SPACE_WARNING:Lnet/minecraft/network/protocol/PacketType;
-548-       378: ldc_w         #269                // String map_item_data
-549-       381: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-550-       384: putstatic     #271                // Field CLIENTBOUND_MAP_ITEM_DATA:Lnet/minecraft/network/protocol/PacketType;
-551-       387: ldc_w         #274                // String merchant_offers
-552-       390: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-553-       393: putstatic     #276                // Field CLIENTBOUND_MERCHANT_OFFERS:Lnet/minecraft/network/protocol/PacketType;
-554-       396: ldc_w         #279                // String move_entity_pos
-555-       399: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-556-       402: putstatic     #281                // Field CLIENTBOUND_MOVE_ENTITY_POS:Lnet/minecraft/network/protocol/PacketType;
-557-       405: ldc_w         #284                // String move_entity_pos_rot
-558-       408: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-559-       411: putstatic     #286                // Field CLIENTBOUND_MOVE_ENTITY_POS_ROT:Lnet/minecraft/network/protocol/PacketType;
-560-       414: ldc_w         #289                // String move_minecart_along_track
-561-       417: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-562-       420: putstatic     #291                // Field CLIENTBOUND_MOVE_MINECART_ALONG_TRACK:Lnet/minecraft/network/protocol/PacketType;
-563-       423: ldc_w         #294                // String move_entity_rot
-564-       426: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-565-       429: putstatic     #296                // Field CLIENTBOUND_MOVE_ENTITY_ROT:Lnet/minecraft/network/protocol/PacketType;
-566-       432: ldc_w         #299                // String move_vehicle
-567-       435: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-568-       438: putstatic     #301                // Field CLIENTBOUND_MOVE_VEHICLE:Lnet/minecraft/network/protocol/PacketType;
-569-       441: ldc_w         #304                // String open_book
-570-       444: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-571-       447: putstatic     #306                // Field CLIENTBOUND_OPEN_BOOK:Lnet/minecraft/network/protocol/PacketType;
-572-       450: ldc_w         #309                // String open_screen
-573-       453: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-574-       456: putstatic     #311                // Field CLIENTBOUND_OPEN_SCREEN:Lnet/minecraft/network/protocol/PacketType;
-575-       459: ldc_w         #314                // String open_sign_editor
-576-       462: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-577-       465: putstatic     #316                // Field CLIENTBOUND_OPEN_SIGN_EDITOR:Lnet/minecraft/network/protocol/PacketType;
-578-       468: ldc_w         #319                // String place_ghost_recipe
-579-       471: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-580-       474: putstatic     #321                // Field CLIENTBOUND_PLACE_GHOST_RECIPE:Lnet/minecraft/network/protocol/PacketType;
-581-       477: ldc_w         #324                // String player_abilities
-582-       480: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-583-       483: putstatic     #326                // Field CLIENTBOUND_PLAYER_ABILITIES:Lnet/minecraft/network/protocol/PacketType;
-584-       486: ldc_w         #329                // String game_rule_values
-585-       489: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-586-       492: putstatic     #331                // Field CLIENTBOUND_GAME_RULE_VALUES:Lnet/minecraft/network/protocol/PacketType;
-587-       495: ldc_w         #334                // String player_chat
-588-       498: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-589-       501: putstatic     #336                // Field CLIENTBOUND_PLAYER_CHAT:Lnet/minecraft/network/protocol/PacketType;
-590-       504: ldc_w         #339                // String player_combat_end
-591-       507: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-592-       510: putstatic     #341                // Field CLIENTBOUND_PLAYER_COMBAT_END:Lnet/minecraft/network/protocol/PacketType;
-593-       513: ldc_w         #344                // String player_combat_enter
-594-       516: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-595-       519: putstatic     #346                // Field CLIENTBOUND_PLAYER_COMBAT_ENTER:Lnet/minecraft/network/protocol/PacketType;
-596:       522: ldc_w         #349                // String player_combat_kill
-597-       525: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-598-       528: putstatic     #351                // Field CLIENTBOUND_PLAYER_COMBAT_KILL:Lnet/minecraft/network/protocol/PacketType;
-599-       531: ldc_w         #354                // String player_info_remove
-600-       534: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-601-       537: putstatic     #356                // Field CLIENTBOUND_PLAYER_INFO_REMOVE:Lnet/minecraft/network/protocol/PacketType;
-602-       540: ldc_w         #359                // String player_info_update
-603-       543: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-604-       546: putstatic     #361                // Field CLIENTBOUND_PLAYER_INFO_UPDATE:Lnet/minecraft/network/protocol/PacketType;
-605-       549: ldc_w         #364                // String player_look_at
-606-       552: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-607-       555: putstatic     #366                // Field CLIENTBOUND_PLAYER_LOOK_AT:Lnet/minecraft/network/protocol/PacketType;
-608-       558: ldc_w         #369                // String player_position
-609-       561: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-610-       564: putstatic     #371                // Field CLIENTBOUND_PLAYER_POSITION:Lnet/minecraft/network/protocol/PacketType;
-611-       567: ldc_w         #374                // String player_rotation
-612-       570: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-613-       573: putstatic     #376                // Field CLIENTBOUND_PLAYER_ROTATION:Lnet/minecraft/network/protocol/PacketType;
-614-       576: ldc_w         #379                // String recipe_book_add
-615-       579: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-616-       582: putstatic     #381                // Field CLIENTBOUND_RECIPE_BOOK_ADD:Lnet/minecraft/network/protocol/PacketType;
-617-       585: ldc_w         #384                // String recipe_book_remove
-618-       588: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-619-       591: putstatic     #386                // Field CLIENTBOUND_RECIPE_BOOK_REMOVE:Lnet/minecraft/network/protocol/PacketType;
-620-       594: ldc_w         #389                // String recipe_book_settings
-621-       597: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-622-       600: putstatic     #391                // Field CLIENTBOUND_RECIPE_BOOK_SETTINGS:Lnet/minecraft/network/protocol/PacketType;
-623-       603: ldc_w         #394                // String remove_entities
-624-       606: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-625-       609: putstatic     #396                // Field CLIENTBOUND_REMOVE_ENTITIES:Lnet/minecraft/network/protocol/PacketType;
-626-       612: ldc_w         #399                // String remove_mob_effect
-627-       615: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-628-       618: putstatic     #401                // Field CLIENTBOUND_REMOVE_MOB_EFFECT:Lnet/minecraft/network/protocol/PacketType;
-629:       621: ldc_w         #404                // String respawn
-630-       624: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-631-       627: putstatic     #406                // Field CLIENTBOUND_RESPAWN:Lnet/minecraft/network/protocol/PacketType;
-632-       630: ldc_w         #409                // String rotate_head
-633-       633: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-634-       636: putstatic     #411                // Field CLIENTBOUND_ROTATE_HEAD:Lnet/minecraft/network/protocol/PacketType;
-635-       639: ldc_w         #414                // String section_blocks_update
-636-       642: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-637-       645: putstatic     #416                // Field CLIENTBOUND_SECTION_BLOCKS_UPDATE:Lnet/minecraft/network/protocol/PacketType;
-638-       648: ldc_w         #419                // String select_advancements_tab
-639-       651: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-640-       654: putstatic     #421                // Field CLIENTBOUND_SELECT_ADVANCEMENTS_TAB:Lnet/minecraft/network/protocol/PacketType;
-641-       657: ldc_w         #424                // String server_data
-642-       660: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-643-       663: putstatic     #426                // Field CLIENTBOUND_SERVER_DATA:Lnet/minecraft/network/protocol/PacketType;
-644-       666: ldc_w         #429                // String set_action_bar_text
-645-       669: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-646-       672: putstatic     #431                // Field CLIENTBOUND_SET_ACTION_BAR_TEXT:Lnet/minecraft/network/protocol/PacketType;
-647-       675: ldc_w         #434                // String set_border_center
-648-       678: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-649-       681: putstatic     #436                // Field CLIENTBOUND_SET_BORDER_CENTER:Lnet/minecraft/network/protocol/PacketType;
-650-       684: ldc_w         #439                // String set_border_lerp_size
-651-       687: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-652-       690: putstatic     #441                // Field CLIENTBOUND_SET_BORDER_LERP_SIZE:Lnet/minecraft/network/protocol/PacketType;
-653-       693: ldc_w         #444                // String set_border_size
-654-       696: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-655-       699: putstatic     #446                // Field CLIENTBOUND_SET_BORDER_SIZE:Lnet/minecraft/network/protocol/PacketType;
-656-       702: ldc_w         #449                // String set_border_warning_delay
-657-       705: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-658-       708: putstatic     #451                // Field CLIENTBOUND_SET_BORDER_WARNING_DELAY:Lnet/minecraft/network/protocol/PacketType;
-659-       711: ldc_w         #454                // String set_border_warning_distance
-660-       714: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-661-       717: putstatic     #456                // Field CLIENTBOUND_SET_BORDER_WARNING_DISTANCE:Lnet/minecraft/network/protocol/PacketType;
-662-       720: ldc_w         #459                // String set_camera
-663-       723: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-664-       726: putstatic     #461                // Field CLIENTBOUND_SET_CAMERA:Lnet/minecraft/network/protocol/PacketType;
-665-       729: ldc_w         #464                // String set_chunk_cache_center
-666-       732: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-667-       735: putstatic     #466                // Field CLIENTBOUND_SET_CHUNK_CACHE_CENTER:Lnet/minecraft/network/protocol/PacketType;
-668-       738: ldc_w         #469                // String set_chunk_cache_radius
-669-       741: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-670-       744: putstatic     #471                // Field CLIENTBOUND_SET_CHUNK_CACHE_RADIUS:Lnet/minecraft/network/protocol/PacketType;
-671-       747: ldc_w         #474                // String set_default_spawn_position
-672-       750: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-673-       753: putstatic     #476                // Field CLIENTBOUND_SET_DEFAULT_SPAWN_POSITION:Lnet/minecraft/network/protocol/PacketType;
-674-       756: ldc_w         #479                // String set_display_objective
-675-       759: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-676-       762: putstatic     #481                // Field CLIENTBOUND_SET_DISPLAY_OBJECTIVE:Lnet/minecraft/network/protocol/PacketType;
-677-       765: ldc_w         #484                // String set_entity_data
-678-       768: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-679-       771: putstatic     #486                // Field CLIENTBOUND_SET_ENTITY_DATA:Lnet/minecraft/network/protocol/PacketType;
-680-       774: ldc_w         #489                // String set_entity_link
-681-       777: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-682-       780: putstatic     #491                // Field CLIENTBOUND_SET_ENTITY_LINK:Lnet/minecraft/network/protocol/PacketType;
-683-       783: ldc_w         #494                // String set_entity_motion
-684-       786: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-685-       789: putstatic     #496                // Field CLIENTBOUND_SET_ENTITY_MOTION:Lnet/minecraft/network/protocol/PacketType;
-686-       792: ldc_w         #499                // String set_equipment
-687-       795: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-688-       798: putstatic     #501                // Field CLIENTBOUND_SET_EQUIPMENT:Lnet/minecraft/network/protocol/PacketType;
-689-       801: ldc_w         #504                // String set_experience
-690-       804: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-691-       807: putstatic     #506                // Field CLIENTBOUND_SET_EXPERIENCE:Lnet/minecraft/network/protocol/PacketType;
-692:       810: ldc_w         #509                // String set_health
-693-       813: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-694-       816: putstatic     #511                // Field CLIENTBOUND_SET_HEALTH:Lnet/minecraft/network/protocol/PacketType;
-695-       819: ldc_w         #514                // String set_held_slot
-696-       822: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-697-       825: putstatic     #516                // Field CLIENTBOUND_SET_HELD_SLOT:Lnet/minecraft/network/protocol/PacketType;
-698-       828: ldc_w         #519                // String set_objective
-699-       831: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-700-       834: putstatic     #521                // Field CLIENTBOUND_SET_OBJECTIVE:Lnet/minecraft/network/protocol/PacketType;
-701-       837: ldc_w         #524                // String set_passengers
-702-       840: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-703-       843: putstatic     #526                // Field CLIENTBOUND_SET_PASSENGERS:Lnet/minecraft/network/protocol/PacketType;
-704-       846: ldc_w         #529                // String set_player_team
-705-       849: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-706-       852: putstatic     #531                // Field CLIENTBOUND_SET_PLAYER_TEAM:Lnet/minecraft/network/protocol/PacketType;
-707-       855: ldc_w         #534                // String set_score
-708-       858: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-709-       861: putstatic     #536                // Field CLIENTBOUND_SET_SCORE:Lnet/minecraft/network/protocol/PacketType;
-710-       864: ldc_w         #539                // String set_simulation_distance
-711-       867: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-712-       870: putstatic     #541                // Field CLIENTBOUND_SET_SIMULATION_DISTANCE:Lnet/minecraft/network/protocol/PacketType;
-713-       873: ldc_w         #544                // String set_subtitle_text
-714-       876: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-715-       879: putstatic     #546                // Field CLIENTBOUND_SET_SUBTITLE_TEXT:Lnet/minecraft/network/protocol/PacketType;
-716-       882: ldc_w         #549                // String set_time
-717-       885: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-718-       888: putstatic     #551                // Field CLIENTBOUND_SET_TIME:Lnet/minecraft/network/protocol/PacketType;
-719-       891: ldc_w         #554                // String set_title_text
-720-       894: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-721-       897: putstatic     #556                // Field CLIENTBOUND_SET_TITLE_TEXT:Lnet/minecraft/network/protocol/PacketType;
-722-       900: ldc_w         #559                // String set_titles_animation
-723-       903: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-724-       906: putstatic     #561                // Field CLIENTBOUND_SET_TITLES_ANIMATION:Lnet/minecraft/network/protocol/PacketType;
-725-       909: ldc_w         #564                // String sound_entity
-726-       912: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-727-       915: putstatic     #566                // Field CLIENTBOUND_SOUND_ENTITY:Lnet/minecraft/network/protocol/PacketType;
-728-       918: ldc_w         #569                // String sound
-729-       921: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-730-       924: putstatic     #571                // Field CLIENTBOUND_SOUND:Lnet/minecraft/network/protocol/PacketType;
-731-       927: ldc_w         #574                // String start_configuration
-732-       930: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-733-       933: putstatic     #576                // Field CLIENTBOUND_START_CONFIGURATION:Lnet/minecraft/network/protocol/PacketType;
-734-       936: ldc_w         #579                // String stop_sound
-735-       939: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-736-       942: putstatic     #581                // Field CLIENTBOUND_STOP_SOUND:Lnet/minecraft/network/protocol/PacketType;
-737-       945: ldc_w         #584                // String system_chat
-738-       948: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-739-       951: putstatic     #586                // Field CLIENTBOUND_SYSTEM_CHAT:Lnet/minecraft/network/protocol/PacketType;
-740-       954: ldc_w         #589                // String tab_list
-741-       957: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-742-       960: putstatic     #591                // Field CLIENTBOUND_TAB_LIST:Lnet/minecraft/network/protocol/PacketType;
-743-       963: ldc_w         #594                // String tag_query
-744-       966: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-745-       969: putstatic     #596                // Field CLIENTBOUND_TAG_QUERY:Lnet/minecraft/network/protocol/PacketType;
-746-       972: ldc_w         #599                // String take_item_entity
-747-       975: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-748-       978: putstatic     #601                // Field CLIENTBOUND_TAKE_ITEM_ENTITY:Lnet/minecraft/network/protocol/PacketType;
-749-       981: ldc_w         #604                // String teleport_entity
-750-       984: invokestatic  #29                 // Method createClientbound:(Ljava/lang/String;)Lnet/minecraft/network/protocol/PacketType;
-751-       987: putstatic     #606                // Field CLIENTBOUND_TELEPORT_ENTITY:Lnet/minecraft/network/protocol/PacketType;
-752-       990: ldc_w         #609                // String test_instance_block_status
-===== net.minecraft.server.level.ServerPlayer [respawn] =====
-Compiled from "ServerPlayer.java"
-public class net.minecraft.server.level.ServerPlayer extends net.minecraft.world.entity.player.Player {
-  private static final org.slf4j.Logger LOGGER;
-
-  private static final int NEUTRAL_MOB_DEATH_NOTIFICATION_RADII_XZ;
-
-  private static final int NEUTRAL_MOB_DEATH_NOTIFICATION_RADII_Y;
-
-  private static final int FLY_STAT_RECORDING_SPEED;
-
-  public static final double BLOCK_INTERACTION_DISTANCE_VERIFICATION_BUFFER;
-
-  public static final double ENTITY_INTERACTION_DISTANCE_VERIFICATION_BUFFER;
-
-  public static final int ENDER_PEARL_TICKET_RADIUS;
-
-  public static final java.lang.String ENDER_PEARLS_TAG;
-
-  public static final java.lang.String ENDER_PEARL_DIMENSION_TAG;
-
-  public static final java.lang.String TAG_DIMENSION;
-
-  private static final net.minecraft.world.entity.ai.attributes.AttributeModifier CREATIVE_BLOCK_INTERACTION_RANGE_MODIFIER;
-
-  private static final net.minecraft.world.entity.ai.attributes.AttributeModifier CREATIVE_ENTITY_INTERACTION_RANGE_MODIFIER;
-
-  private static final net.minecraft.network.chat.Component SPAWN_SET_MESSAGE;
-
-  private static final net.minecraft.world.entity.ai.attributes.AttributeModifier WAYPOINT_TRANSMIT_RANGE_CROUCH_MODIFIER;
-
-  private static final boolean DEFAULT_SEEN_CREDITS;
-
-  private static final boolean DEFAULT_SPAWN_EXTRA_PARTICLES_ON_FALL;
-
-  public net.minecraft.server.network.ServerGamePacketListenerImpl connection;
-
-  private final net.minecraft.server.MinecraftServer server;
-
-  public final net.minecraft.server.level.ServerPlayerGameMode gameMode;
-
-  private final net.minecraft.server.PlayerAdvancements advancements;
-
-  private final net.minecraft.stats.ServerStatsCounter stats;
-
-  private float lastRecordedHealthAndAbsorption;
-
-  private int lastRecordedFoodLevel;
-
-  private int lastRecordedAirLevel;
-
-  private int lastRecordedArmor;
-
-  private int lastRecordedLevel;
-
-  private int lastRecordedExperience;
-
-  private float lastSentHealth;
-
-  private int lastSentFood;
-
-  private boolean lastFoodSaturationZero;
-
-  private int lastSentExp;
-
-  private net.minecraft.world.entity.player.ChatVisiblity chatVisibility;
-
-  private net.minecraft.server.level.ParticleStatus particleStatus;
-
-  private boolean canChatColor;
-
-  private long lastActionTime;
-
-  private net.minecraft.world.entity.Entity camera;
-
-  private boolean isChangingDimension;
-
-  public boolean seenCredits;
-
-  private final net.minecraft.stats.ServerRecipeBook recipeBook;
-
-  private net.minecraft.world.phys.Vec3 levitationStartPos;
-
-  private int levitationStartTime;
-
-  private boolean disconnected;
-
-  private int requestedViewDistance;
-
-  private java.lang.String language;
-
-  private net.minecraft.world.phys.Vec3 startingToFallPosition;
-
-  private net.minecraft.world.phys.Vec3 enteredNetherPosition;
-
-  private net.minecraft.world.phys.Vec3 enteredLavaOnVehiclePosition;
-
-  private net.minecraft.core.SectionPos lastSectionPos;
-
-  private net.minecraft.server.level.ChunkTrackingView chunkTrackingView;
-
-  private net.minecraft.server.level.ServerPlayer$RespawnConfig respawnConfig;
-
-  private final net.minecraft.server.network.TextFilter textFilter;
-
-  private boolean textFilteringEnabled;
-
-  private boolean allowsListing;
-
-  private boolean spawnExtraParticlesOnFall;
-
-  private net.minecraft.world.entity.monster.warden.WardenSpawnTracker wardenSpawnTracker;
-
-  private net.minecraft.core.BlockPos raidOmenPosition;
-
-  private net.minecraft.world.phys.Vec3 lastKnownClientMovement;
-
-  private net.minecraft.world.entity.player.Input lastClientInput;
-
-  private final java.util.Set<net.minecraft.world.entity.projectile.throwableitemprojectile.ThrownEnderpearl> enderPearls;
-
-345-        45: aconst_null
-346-        46: invokevirtual #333                // Method java/util/Optional.orElse:(Ljava/lang/Object;)Ljava/lang/Object;
-347-        49: checkcast     #131                // class net/minecraft/world/phys/Vec3
-348-        52: putfield      #336                // Field enteredNetherPosition:Lnet/minecraft/world/phys/Vec3;
-349-        55: aload_0
-350-        56: aload_1
-351-        57: ldc_w         #339                // String seenCredits
-352-        60: iconst_0
-353-        61: invokeinterface #340,  3          // InterfaceMethod net/minecraft/world/level/storage/ValueInput.getBooleanOr:(Ljava/lang/String;Z)Z
-354-        66: putfield      #83                 // Field seenCredits:Z
-355-        69: aload_1
-356-        70: ldc_w         #344                // String recipeBook
-357-        73: getstatic     #345                // Field net/minecraft/stats/ServerRecipeBook$Packed.CODEC:Lcom/mojang/serialization/Codec;
-358-        76: invokeinterface #314,  3          // InterfaceMethod net/minecraft/world/level/storage/ValueInput.read:(Ljava/lang/String;Lcom/mojang/serialization/Codec;)Ljava/util/Optional;
-359-        81: aload_0
-360-        82: invokedynamic #348,  0            // InvokeDynamic #3:accept:(Lnet/minecraft/server/level/ServerPlayer;)Ljava/util/function/Consumer;
-361-        87: invokevirtual #352                // Method java/util/Optional.ifPresent:(Ljava/util/function/Consumer;)V
-362-        90: aload_0
-363-        91: invokevirtual #356                // Method isSleeping:()Z
-364-        94: ifeq          101
-365-        97: aload_0
-366-        98: invokevirtual #360                // Method stopSleeping:()V
-367-       101: aload_0
-368-       102: aload_1
-369:       103: ldc_w         #363                // String respawn
-370-       106: getstatic     #365                // Field net/minecraft/server/level/ServerPlayer$RespawnConfig.CODEC:Lcom/mojang/serialization/Codec;
-371-       109: invokeinterface #314,  3          // InterfaceMethod net/minecraft/world/level/storage/ValueInput.read:(Ljava/lang/String;Lcom/mojang/serialization/Codec;)Ljava/util/Optional;
-372-       114: aconst_null
-373-       115: invokevirtual #333                // Method java/util/Optional.orElse:(Ljava/lang/Object;)Ljava/lang/Object;
-374-       118: checkcast     #366                // class net/minecraft/server/level/ServerPlayer$RespawnConfig
-375-       121: putfield      #368                // Field respawnConfig:Lnet/minecraft/server/level/ServerPlayer$RespawnConfig;
-376-       124: aload_0
-377-       125: aload_1
-378-       126: ldc_w         #372                // String spawn_extra_particles_on_fall
-379-       129: iconst_0
-380-       130: invokeinterface #340,  3          // InterfaceMethod net/minecraft/world/level/storage/ValueInput.getBooleanOr:(Ljava/lang/String;Z)Z
-381-       135: putfield      #118                // Field spawnExtraParticlesOnFall:Z
-382-       138: aload_0
-383-       139: aload_1
-384-       140: ldc_w         #374                // String raid_omen_position
-385-       143: getstatic     #376                // Field net/minecraft/core/BlockPos.CODEC:Lcom/mojang/serialization/Codec;
-386-       146: invokeinterface #314,  3          // InterfaceMethod net/minecraft/world/level/storage/ValueInput.read:(Ljava/lang/String;Lcom/mojang/serialization/Codec;)Ljava/util/Optional;
-387-       151: aconst_null
-388-       152: invokevirtual #333                // Method java/util/Optional.orElse:(Ljava/lang/Object;)Ljava/lang/Object;
-389-       155: checkcast     #299                // class net/minecraft/core/BlockPos
-390-       158: putfield      #377                // Field raidOmenPosition:Lnet/minecraft/core/BlockPos;
-391-       161: aload_0
-392-       162: getfield      #213                // Field gameMode:Lnet/minecraft/server/level/ServerPlayerGameMode;
-393-       165: aload_0
-394-       166: aload_1
-395-       167: ldc_w         #381                // String playerGameType
-396-       170: invokestatic  #383                // Method readPlayerMode:(Lnet/minecraft/world/level/storage/ValueInput;Ljava/lang/String;)Lnet/minecraft/world/level/GameType;
-397-       173: invokevirtual #217                // Method calculateGameModeForNewPlayer:(Lnet/minecraft/world/level/GameType;)Lnet/minecraft/world/level/GameType;
-398-       176: aload_1
-399-       177: ldc_w         #387                // String previousPlayerGameType
-400-       180: invokestatic  #383                // Method readPlayerMode:(Lnet/minecraft/world/level/storage/ValueInput;Ljava/lang/String;)Lnet/minecraft/world/level/GameType;
-401-       183: invokevirtual #221                // Method net/minecraft/server/level/ServerPlayerGameMode.setGameModeForPlayer:(Lnet/minecraft/world/level/GameType;Lnet/minecraft/world/level/GameType;)V
-402-       186: aload_0
-403-       187: aload_1
-404-       188: ldc_w         #389                // String ShoulderEntityLeft
-405-       191: getstatic     #391                // Field net/minecraft/nbt/CompoundTag.CODEC:Lcom/mojang/serialization/Codec;
-406-       194: invokeinterface #314,  3          // InterfaceMethod net/minecraft/world/level/storage/ValueInput.read:(Ljava/lang/String;Lcom/mojang/serialization/Codec;)Ljava/util/Optional;
-407-       199: invokedynamic #392,  0            // InvokeDynamic #4:get:()Ljava/util/function/Supplier;
-408-       204: invokevirtual #324                // Method java/util/Optional.orElseGet:(Ljava/util/function/Supplier;)Ljava/lang/Object;
-409-       207: checkcast     #154                // class net/minecraft/nbt/CompoundTag
-410-       210: invokevirtual #393                // Method setShoulderEntityLeft:(Lnet/minecraft/nbt/CompoundTag;)V
-411-       213: aload_0
-412-       214: aload_1
-413-       215: ldc_w         #397                // String ShoulderEntityRight
-414-       218: getstatic     #391                // Field net/minecraft/nbt/CompoundTag.CODEC:Lcom/mojang/serialization/Codec;
-415-       221: invokeinterface #314,  3          // InterfaceMethod net/minecraft/world/level/storage/ValueInput.read:(Ljava/lang/String;Lcom/mojang/serialization/Codec;)Ljava/util/Optional;
-416-       226: invokedynamic #392,  0            // InvokeDynamic #4:get:()Ljava/util/function/Supplier;
-417-       231: invokevirtual #324                // Method java/util/Optional.orElseGet:(Ljava/util/function/Supplier;)Ljava/lang/Object;
-418-       234: checkcast     #154                // class net/minecraft/nbt/CompoundTag
-419-       237: invokevirtual #399                // Method setShoulderEntityRight:(Lnet/minecraft/nbt/CompoundTag;)V
-420-       240: return
-421-
-422-  protected void addAdditionalSaveData(net.minecraft.world.level.storage.ValueOutput);
-423-    Code:
-424-         0: aload_0
-425-         1: aload_1
-426-         2: invokespecial #402                // Method net/minecraft/world/entity/player/Player.addAdditionalSaveData:(Lnet/minecraft/world/level/storage/ValueOutput;)V
-427-         5: aload_1
-428-         6: ldc_w         #308                // String warden_spawn_tracker
-429-         9: getstatic     #310                // Field net/minecraft/world/entity/monster/warden/WardenSpawnTracker.CODEC:Lcom/mojang/serialization/Codec;
---
-442-        40: ldc_w         #330                // String entered_nether_pos
-443-        43: getstatic     #332                // Field net/minecraft/world/phys/Vec3.CODEC:Lcom/mojang/serialization/Codec;
-444-        46: aload_0
-445-        47: getfield      #336                // Field enteredNetherPosition:Lnet/minecraft/world/phys/Vec3;
-446-        50: invokeinterface #419,  4          // InterfaceMethod net/minecraft/world/level/storage/ValueOutput.storeNullable:(Ljava/lang/String;Lcom/mojang/serialization/Codec;Ljava/lang/Object;)V
-447-        55: aload_0
-448-        56: aload_1
-449-        57: invokevirtual #422                // Method saveParentVehicle:(Lnet/minecraft/world/level/storage/ValueOutput;)V
-450-        60: aload_1
-451-        61: ldc_w         #344                // String recipeBook
-452-        64: getstatic     #345                // Field net/minecraft/stats/ServerRecipeBook$Packed.CODEC:Lcom/mojang/serialization/Codec;
-453-        67: aload_0
-454-        68: getfield      #236                // Field recipeBook:Lnet/minecraft/stats/ServerRecipeBook;
-455-        71: invokevirtual #425                // Method net/minecraft/stats/ServerRecipeBook.pack:()Lnet/minecraft/stats/ServerRecipeBook$Packed;
-456-        74: invokeinterface #406,  4          // InterfaceMethod net/minecraft/world/level/storage/ValueOutput.store:(Ljava/lang/String;Lcom/mojang/serialization/Codec;Ljava/lang/Object;)V
-457-        79: aload_1
-458-        80: ldc_w         #429                // String Dimension
-459-        83: aload_0
-460-        84: invokevirtual #431                // Method level:()Lnet/minecraft/server/level/ServerLevel;
-461-        87: invokevirtual #435                // Method net/minecraft/server/level/ServerLevel.dimension:()Lnet/minecraft/resources/ResourceKey;
-462-        90: invokevirtual #441                // Method net/minecraft/resources/ResourceKey.identifier:()Lnet/minecraft/resources/Identifier;
-463-        93: invokevirtual #447                // Method net/minecraft/resources/Identifier.toString:()Ljava/lang/String;
-464-        96: invokeinterface #453,  3          // InterfaceMethod net/minecraft/world/level/storage/ValueOutput.putString:(Ljava/lang/String;Ljava/lang/String;)V
-465-       101: aload_1
-466:       102: ldc_w         #363                // String respawn
-467-       105: getstatic     #365                // Field net/minecraft/server/level/ServerPlayer$RespawnConfig.CODEC:Lcom/mojang/serialization/Codec;
-468-       108: aload_0
-469-       109: getfield      #368                // Field respawnConfig:Lnet/minecraft/server/level/ServerPlayer$RespawnConfig;
-470-       112: invokeinterface #419,  4          // InterfaceMethod net/minecraft/world/level/storage/ValueOutput.storeNullable:(Ljava/lang/String;Lcom/mojang/serialization/Codec;Ljava/lang/Object;)V
-471-       117: aload_1
-472-       118: ldc_w         #372                // String spawn_extra_particles_on_fall
-473-       121: aload_0
-474-       122: getfield      #118                // Field spawnExtraParticlesOnFall:Z
-475-       125: invokeinterface #415,  3          // InterfaceMethod net/minecraft/world/level/storage/ValueOutput.putBoolean:(Ljava/lang/String;Z)V
-476-       130: aload_1
-477-       131: ldc_w         #374                // String raid_omen_position
-478-       134: getstatic     #376                // Field net/minecraft/core/BlockPos.CODEC:Lcom/mojang/serialization/Codec;
-479-       137: aload_0
-480-       138: getfield      #377                // Field raidOmenPosition:Lnet/minecraft/core/BlockPos;
-481-       141: invokeinterface #419,  4          // InterfaceMethod net/minecraft/world/level/storage/ValueOutput.storeNullable:(Ljava/lang/String;Lcom/mojang/serialization/Codec;Ljava/lang/Object;)V
-482-       146: aload_0
-483-       147: aload_1
-484-       148: invokevirtual #457                // Method saveEnderPearls:(Lnet/minecraft/world/level/storage/ValueOutput;)V
-485-       151: aload_0
-486-       152: invokevirtual #460                // Method getShoulderEntityLeft:()Lnet/minecraft/nbt/CompoundTag;
-487-       155: invokevirtual #464                // Method net/minecraft/nbt/CompoundTag.isEmpty:()Z
-488-       158: ifne          177
-489-       161: aload_1
-490-       162: ldc_w         #389                // String ShoulderEntityLeft
-491-       165: getstatic     #391                // Field net/minecraft/nbt/CompoundTag.CODEC:Lcom/mojang/serialization/Codec;
-492-       168: aload_0
-493-       169: invokevirtual #460                // Method getShoulderEntityLeft:()Lnet/minecraft/nbt/CompoundTag;
-494-       172: invokeinterface #406,  4          // InterfaceMethod net/minecraft/world/level/storage/ValueOutput.store:(Ljava/lang/String;Lcom/mojang/serialization/Codec;Ljava/lang/Object;)V
-495-       177: aload_0
-496-       178: invokevirtual #467                // Method getShoulderEntityRight:()Lnet/minecraft/nbt/CompoundTag;
-497-       181: invokevirtual #464                // Method net/minecraft/nbt/CompoundTag.isEmpty:()Z
-498-       184: ifne          203
-499-       187: aload_1
-500-       188: ldc_w         #397                // String ShoulderEntityRight
-501-       191: getstatic     #391                // Field net/minecraft/nbt/CompoundTag.CODEC:Lcom/mojang/serialization/Codec;
-502-       194: aload_0
-503-       195: invokevirtual #467                // Method getShoulderEntityRight:()Lnet/minecraft/nbt/CompoundTag;
-504-       198: invokeinterface #406,  4          // InterfaceMethod net/minecraft/world/level/storage/ValueOutput.store:(Ljava/lang/String;Lcom/mojang/serialization/Codec;Ljava/lang/Object;)V
-505-       203: return
-506-
-507-  private void saveParentVehicle(net.minecraft.world.level.storage.ValueOutput);
-508-    Code:
-509-         0: aload_0
-510-         1: invokevirtual #470                // Method getRootVehicle:()Lnet/minecraft/world/entity/Entity;
-511-         4: astore_2
-512-         5: aload_0
-513-         6: invokevirtual #474                // Method getVehicle:()Lnet/minecraft/world/entity/Entity;
-514-         9: astore_3
-515-        10: aload_3
-516-        11: ifnull        69
-517-        14: aload_2
-518-        15: aload_0
-519-        16: if_acmpeq     69
-520-        19: aload_2
-521-        20: invokevirtual #477                // Method net/minecraft/world/entity/Entity.hasExactlyOnePlayerPassenger:()Z
-522-        23: ifeq          69
-523-        26: aload_1
-524-        27: ldc_w         #482                // String RootVehicle
-525-        30: invokeinterface #484,  2          // InterfaceMethod net/minecraft/world/level/storage/ValueOutput.child:(Ljava/lang/String;)Lnet/minecraft/world/level/storage/ValueOutput;
-526-        35: astore        4
-===== net.minecraft.server.network.ServerGamePacketListenerImpl [respawn] =====
-Compiled from "ServerGamePacketListenerImpl.java"
-public class net.minecraft.server.network.ServerGamePacketListenerImpl extends net.minecraft.server.network.ServerCommonPacketListenerImpl implements net.minecraft.network.protocol.game.ServerGamePacketListener,net.minecraft.server.network.ServerPlayerConnection,net.minecraft.network.TickablePacketListener,net.minecraft.network.protocol.game.GameProtocols$Context {
-  private static final org.slf4j.Logger LOGGER;
-
-  private static final int NO_BLOCK_UPDATES_TO_ACK;
-
-  private static final int TRACKED_MESSAGE_DISCONNECT_THRESHOLD;
-
-  private static final int MAXIMUM_FLYING_TICKS;
-
-  private static final int ATTACK_INDICATOR_TOLERANCE_TICKS;
-
-  public static final int CLIENT_LOADED_TIMEOUT_TIME;
-
-  private static final net.minecraft.network.chat.Component CHAT_VALIDATION_FAILED;
-
-  private static final net.minecraft.network.chat.Component INVALID_COMMAND_SIGNATURE;
-
-  private static final int MAX_COMMAND_SUGGESTIONS;
-
-  public net.minecraft.server.level.ServerPlayer player;
-
-  public final net.minecraft.server.network.PlayerChunkSender chunkSender;
-
-  private int tickCount;
-
-  private int ackBlockChangesUpTo;
-
-  private final net.minecraft.util.TickThrottler chatSpamThrottler;
-
-  private final net.minecraft.util.TickThrottler dropSpamThrottler;
-
-  private double firstGoodX;
-
-  private double firstGoodY;
-
-  private double firstGoodZ;
-
-  private double lastGoodX;
-
-  private double lastGoodY;
-
-  private double lastGoodZ;
-
-  private net.minecraft.world.entity.Entity lastVehicle;
-
-  private double vehicleFirstGoodX;
-
-  private double vehicleFirstGoodY;
-
-  private double vehicleFirstGoodZ;
-
-  private double vehicleLastGoodX;
-
-  private double vehicleLastGoodY;
-
-  private double vehicleLastGoodZ;
-
-  private net.minecraft.world.phys.Vec3 awaitingPositionFromClient;
-
-  private int awaitingTeleport;
-
-  private int awaitingTeleportTime;
-
-  private boolean clientIsFloating;
-
-  private int aboveGroundTickCount;
-
-  private boolean clientVehicleIsFloating;
-
-  private int aboveGroundVehicleTickCount;
-
-  private int receivedMovePacketCount;
-
-  private int knownMovePacketCount;
-
-  private boolean receivedMovementThisTick;
-
-  private net.minecraft.network.chat.RemoteChatSession chatSession;
-
-  private net.minecraft.network.chat.SignedMessageChain$Decoder signedMessageDecoder;
-
-  private final net.minecraft.network.chat.LastSeenMessagesValidator lastSeenMessages;
-
-  private int nextChatIndex;
-
-  private final net.minecraft.network.chat.MessageSignatureCache messageSignatureCache;
-
-  private final net.minecraft.util.FutureChain chatMessageChain;
-
-  private boolean waitingForSwitchToConfig;
-
-  private boolean waitingForRespawn;
-
-  private int clientLoadedTimeoutTimer;
-
-  public net.minecraft.server.network.ServerGamePacketListenerImpl(net.minecraft.server.MinecraftServer, net.minecraft.network.Connection, net.minecraft.server.level.ServerPlayer, net.minecraft.server.network.CommonListenerCookie);
+===== net.minecraft.network.protocol.game.ClientboundSetHealthPacket =====
+Compiled from "ClientboundSetHealthPacket.java"
+public class net.minecraft.network.protocol.game.ClientboundSetHealthPacket implements net.minecraft.network.protocol.Packet<net.minecraft.network.protocol.game.ClientGamePacketListener> {
+  public static final net.minecraft.network.codec.StreamCodec<net.minecraft.network.FriendlyByteBuf, net.minecraft.network.protocol.game.ClientboundSetHealthPacket> STREAM_CODEC;
+    descriptor: Lnet/minecraft/network/codec/StreamCodec;
+
+  private final float health;
+    descriptor: F
+
+  private final int food;
+    descriptor: I
+
+  private final float saturation;
+    descriptor: F
+
+  public net.minecraft.network.protocol.game.ClientboundSetHealthPacket(float, int, float);
+    descriptor: (FIF)V
     Code:
          0: aload_0
-         1: aload_1
-         2: aload_2
-         3: aload         4
-         5: invokespecial #3                  // Method net/minecraft/server/network/ServerCommonPacketListenerImpl."<init>":(Lnet/minecraft/server/MinecraftServer;Lnet/minecraft/network/Connection;Lnet/minecraft/server/network/CommonListenerCookie;)V
-         8: aload_0
-         9: iconst_m1
-        10: putfield      #11                 // Field ackBlockChangesUpTo:I
-        13: aload_0
-        14: new           #15                 // class net/minecraft/util/TickThrottler
-        17: dup
-        18: bipush        20
-        20: sipush        200
-        23: invokespecial #17                 // Method net/minecraft/util/TickThrottler."<init>":(II)V
-        26: putfield      #20                 // Field chatSpamThrottler:Lnet/minecraft/util/TickThrottler;
-        29: aload_0
-        30: new           #15                 // class net/minecraft/util/TickThrottler
-        33: dup
-        34: bipush        20
-        36: sipush        1480
-        39: invokespecial #17                 // Method net/minecraft/util/TickThrottler."<init>":(II)V
-        42: putfield      #24                 // Field dropSpamThrottler:Lnet/minecraft/util/TickThrottler;
-===== net.minecraft.server.players.PlayerList [respawn] =====
-Compiled from "PlayerList.java"
-public abstract class net.minecraft.server.players.PlayerList {
-  public static final java.io.File USERBANLIST_FILE;
-
-  public static final java.io.File IPBANLIST_FILE;
-
-  public static final java.io.File OPLIST_FILE;
-
-  public static final java.io.File WHITELIST_FILE;
-
-  public static final net.minecraft.network.chat.Component CHAT_FILTERED_FULL;
-
-  public static final net.minecraft.network.chat.Component DUPLICATE_LOGIN_DISCONNECT_MESSAGE;
-
-  private static final org.slf4j.Logger LOGGER;
-
-  private static final int SEND_PLAYER_INFO_INTERVAL;
-
-  private static final java.text.SimpleDateFormat BAN_DATE_FORMAT;
-
-  private final net.minecraft.server.MinecraftServer server;
-
-  private final java.util.List<net.minecraft.server.level.ServerPlayer> players;
-
-  private final java.util.Map<java.util.UUID, net.minecraft.server.level.ServerPlayer> playersByUUID;
-
-  private final net.minecraft.server.players.UserBanList bans;
-
-  private final net.minecraft.server.players.IpBanList ipBans;
-
-  private final net.minecraft.server.players.ServerOpList ops;
-
-  private final net.minecraft.server.players.UserWhiteList whitelist;
-
-  private final java.util.Map<java.util.UUID, net.minecraft.stats.ServerStatsCounter> stats;
-
-  private final java.util.Map<java.util.UUID, net.minecraft.server.PlayerAdvancements> advancements;
-
-  private final net.minecraft.world.level.storage.PlayerDataStorage playerIo;
-
-  private final net.minecraft.core.LayeredRegistryAccess<net.minecraft.server.RegistryLayer> registries;
-
-  private int viewDistance;
-
-  private int simulationDistance;
-
-  private boolean allowCommandsForAllPlayers;
-
-  private int sendAllPlayerInfoIn;
-
-  public net.minecraft.server.players.PlayerList(net.minecraft.server.MinecraftServer, net.minecraft.core.LayeredRegistryAccess<net.minecraft.server.RegistryLayer>, net.minecraft.world.level.storage.PlayerDataStorage, net.minecraft.server.notifications.NotificationService);
-    Code:
-         0: aload_0
-         1: invokespecial #3                  // Method java/lang/Object."<init>":()V
+         1: invokespecial #1                  // Method java/lang/Object."<init>":()V
          4: aload_0
-         5: invokestatic  #9                  // Method com/google/common/collect/Lists.newArrayList:()Ljava/util/ArrayList;
-         8: putfield      #15                 // Field players:Ljava/util/List;
-        11: aload_0
-        12: invokestatic  #21                 // Method com/google/common/collect/Maps.newHashMap:()Ljava/util/HashMap;
-        15: putfield      #27                 // Field playersByUUID:Ljava/util/Map;
-        18: aload_0
-        19: invokestatic  #21                 // Method com/google/common/collect/Maps.newHashMap:()Ljava/util/HashMap;
-        22: putfield      #31                 // Field stats:Ljava/util/Map;
-        25: aload_0
-        26: invokestatic  #21                 // Method com/google/common/collect/Maps.newHashMap:()Ljava/util/HashMap;
-        29: putfield      #34                 // Field advancements:Ljava/util/Map;
-        32: aload_0
-        33: aload_1
-        34: putfield      #37                 // Field server:Lnet/minecraft/server/MinecraftServer;
-        37: aload_0
-        38: aload_2
-        39: putfield      #41                 // Field registries:Lnet/minecraft/core/LayeredRegistryAccess;
-        42: aload_0
-        43: aload_3
-        44: putfield      #45                 // Field playerIo:Lnet/minecraft/world/level/storage/PlayerDataStorage;
-        47: aload_0
-        48: new           #49                 // class net/minecraft/server/players/UserWhiteList
-        51: dup
-        52: getstatic     #51                 // Field WHITELIST_FILE:Ljava/io/File;
-        55: aload         4
-        57: invokespecial #55                 // Method net/minecraft/server/players/UserWhiteList."<init>":(Ljava/io/File;Lnet/minecraft/server/notifications/NotificationService;)V
-        60: putfield      #58                 // Field whitelist:Lnet/minecraft/server/players/UserWhiteList;
-        63: aload_0
-        64: new           #62                 // class net/minecraft/server/players/ServerOpList
-        67: dup
-        68: getstatic     #64                 // Field OPLIST_FILE:Ljava/io/File;
-        71: aload         4
-        73: invokespecial #67                 // Method net/minecraft/server/players/ServerOpList."<init>":(Ljava/io/File;Lnet/minecraft/server/notifications/NotificationService;)V
-        76: putfield      #68                 // Field ops:Lnet/minecraft/server/players/ServerOpList;
-        79: aload_0
-        80: new           #72                 // class net/minecraft/server/players/UserBanList
-        83: dup
-        84: getstatic     #74                 // Field USERBANLIST_FILE:Ljava/io/File;
-        87: aload         4
-        89: invokespecial #77                 // Method net/minecraft/server/players/UserBanList."<init>":(Ljava/io/File;Lnet/minecraft/server/notifications/NotificationService;)V
-        92: putfield      #78                 // Field bans:Lnet/minecraft/server/players/UserBanList;
-        95: aload_0
-        96: new           #82                 // class net/minecraft/server/players/IpBanList
-        99: dup
-       100: getstatic     #84                 // Field IPBANLIST_FILE:Ljava/io/File;
-       103: aload         4
-       105: invokespecial #87                 // Method net/minecraft/server/players/IpBanList."<init>":(Ljava/io/File;Lnet/minecraft/server/notifications/NotificationService;)V
-       108: putfield      #88                 // Field ipBans:Lnet/minecraft/server/players/IpBanList;
-       111: return
-
-  public void placeNewPlayer(net.minecraft.network.Connection, net.minecraft.server.level.ServerPlayer, net.minecraft.server.network.CommonListenerCookie);
-    Code:
-         0: aload_2
-         1: invokevirtual #92                 // Method net/minecraft/server/level/ServerPlayer.nameAndId:()Lnet/minecraft/server/players/NameAndId;
-         4: astore        4
-         6: aload_0
-         7: getfield      #37                 // Field server:Lnet/minecraft/server/MinecraftServer;
-        10: invokevirtual #98                 // Method net/minecraft/server/MinecraftServer.services:()Lnet/minecraft/server/Services;
-        13: invokevirtual #104                // Method net/minecraft/server/Services.nameToIdCache:()Lnet/minecraft/server/players/UserNameToIdResolver;
-        16: astore        5
-        18: aload         5
-        20: aload         4
-        22: invokevirtual #110                // Method net/minecraft/server/players/NameAndId.id:()Ljava/util/UUID;
-        25: invokeinterface #116,  2          // InterfaceMethod net/minecraft/server/players/UserNameToIdResolver.get:(Ljava/util/UUID;)Ljava/util/Optional;
-        30: astore        7
-===== net.minecraft.util.datafix.fixes.InlineBlockPosFormatFix [respawn] =====
-Compiled from "InlineBlockPosFormatFix.java"
-public class net.minecraft.util.datafix.fixes.InlineBlockPosFormatFix extends com.mojang.datafixers.DataFix {
-  public net.minecraft.util.datafix.fixes.InlineBlockPosFormatFix(com.mojang.datafixers.schemas.Schema);
-    Code:
-         0: aload_0
-         1: aload_1
-         2: iconst_0
-         3: invokespecial #1                  // Method com/mojang/datafixers/DataFix."<init>":(Lcom/mojang/datafixers/schemas/Schema;Z)V
-         6: return
-
-  public com.mojang.datafixers.TypeRewriteRule makeRule();
-    Code:
-         0: aload_0
-         1: ldc           #7                  // String minecraft:vex
-         3: invokevirtual #9                  // Method entityFinder:(Ljava/lang/String;)Lcom/mojang/datafixers/OpticFinder;
-         6: astore_1
-         7: aload_0
-         8: ldc           #15                 // String minecraft:phantom
-        10: invokevirtual #9                  // Method entityFinder:(Ljava/lang/String;)Lcom/mojang/datafixers/OpticFinder;
-        13: astore_2
+         5: fload_1
+         6: putfield      #7                  // Field health:F
+         9: aload_0
+        10: iload_2
+        11: putfield      #13                 // Field food:I
         14: aload_0
-        15: ldc           #17                 // String minecraft:turtle
-        17: invokevirtual #9                  // Method entityFinder:(Ljava/lang/String;)Lcom/mojang/datafixers/OpticFinder;
-        20: astore_3
-        21: aload_0
-        22: ldc           #19                 // String minecraft:item_frame
-        24: invokevirtual #9                  // Method entityFinder:(Ljava/lang/String;)Lcom/mojang/datafixers/OpticFinder;
-        27: aload_0
-        28: ldc           #21                 // String minecraft:glow_item_frame
-        30: invokevirtual #9                  // Method entityFinder:(Ljava/lang/String;)Lcom/mojang/datafixers/OpticFinder;
-        33: aload_0
-        34: ldc           #23                 // String minecraft:painting
-        36: invokevirtual #9                  // Method entityFinder:(Ljava/lang/String;)Lcom/mojang/datafixers/OpticFinder;
-        39: aload_0
-        40: ldc           #25                 // String minecraft:leash_knot
-        42: invokevirtual #9                  // Method entityFinder:(Ljava/lang/String;)Lcom/mojang/datafixers/OpticFinder;
-        45: invokestatic  #27                 // InterfaceMethod java/util/List.of:(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/List;
-        48: astore        4
-        50: aload_0
-        51: ldc           #33                 // String InlineBlockPosFormatFix - player
-        53: aload_0
-        54: invokevirtual #35                 // Method getInputSchema:()Lcom/mojang/datafixers/schemas/Schema;
-        57: getstatic     #39                 // Field net/minecraft/util/datafix/fixes/References.PLAYER:Lcom/mojang/datafixers/DSL$TypeReference;
-        60: invokevirtual #45                 // Method com/mojang/datafixers/schemas/Schema.getType:(Lcom/mojang/datafixers/DSL$TypeReference;)Lcom/mojang/datafixers/types/Type;
-        63: aload_0
-        64: invokedynamic #51,  0             // InvokeDynamic #0:apply:(Lnet/minecraft/util/datafix/fixes/InlineBlockPosFormatFix;)Ljava/util/function/Function;
-        69: invokevirtual #55                 // Method fixTypeEverywhereTyped:(Ljava/lang/String;Lcom/mojang/datafixers/types/Type;Ljava/util/function/Function;)Lcom/mojang/datafixers/TypeRewriteRule;
-        72: aload_0
-        73: ldc           #59                 // String InlineBlockPosFormatFix - entity
-        75: aload_0
-        76: invokevirtual #35                 // Method getInputSchema:()Lcom/mojang/datafixers/schemas/Schema;
-        79: getstatic     #61                 // Field net/minecraft/util/datafix/fixes/References.ENTITY:Lcom/mojang/datafixers/DSL$TypeReference;
-        82: invokevirtual #45                 // Method com/mojang/datafixers/schemas/Schema.getType:(Lcom/mojang/datafixers/DSL$TypeReference;)Lcom/mojang/datafixers/types/Type;
-        85: aload_0
-        86: aload_1
-        87: aload_2
-        88: aload_3
-        89: aload         4
-        91: invokedynamic #64,  0             // InvokeDynamic #1:apply:(Lnet/minecraft/util/datafix/fixes/InlineBlockPosFormatFix;Lcom/mojang/datafixers/OpticFinder;Lcom/mojang/datafixers/OpticFinder;Lcom/mojang/datafixers/OpticFinder;Ljava/util/List;)Ljava/util/function/Function;
-        96: invokevirtual #55                 // Method fixTypeEverywhereTyped:(Ljava/lang/String;Lcom/mojang/datafixers/types/Type;Ljava/util/function/Function;)Lcom/mojang/datafixers/TypeRewriteRule;
-        99: invokestatic  #67                 // InterfaceMethod com/mojang/datafixers/TypeRewriteRule.seq:(Lcom/mojang/datafixers/TypeRewriteRule;Lcom/mojang/datafixers/TypeRewriteRule;)Lcom/mojang/datafixers/TypeRewriteRule;
-       102: areturn
+        15: fload_3
+        16: putfield      #17                 // Field saturation:F
+        19: return
 
-  private com.mojang.datafixers.OpticFinder<?> entityFinder(java.lang.String);
+  private net.minecraft.network.protocol.game.ClientboundSetHealthPacket(net.minecraft.network.FriendlyByteBuf);
+    descriptor: (Lnet/minecraft/network/FriendlyByteBuf;)V
+    Code:
+         0: aload_0
+         1: invokespecial #1                  // Method java/lang/Object."<init>":()V
+         4: aload_0
+         5: aload_1
+         6: invokevirtual #20                 // Method net/minecraft/network/FriendlyByteBuf.readFloat:()F
+         9: putfield      #7                  // Field health:F
+        12: aload_0
+        13: aload_1
+        14: invokevirtual #26                 // Method net/minecraft/network/FriendlyByteBuf.readVarInt:()I
+        17: putfield      #13                 // Field food:I
+        20: aload_0
+        21: aload_1
+        22: invokevirtual #20                 // Method net/minecraft/network/FriendlyByteBuf.readFloat:()F
+        25: putfield      #17                 // Field saturation:F
+        28: return
+
+  private void write(net.minecraft.network.FriendlyByteBuf);
+    descriptor: (Lnet/minecraft/network/FriendlyByteBuf;)V
     Code:
          0: aload_1
          1: aload_0
-         2: invokevirtual #35                 // Method getInputSchema:()Lcom/mojang/datafixers/schemas/Schema;
-         5: getstatic     #61                 // Field net/minecraft/util/datafix/fixes/References.ENTITY:Lcom/mojang/datafixers/DSL$TypeReference;
-         8: aload_1
-         9: invokevirtual #73                 // Method com/mojang/datafixers/schemas/Schema.getChoiceType:(Lcom/mojang/datafixers/DSL$TypeReference;Ljava/lang/String;)Lcom/mojang/datafixers/types/Type;
-        12: invokestatic  #77                 // InterfaceMethod com/mojang/datafixers/DSL.namedChoice:(Ljava/lang/String;Lcom/mojang/datafixers/types/Type;)Lcom/mojang/datafixers/OpticFinder;
-        15: areturn
+         2: getfield      #7                  // Field health:F
+         5: invokevirtual #30                 // Method net/minecraft/network/FriendlyByteBuf.writeFloat:(F)Lnet/minecraft/network/FriendlyByteBuf;
+         8: pop
+         9: aload_1
+        10: aload_0
+        11: getfield      #13                 // Field food:I
+        14: invokevirtual #34                 // Method net/minecraft/network/FriendlyByteBuf.writeVarInt:(I)Lnet/minecraft/network/FriendlyByteBuf;
+        17: pop
+        18: aload_1
+        19: aload_0
+        20: getfield      #17                 // Field saturation:F
+        23: invokevirtual #30                 // Method net/minecraft/network/FriendlyByteBuf.writeFloat:(F)Lnet/minecraft/network/FriendlyByteBuf;
+        26: pop
+        27: return
 
-  private com.mojang.serialization.Dynamic<?> fixPlayer(com.mojang.serialization.Dynamic<?>);
+  public net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundSetHealthPacket> type();
+    descriptor: ()Lnet/minecraft/network/protocol/PacketType;
+    Code:
+         0: getstatic     #38                 // Field net/minecraft/network/protocol/game/GamePacketTypes.CLIENTBOUND_SET_HEALTH:Lnet/minecraft/network/protocol/PacketType;
+         3: areturn
+
+  public void handle(net.minecraft.network.protocol.game.ClientGamePacketListener);
+    descriptor: (Lnet/minecraft/network/protocol/game/ClientGamePacketListener;)V
+    Code:
+         0: aload_1
+         1: aload_0
+         2: invokeinterface #44,  2           // InterfaceMethod net/minecraft/network/protocol/game/ClientGamePacketListener.handleSetHealth:(Lnet/minecraft/network/protocol/game/ClientboundSetHealthPacket;)V
+         7: return
+
+  public float getHealth();
+    descriptor: ()F
+    Code:
+         0: aload_0
+         1: getfield      #7                  // Field health:F
+         4: freturn
+
+  public int getFood();
+    descriptor: ()I
+    Code:
+         0: aload_0
+         1: getfield      #13                 // Field food:I
+         4: ireturn
+
+  public float getSaturation();
+    descriptor: ()F
+    Code:
+         0: aload_0
+         1: getfield      #17                 // Field saturation:F
+         4: freturn
+
+  public void handle(net.minecraft.network.PacketListener);
+    descriptor: (Lnet/minecraft/network/PacketListener;)V
     Code:
          0: aload_0
          1: aload_1
-         2: invokevirtual #83                 // Method fixLivingEntity:(Lcom/mojang/serialization/Dynamic;)Lcom/mojang/serialization/Dynamic;
-         5: astore_1
-         6: aload_1
-         7: ldc           #87                 // String SpawnX
-         9: invokevirtual #89                 // Method com/mojang/serialization/Dynamic.get:(Ljava/lang/String;)Lcom/mojang/serialization/OptionalDynamic;
-        12: invokevirtual #95                 // Method com/mojang/serialization/OptionalDynamic.asNumber:()Lcom/mojang/serialization/DataResult;
-        15: invokeinterface #101,  1          // InterfaceMethod com/mojang/serialization/DataResult.result:()Ljava/util/Optional;
-        20: astore_2
-        21: aload_1
-        22: ldc           #107                // String SpawnY
-        24: invokevirtual #89                 // Method com/mojang/serialization/Dynamic.get:(Ljava/lang/String;)Lcom/mojang/serialization/OptionalDynamic;
-        27: invokevirtual #95                 // Method com/mojang/serialization/OptionalDynamic.asNumber:()Lcom/mojang/serialization/DataResult;
-        30: invokeinterface #101,  1          // InterfaceMethod com/mojang/serialization/DataResult.result:()Ljava/util/Optional;
-        35: astore_3
-        36: aload_1
-        37: ldc           #109                // String SpawnZ
-        39: invokevirtual #89                 // Method com/mojang/serialization/Dynamic.get:(Ljava/lang/String;)Lcom/mojang/serialization/OptionalDynamic;
-        42: invokevirtual #95                 // Method com/mojang/serialization/OptionalDynamic.asNumber:()Lcom/mojang/serialization/DataResult;
-        45: invokeinterface #101,  1          // InterfaceMethod com/mojang/serialization/DataResult.result:()Ljava/util/Optional;
-        50: astore        4
-        52: aload_2
-        53: invokevirtual #111                // Method java/util/Optional.isPresent:()Z
-        56: ifeq          201
-        59: aload_3
-        60: invokevirtual #111                // Method java/util/Optional.isPresent:()Z
-        63: ifeq          201
-        66: aload         4
-        68: invokevirtual #111                // Method java/util/Optional.isPresent:()Z
-        71: ifeq          201
-        74: aload_1
-        75: aload_1
-        76: ldc           #117                // String pos
-        78: invokevirtual #119                // Method com/mojang/serialization/Dynamic.createString:(Ljava/lang/String;)Lcom/mojang/serialization/Dynamic;
-        81: aload_1
-        82: aload_2
-        83: invokevirtual #123                // Method java/util/Optional.get:()Ljava/lang/Object;
-        86: checkcast     #126                // class java/lang/Number
-        89: invokevirtual #128                // Method java/lang/Number.intValue:()I
-        92: aload_3
-        93: invokevirtual #123                // Method java/util/Optional.get:()Ljava/lang/Object;
-        96: checkcast     #126                // class java/lang/Number
-        99: invokevirtual #128                // Method java/lang/Number.intValue:()I
-138-       141: ldc           #157                // String dimension
-139-       143: invokestatic  #151                // Method com/mojang/serialization/Dynamic.copyField:(Lcom/mojang/serialization/Dynamic;Ljava/lang/String;Lcom/mojang/serialization/Dynamic;Ljava/lang/String;)Lcom/mojang/serialization/Dynamic;
-140-       146: astore        5
-141-       148: aload_1
-142-       149: ldc           #159                // String SpawnForced
-143-       151: aload         5
-144-       153: ldc           #161                // String forced
-145-       155: invokestatic  #151                // Method com/mojang/serialization/Dynamic.copyField:(Lcom/mojang/serialization/Dynamic;Ljava/lang/String;Lcom/mojang/serialization/Dynamic;Ljava/lang/String;)Lcom/mojang/serialization/Dynamic;
-146-       158: astore        5
-147-       160: aload_1
-148-       161: ldc           #87                 // String SpawnX
-149-       163: invokevirtual #163                // Method com/mojang/serialization/Dynamic.remove:(Ljava/lang/String;)Lcom/mojang/serialization/Dynamic;
-150-       166: ldc           #107                // String SpawnY
-151-       168: invokevirtual #163                // Method com/mojang/serialization/Dynamic.remove:(Ljava/lang/String;)Lcom/mojang/serialization/Dynamic;
-152-       171: ldc           #109                // String SpawnZ
-153-       173: invokevirtual #163                // Method com/mojang/serialization/Dynamic.remove:(Ljava/lang/String;)Lcom/mojang/serialization/Dynamic;
-154-       176: ldc           #147                // String SpawnAngle
-155-       178: invokevirtual #163                // Method com/mojang/serialization/Dynamic.remove:(Ljava/lang/String;)Lcom/mojang/serialization/Dynamic;
-156-       181: ldc           #155                // String SpawnDimension
-157-       183: invokevirtual #163                // Method com/mojang/serialization/Dynamic.remove:(Ljava/lang/String;)Lcom/mojang/serialization/Dynamic;
-158-       186: ldc           #159                // String SpawnForced
-159-       188: invokevirtual #163                // Method com/mojang/serialization/Dynamic.remove:(Ljava/lang/String;)Lcom/mojang/serialization/Dynamic;
-160-       191: astore_1
-161-       192: aload_1
-162:       193: ldc           #166                // String respawn
-163-       195: aload         5
-164-       197: invokevirtual #168                // Method com/mojang/serialization/Dynamic.set:(Ljava/lang/String;Lcom/mojang/serialization/Dynamic;)Lcom/mojang/serialization/Dynamic;
-165-       200: astore_1
-166-       201: aload_1
-167-       202: ldc           #172                // String enteredNetherPosition
-168-       204: invokevirtual #89                 // Method com/mojang/serialization/Dynamic.get:(Ljava/lang/String;)Lcom/mojang/serialization/OptionalDynamic;
-169-       207: invokevirtual #174                // Method com/mojang/serialization/OptionalDynamic.result:()Ljava/util/Optional;
-170-       210: astore        5
-171-       212: aload         5
-172-       214: invokevirtual #111                // Method java/util/Optional.isPresent:()Z
-173-       217: ifeq          315
-174-       220: aload_1
-175-       221: ldc           #172                // String enteredNetherPosition
-176-       223: invokevirtual #163                // Method com/mojang/serialization/Dynamic.remove:(Ljava/lang/String;)Lcom/mojang/serialization/Dynamic;
-177-       226: ldc           #175                // String entered_nether_pos
-178-       228: aload_1
-179-       229: iconst_3
-180-       230: anewarray     #90                 // class com/mojang/serialization/Dynamic
-181-       233: dup
-182-       234: iconst_0
-183-       235: aload_1
-184-       236: aload         5
-185-       238: invokevirtual #123                // Method java/util/Optional.get:()Ljava/lang/Object;
-186-       241: checkcast     #90                 // class com/mojang/serialization/Dynamic
-187-       244: ldc           #177                // String x
-188-       246: invokevirtual #89                 // Method com/mojang/serialization/Dynamic.get:(Ljava/lang/String;)Lcom/mojang/serialization/OptionalDynamic;
-189-       249: dconst_0
-190-       250: invokevirtual #179                // Method com/mojang/serialization/OptionalDynamic.asDouble:(D)D
-191-       253: invokevirtual #183                // Method com/mojang/serialization/Dynamic.createDouble:(D)Lcom/mojang/serialization/Dynamic;
-192-       256: aastore
-193-       257: dup
-194-       258: iconst_1
-195-       259: aload_1
-196-       260: aload         5
-197-       262: invokevirtual #123                // Method java/util/Optional.get:()Ljava/lang/Object;
-198-       265: checkcast     #90                 // class com/mojang/serialization/Dynamic
-199-       268: ldc           #187                // String y
-200-       270: invokevirtual #89                 // Method com/mojang/serialization/Dynamic.get:(Ljava/lang/String;)Lcom/mojang/serialization/OptionalDynamic;
-201-       273: dconst_0
-202-       274: invokevirtual #179                // Method com/mojang/serialization/OptionalDynamic.asDouble:(D)D
-203-       277: invokevirtual #183                // Method com/mojang/serialization/Dynamic.createDouble:(D)Lcom/mojang/serialization/Dynamic;
-204-       280: aastore
-205-       281: dup
-206-       282: iconst_2
-207-       283: aload_1
-208-       284: aload         5
-209-       286: invokevirtual #123                // Method java/util/Optional.get:()Ljava/lang/Object;
-210-       289: checkcast     #90                 // class com/mojang/serialization/Dynamic
-211-       292: ldc           #189                // String z
-212-       294: invokevirtual #89                 // Method com/mojang/serialization/Dynamic.get:(Ljava/lang/String;)Lcom/mojang/serialization/OptionalDynamic;
-213-       297: dconst_0
-214-       298: invokevirtual #179                // Method com/mojang/serialization/OptionalDynamic.asDouble:(D)D
-215-       301: invokevirtual #183                // Method com/mojang/serialization/Dynamic.createDouble:(D)Lcom/mojang/serialization/Dynamic;
-216-       304: aastore
-217-       305: invokestatic  #191                // InterfaceMethod java/util/stream/Stream.of:([Ljava/lang/Object;)Ljava/util/stream/Stream;
-218-       308: invokevirtual #196                // Method com/mojang/serialization/Dynamic.createList:(Ljava/util/stream/Stream;)Lcom/mojang/serialization/Dynamic;
-219-       311: invokevirtual #168                // Method com/mojang/serialization/Dynamic.set:(Ljava/lang/String;Lcom/mojang/serialization/Dynamic;)Lcom/mojang/serialization/Dynamic;
-220-       314: astore_1
-221-       315: aload_1
-222-       316: areturn
-===== net.minecraft.util.datafix.fixes.PlayerRespawnDataFix [respawn] =====
-Compiled from "PlayerRespawnDataFix.java"
-public class net.minecraft.util.datafix.fixes.PlayerRespawnDataFix extends com.mojang.datafixers.DataFix {
-  public net.minecraft.util.datafix.fixes.PlayerRespawnDataFix(com.mojang.datafixers.schemas.Schema);
-    Code:
-         0: aload_0
-         1: aload_1
-         2: iconst_0
-         3: invokespecial #1                  // Method com/mojang/datafixers/DataFix."<init>":(Lcom/mojang/datafixers/schemas/Schema;Z)V
-         6: return
+         2: checkcast     #45                 // class net/minecraft/network/protocol/game/ClientGamePacketListener
+         5: invokevirtual #50                 // Method handle:(Lnet/minecraft/network/protocol/game/ClientGamePacketListener;)V
+         8: return
 
-  protected com.mojang.datafixers.TypeRewriteRule makeRule();
+  static {};
+    descriptor: ()V
     Code:
-         0: aload_0
-         1: ldc           #7                  // String PlayerRespawnDataFix
-         3: aload_0
-         4: invokevirtual #9                  // Method getInputSchema:()Lcom/mojang/datafixers/schemas/Schema;
-         7: getstatic     #15                 // Field net/minecraft/util/datafix/fixes/References.PLAYER:Lcom/mojang/datafixers/DSL$TypeReference;
-        10: invokevirtual #21                 // Method com/mojang/datafixers/schemas/Schema.getType:(Lcom/mojang/datafixers/DSL$TypeReference;)Lcom/mojang/datafixers/types/Type;
-        13: invokedynamic #27,  0             // InvokeDynamic #0:apply:()Ljava/util/function/Function;
-        18: invokevirtual #31                 // Method fixTypeEverywhereTyped:(Ljava/lang/String;Lcom/mojang/datafixers/types/Type;Ljava/util/function/Function;)Lcom/mojang/datafixers/TypeRewriteRule;
-        21: areturn
-
-  private static com.mojang.datafixers.Typed lambda$makeRule$0(com.mojang.datafixers.Typed);
-    Code:
-         0: aload_0
-         1: invokestatic  #35                 // InterfaceMethod com/mojang/datafixers/DSL.remainderFinder:()Lcom/mojang/datafixers/OpticFinder;
-         4: invokedynamic #41,  0             // InvokeDynamic #1:apply:()Ljava/util/function/Function;
-         9: invokevirtual #42                 // Method com/mojang/datafixers/Typed.update:(Lcom/mojang/datafixers/OpticFinder;Ljava/util/function/Function;)Lcom/mojang/datafixers/Typed;
-        12: areturn
-
-  private static com.mojang.serialization.Dynamic lambda$makeRule$1(com.mojang.serialization.Dynamic);
-    Code:
-         0: aload_0
-         1: ldc           #48                 // String respawn
-         3: invokedynamic #50,  0             // InvokeDynamic #2:apply:()Ljava/util/function/Function;
-         8: invokevirtual #51                 // Method com/mojang/serialization/Dynamic.update:(Ljava/lang/String;Ljava/util/function/Function;)Lcom/mojang/serialization/Dynamic;
-        11: areturn
-
-  private static com.mojang.serialization.Dynamic lambda$makeRule$2(com.mojang.serialization.Dynamic);
-    Code:
-         0: aload_0
-         1: ldc           #56                 // String dimension
-         3: aload_0
-         4: aload_0
-         5: ldc           #56                 // String dimension
-         7: invokevirtual #58                 // Method com/mojang/serialization/Dynamic.get:(Ljava/lang/String;)Lcom/mojang/serialization/OptionalDynamic;
-        10: ldc           #62                 // String minecraft:overworld
-        12: invokevirtual #64                 // Method com/mojang/serialization/OptionalDynamic.asString:(Ljava/lang/String;)Ljava/lang/String;
-        15: invokevirtual #70                 // Method com/mojang/serialization/Dynamic.createString:(Ljava/lang/String;)Lcom/mojang/serialization/Dynamic;
-        18: invokevirtual #74                 // Method com/mojang/serialization/Dynamic.set:(Ljava/lang/String;Lcom/mojang/serialization/Dynamic;)Lcom/mojang/serialization/Dynamic;
-        21: ldc           #78                 // String yaw
-        23: aload_0
-        24: aload_0
-        25: ldc           #80                 // String angle
-        27: invokevirtual #58                 // Method com/mojang/serialization/Dynamic.get:(Ljava/lang/String;)Lcom/mojang/serialization/OptionalDynamic;
-        30: fconst_0
-        31: invokevirtual #82                 // Method com/mojang/serialization/OptionalDynamic.asFloat:(F)F
-        34: invokevirtual #86                 // Method com/mojang/serialization/Dynamic.createFloat:(F)Lcom/mojang/serialization/Dynamic;
-        37: invokevirtual #74                 // Method com/mojang/serialization/Dynamic.set:(Ljava/lang/String;Lcom/mojang/serialization/Dynamic;)Lcom/mojang/serialization/Dynamic;
-        40: ldc           #90                 // String pitch
-        42: aload_0
-        43: fconst_0
-        44: invokevirtual #86                 // Method com/mojang/serialization/Dynamic.createFloat:(F)Lcom/mojang/serialization/Dynamic;
-        47: invokevirtual #74                 // Method com/mojang/serialization/Dynamic.set:(Ljava/lang/String;Lcom/mojang/serialization/Dynamic;)Lcom/mojang/serialization/Dynamic;
-        50: ldc           #80                 // String angle
-        52: invokevirtual #92                 // Method com/mojang/serialization/Dynamic.remove:(Ljava/lang/String;)Lcom/mojang/serialization/Dynamic;
-        55: areturn
+         0: invokedynamic #54,  0             // InvokeDynamic #0:encode:()Lnet/minecraft/network/codec/StreamMemberEncoder;
+         5: invokedynamic #58,  0             // InvokeDynamic #1:decode:()Lnet/minecraft/network/codec/StreamDecoder;
+        10: invokestatic  #62                 // InterfaceMethod net/minecraft/network/protocol/Packet.codec:(Lnet/minecraft/network/codec/StreamMemberEncoder;Lnet/minecraft/network/codec/StreamDecoder;)Lnet/minecraft/network/codec/StreamCodec;
+        13: putstatic     #68                 // Field STREAM_CODEC:Lnet/minecraft/network/codec/StreamCodec;
+        16: return
 }
-10-
-11-  protected com.mojang.datafixers.TypeRewriteRule makeRule();
-12-    Code:
-13-         0: aload_0
-14-         1: ldc           #7                  // String PlayerRespawnDataFix
-15-         3: aload_0
-16-         4: invokevirtual #9                  // Method getInputSchema:()Lcom/mojang/datafixers/schemas/Schema;
-17-         7: getstatic     #15                 // Field net/minecraft/util/datafix/fixes/References.PLAYER:Lcom/mojang/datafixers/DSL$TypeReference;
-18-        10: invokevirtual #21                 // Method com/mojang/datafixers/schemas/Schema.getType:(Lcom/mojang/datafixers/DSL$TypeReference;)Lcom/mojang/datafixers/types/Type;
-19-        13: invokedynamic #27,  0             // InvokeDynamic #0:apply:()Ljava/util/function/Function;
-20-        18: invokevirtual #31                 // Method fixTypeEverywhereTyped:(Ljava/lang/String;Lcom/mojang/datafixers/types/Type;Ljava/util/function/Function;)Lcom/mojang/datafixers/TypeRewriteRule;
-21-        21: areturn
-22-
-23-  private static com.mojang.datafixers.Typed lambda$makeRule$0(com.mojang.datafixers.Typed);
-24-    Code:
-25-         0: aload_0
-26-         1: invokestatic  #35                 // InterfaceMethod com/mojang/datafixers/DSL.remainderFinder:()Lcom/mojang/datafixers/OpticFinder;
-27-         4: invokedynamic #41,  0             // InvokeDynamic #1:apply:()Ljava/util/function/Function;
-28-         9: invokevirtual #42                 // Method com/mojang/datafixers/Typed.update:(Lcom/mojang/datafixers/OpticFinder;Ljava/util/function/Function;)Lcom/mojang/datafixers/Typed;
-29-        12: areturn
-30-
-31-  private static com.mojang.serialization.Dynamic lambda$makeRule$1(com.mojang.serialization.Dynamic);
-32-    Code:
-33-         0: aload_0
-34:         1: ldc           #48                 // String respawn
-35-         3: invokedynamic #50,  0             // InvokeDynamic #2:apply:()Ljava/util/function/Function;
-36-         8: invokevirtual #51                 // Method com/mojang/serialization/Dynamic.update:(Ljava/lang/String;Ljava/util/function/Function;)Lcom/mojang/serialization/Dynamic;
-37-        11: areturn
-38-
-39-  private static com.mojang.serialization.Dynamic lambda$makeRule$2(com.mojang.serialization.Dynamic);
-40-    Code:
-41-         0: aload_0
-42-         1: ldc           #56                 // String dimension
-43-         3: aload_0
-44-         4: aload_0
-45-         5: ldc           #56                 // String dimension
-46-         7: invokevirtual #58                 // Method com/mojang/serialization/Dynamic.get:(Ljava/lang/String;)Lcom/mojang/serialization/OptionalDynamic;
-47-        10: ldc           #62                 // String minecraft:overworld
-48-        12: invokevirtual #64                 // Method com/mojang/serialization/OptionalDynamic.asString:(Ljava/lang/String;)Ljava/lang/String;
-49-        15: invokevirtual #70                 // Method com/mojang/serialization/Dynamic.createString:(Ljava/lang/String;)Lcom/mojang/serialization/Dynamic;
-50-        18: invokevirtual #74                 // Method com/mojang/serialization/Dynamic.set:(Ljava/lang/String;Lcom/mojang/serialization/Dynamic;)Lcom/mojang/serialization/Dynamic;
-51-        21: ldc           #78                 // String yaw
-52-        23: aload_0
-53-        24: aload_0
-54-        25: ldc           #80                 // String angle
-55-        27: invokevirtual #58                 // Method com/mojang/serialization/Dynamic.get:(Ljava/lang/String;)Lcom/mojang/serialization/OptionalDynamic;
-56-        30: fconst_0
-57-        31: invokevirtual #82                 // Method com/mojang/serialization/OptionalDynamic.asFloat:(F)F
-58-        34: invokevirtual #86                 // Method com/mojang/serialization/Dynamic.createFloat:(F)Lcom/mojang/serialization/Dynamic;
-59-        37: invokevirtual #74                 // Method com/mojang/serialization/Dynamic.set:(Ljava/lang/String;Lcom/mojang/serialization/Dynamic;)Lcom/mojang/serialization/Dynamic;
-60-        40: ldc           #90                 // String pitch
-61-        42: aload_0
-62-        43: fconst_0
-63-        44: invokevirtual #86                 // Method com/mojang/serialization/Dynamic.createFloat:(F)Lcom/mojang/serialization/Dynamic;
-64-        47: invokevirtual #74                 // Method com/mojang/serialization/Dynamic.set:(Ljava/lang/String;Lcom/mojang/serialization/Dynamic;)Lcom/mojang/serialization/Dynamic;
-65-        50: ldc           #80                 // String angle
-66-        52: invokevirtual #92                 // Method com/mojang/serialization/Dynamic.remove:(Ljava/lang/String;)Lcom/mojang/serialization/Dynamic;
-67-        55: areturn
-68-}
+===== net.minecraft.network.protocol.game.ClientboundDamageEventPacket =====
+Compiled from "ClientboundDamageEventPacket.java"
+public final class net.minecraft.network.protocol.game.ClientboundDamageEventPacket extends java.lang.Record implements net.minecraft.network.protocol.Packet<net.minecraft.network.protocol.game.ClientGamePacketListener> {
+  private final int entityId;
+    descriptor: I
+
+  private final net.minecraft.core.Holder<net.minecraft.world.damagesource.DamageType> sourceType;
+    descriptor: Lnet/minecraft/core/Holder;
+
+  private final int sourceCauseId;
+    descriptor: I
+
+  private final int sourceDirectId;
+    descriptor: I
+
+  private final java.util.Optional<net.minecraft.world.phys.Vec3> sourcePosition;
+    descriptor: Ljava/util/Optional;
+
+  public static final net.minecraft.network.codec.StreamCodec<net.minecraft.network.RegistryFriendlyByteBuf, net.minecraft.network.protocol.game.ClientboundDamageEventPacket> STREAM_CODEC;
+    descriptor: Lnet/minecraft/network/codec/StreamCodec;
+
+  public net.minecraft.network.protocol.game.ClientboundDamageEventPacket(net.minecraft.world.entity.Entity, net.minecraft.world.damagesource.DamageSource);
+    descriptor: (Lnet/minecraft/world/entity/Entity;Lnet/minecraft/world/damagesource/DamageSource;)V
+    Code:
+         0: aload_0
+         1: aload_1
+         2: invokevirtual #27                 // Method net/minecraft/world/entity/Entity.getId:()I
+         5: aload_2
+         6: invokevirtual #33                 // Method net/minecraft/world/damagesource/DamageSource.typeHolder:()Lnet/minecraft/core/Holder;
+         9: aload_2
+        10: invokevirtual #39                 // Method net/minecraft/world/damagesource/DamageSource.getEntity:()Lnet/minecraft/world/entity/Entity;
+        13: ifnull        26
+        16: aload_2
+        17: invokevirtual #39                 // Method net/minecraft/world/damagesource/DamageSource.getEntity:()Lnet/minecraft/world/entity/Entity;
+        20: invokevirtual #27                 // Method net/minecraft/world/entity/Entity.getId:()I
+        23: goto          27
+        26: iconst_m1
+        27: aload_2
+        28: invokevirtual #43                 // Method net/minecraft/world/damagesource/DamageSource.getDirectEntity:()Lnet/minecraft/world/entity/Entity;
+        31: ifnull        44
+        34: aload_2
+        35: invokevirtual #43                 // Method net/minecraft/world/damagesource/DamageSource.getDirectEntity:()Lnet/minecraft/world/entity/Entity;
+        38: invokevirtual #27                 // Method net/minecraft/world/entity/Entity.getId:()I
+        41: goto          45
+        44: iconst_m1
+        45: aload_2
+        46: invokevirtual #46                 // Method net/minecraft/world/damagesource/DamageSource.sourcePositionRaw:()Lnet/minecraft/world/phys/Vec3;
+        49: invokestatic  #50                 // Method java/util/Optional.ofNullable:(Ljava/lang/Object;)Ljava/util/Optional;
+        52: invokespecial #56                 // Method "<init>":(ILnet/minecraft/core/Holder;IILjava/util/Optional;)V
+        55: return
+
+  private net.minecraft.network.protocol.game.ClientboundDamageEventPacket(net.minecraft.network.RegistryFriendlyByteBuf);
+    descriptor: (Lnet/minecraft/network/RegistryFriendlyByteBuf;)V
+    Code:
+         0: aload_0
+         1: aload_1
+         2: invokevirtual #68                 // Method net/minecraft/network/RegistryFriendlyByteBuf.readVarInt:()I
+         5: getstatic     #71                 // Field net/minecraft/world/damagesource/DamageType.STREAM_CODEC:Lnet/minecraft/network/codec/StreamCodec;
+         8: aload_1
+         9: invokeinterface #77,  2           // InterfaceMethod net/minecraft/network/codec/StreamCodec.decode:(Ljava/lang/Object;)Ljava/lang/Object;
+        14: checkcast     #83                 // class net/minecraft/core/Holder
+        17: aload_1
+        18: invokestatic  #85                 // Method readOptionalEntityId:(Lnet/minecraft/network/FriendlyByteBuf;)I
+        21: aload_1
+        22: invokestatic  #85                 // Method readOptionalEntityId:(Lnet/minecraft/network/FriendlyByteBuf;)I
+        25: aload_1
+        26: invokedynamic #89,  0             // InvokeDynamic #0:decode:()Lnet/minecraft/network/codec/StreamDecoder;
+        31: invokevirtual #92                 // Method net/minecraft/network/RegistryFriendlyByteBuf.readOptional:(Lnet/minecraft/network/codec/StreamDecoder;)Ljava/util/Optional;
+        34: invokespecial #56                 // Method "<init>":(ILnet/minecraft/core/Holder;IILjava/util/Optional;)V
+        37: return
+
+  public net.minecraft.network.protocol.game.ClientboundDamageEventPacket(int, net.minecraft.core.Holder<net.minecraft.world.damagesource.DamageType>, int, int, java.util.Optional<net.minecraft.world.phys.Vec3>);
+    descriptor: (ILnet/minecraft/core/Holder;IILjava/util/Optional;)V
+    Code:
+         0: aload_0
+         1: invokespecial #1                  // Method java/lang/Record."<init>":()V
+         4: aload_0
+         5: iload_1
+         6: putfield      #7                  // Field entityId:I
+         9: aload_0
+        10: aload_2
+        11: putfield      #13                 // Field sourceType:Lnet/minecraft/core/Holder;
+        14: aload_0
+        15: iload_3
+        16: putfield      #17                 // Field sourceCauseId:I
+        19: aload_0
+        20: iload         4
+        22: putfield      #20                 // Field sourceDirectId:I
+        25: aload_0
+        26: aload         5
+        28: putfield      #23                 // Field sourcePosition:Ljava/util/Optional;
+        31: return
+
+  private static void writeOptionalEntityId(net.minecraft.network.FriendlyByteBuf, int);
+    descriptor: (Lnet/minecraft/network/FriendlyByteBuf;I)V
+    Code:
+         0: aload_0
+         1: iload_1
+         2: iconst_1
+         3: iadd
+         4: invokevirtual #59                 // Method net/minecraft/network/FriendlyByteBuf.writeVarInt:(I)Lnet/minecraft/network/FriendlyByteBuf;
+         7: pop
+         8: return
+
+  private static int readOptionalEntityId(net.minecraft.network.FriendlyByteBuf);
+    descriptor: (Lnet/minecraft/network/FriendlyByteBuf;)I
+    Code:
+         0: aload_0
+         1: invokevirtual #65                 // Method net/minecraft/network/FriendlyByteBuf.readVarInt:()I
+         4: iconst_1
+         5: isub
+         6: ireturn
+
+  private void write(net.minecraft.network.RegistryFriendlyByteBuf);
+    descriptor: (Lnet/minecraft/network/RegistryFriendlyByteBuf;)V
+    Code:
+         0: aload_1
+         1: aload_0
+         2: getfield      #7                  // Field entityId:I
+         5: invokevirtual #96                 // Method net/minecraft/network/RegistryFriendlyByteBuf.writeVarInt:(I)Lnet/minecraft/network/FriendlyByteBuf;
+         8: pop
+         9: getstatic     #71                 // Field net/minecraft/world/damagesource/DamageType.STREAM_CODEC:Lnet/minecraft/network/codec/StreamCodec;
+        12: aload_1
+        13: aload_0
+        14: getfield      #13                 // Field sourceType:Lnet/minecraft/core/Holder;
+        17: invokeinterface #97,  3           // InterfaceMethod net/minecraft/network/codec/StreamCodec.encode:(Ljava/lang/Object;Ljava/lang/Object;)V
+        22: aload_1
+        23: aload_0
+        24: getfield      #17                 // Field sourceCauseId:I
+        27: invokestatic  #101                // Method writeOptionalEntityId:(Lnet/minecraft/network/FriendlyByteBuf;I)V
+        30: aload_1
+        31: aload_0
+        32: getfield      #20                 // Field sourceDirectId:I
+        35: invokestatic  #101                // Method writeOptionalEntityId:(Lnet/minecraft/network/FriendlyByteBuf;I)V
+        38: aload_1
+        39: aload_0
+        40: getfield      #23                 // Field sourcePosition:Ljava/util/Optional;
+        43: invokedynamic #105,  0            // InvokeDynamic #1:encode:()Lnet/minecraft/network/codec/StreamEncoder;
+        48: invokevirtual #108                // Method net/minecraft/network/RegistryFriendlyByteBuf.writeOptional:(Ljava/util/Optional;Lnet/minecraft/network/codec/StreamEncoder;)V
+        51: return
+
+  public net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundDamageEventPacket> type();
+    descriptor: ()Lnet/minecraft/network/protocol/PacketType;
+    Code:
+         0: getstatic     #112                // Field net/minecraft/network/protocol/game/GamePacketTypes.CLIENTBOUND_DAMAGE_EVENT:Lnet/minecraft/network/protocol/PacketType;
+         3: areturn
+
+  public void handle(net.minecraft.network.protocol.game.ClientGamePacketListener);
+    descriptor: (Lnet/minecraft/network/protocol/game/ClientGamePacketListener;)V
+    Code:
+         0: aload_1
+         1: aload_0
+         2: invokeinterface #118,  2          // InterfaceMethod net/minecraft/network/protocol/game/ClientGamePacketListener.handleDamageEvent:(Lnet/minecraft/network/protocol/game/ClientboundDamageEventPacket;)V
+         7: return
+
+  public net.minecraft.world.damagesource.DamageSource getSource(net.minecraft.world.level.Level);
+    descriptor: (Lnet/minecraft/world/level/Level;)Lnet/minecraft/world/damagesource/DamageSource;
+    Code:
+         0: aload_0
+         1: getfield      #23                 // Field sourcePosition:Ljava/util/Optional;
+         4: invokevirtual #124                // Method java/util/Optional.isPresent:()Z
+         7: ifeq          32
+        10: new           #34                 // class net/minecraft/world/damagesource/DamageSource
+        13: dup
+        14: aload_0
+        15: getfield      #13                 // Field sourceType:Lnet/minecraft/core/Holder;
+        18: aload_0
+        19: getfield      #23                 // Field sourcePosition:Ljava/util/Optional;
+        22: invokevirtual #128                // Method java/util/Optional.get:()Ljava/lang/Object;
+        25: checkcast     #132                // class net/minecraft/world/phys/Vec3
+        28: invokespecial #134                // Method net/minecraft/world/damagesource/DamageSource."<init>":(Lnet/minecraft/core/Holder;Lnet/minecraft/world/phys/Vec3;)V
+        31: areturn
+        32: aload_1
+        33: aload_0
+        34: getfield      #17                 // Field sourceCauseId:I
+        37: invokevirtual #137                // Method net/minecraft/world/level/Level.getEntity:(I)Lnet/minecraft/world/entity/Entity;
+        40: astore_2
+        41: aload_1
+        42: aload_0
+        43: getfield      #20                 // Field sourceDirectId:I
+        46: invokevirtual #137                // Method net/minecraft/world/level/Level.getEntity:(I)Lnet/minecraft/world/entity/Entity;
+        49: astore_3
+        50: new           #34                 // class net/minecraft/world/damagesource/DamageSource
+        53: dup
+        54: aload_0
+        55: getfield      #13                 // Field sourceType:Lnet/minecraft/core/Holder;
+        58: aload_3
+        59: aload_2
+        60: invokespecial #142                // Method net/minecraft/world/damagesource/DamageSource."<init>":(Lnet/minecraft/core/Holder;Lnet/minecraft/world/entity/Entity;Lnet/minecraft/world/entity/Entity;)V
+        63: areturn
+
+  public final java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+    Code:
+         0: aload_0
+         1: invokedynamic #149,  0            // InvokeDynamic #2:toString:(Lnet/minecraft/network/protocol/game/ClientboundDamageEventPacket;)Ljava/lang/String;
+         6: areturn
+
+  public final int hashCode();
+    descriptor: ()I
+    Code:
+         0: aload_0
+         1: invokedynamic #153,  0            // InvokeDynamic #2:hashCode:(Lnet/minecraft/network/protocol/game/ClientboundDamageEventPacket;)I
+         6: ireturn
+
+  public final boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+    Code:
+         0: aload_0
+         1: aload_1
+         2: invokedynamic #157,  0            // InvokeDynamic #2:equals:(Lnet/minecraft/network/protocol/game/ClientboundDamageEventPacket;Ljava/lang/Object;)Z
+         7: ireturn
+
+  public int entityId();
+    descriptor: ()I
+    Code:
+         0: aload_0
+         1: getfield      #7                  // Field entityId:I
+         4: ireturn
+
+  public net.minecraft.core.Holder<net.minecraft.world.damagesource.DamageType> sourceType();
+    descriptor: ()Lnet/minecraft/core/Holder;
+    Code:
+         0: aload_0
+         1: getfield      #13                 // Field sourceType:Lnet/minecraft/core/Holder;
+         4: areturn
+
+  public int sourceCauseId();
+    descriptor: ()I
+    Code:
+         0: aload_0
+         1: getfield      #17                 // Field sourceCauseId:I
+         4: ireturn
+
+  public int sourceDirectId();
+    descriptor: ()I
+    Code:
+         0: aload_0
+         1: getfield      #20                 // Field sourceDirectId:I
+         4: ireturn
+
+  public java.util.Optional<net.minecraft.world.phys.Vec3> sourcePosition();
+    descriptor: ()Ljava/util/Optional;
+    Code:
+         0: aload_0
+         1: getfield      #23                 // Field sourcePosition:Ljava/util/Optional;
+         4: areturn
+
+  public void handle(net.minecraft.network.PacketListener);
+    descriptor: (Lnet/minecraft/network/PacketListener;)V
+    Code:
+         0: aload_0
+         1: aload_1
+         2: checkcast     #119                // class net/minecraft/network/protocol/game/ClientGamePacketListener
+         5: invokevirtual #145                // Method handle:(Lnet/minecraft/network/protocol/game/ClientGamePacketListener;)V
+         8: return
+
+  private static void lambda$write$0(net.minecraft.network.FriendlyByteBuf, net.minecraft.world.phys.Vec3);
+    descriptor: (Lnet/minecraft/network/FriendlyByteBuf;Lnet/minecraft/world/phys/Vec3;)V
+    Code:
+         0: aload_0
+         1: aload_1
+         2: invokevirtual #161                // Method net/minecraft/world/phys/Vec3.x:()D
+         5: invokevirtual #165                // Method net/minecraft/network/FriendlyByteBuf.writeDouble:(D)Lnet/minecraft/network/FriendlyByteBuf;
+         8: pop
+         9: aload_0
+        10: aload_1
+        11: invokevirtual #169                // Method net/minecraft/world/phys/Vec3.y:()D
+        14: invokevirtual #165                // Method net/minecraft/network/FriendlyByteBuf.writeDouble:(D)Lnet/minecraft/network/FriendlyByteBuf;
+        17: pop
+        18: aload_0
+        19: aload_1
+        20: invokevirtual #172                // Method net/minecraft/world/phys/Vec3.z:()D
+        23: invokevirtual #165                // Method net/minecraft/network/FriendlyByteBuf.writeDouble:(D)Lnet/minecraft/network/FriendlyByteBuf;
+        26: pop
+        27: return
+
+  private static net.minecraft.world.phys.Vec3 lambda$new$0(net.minecraft.network.FriendlyByteBuf);
+    descriptor: (Lnet/minecraft/network/FriendlyByteBuf;)Lnet/minecraft/world/phys/Vec3;
+    Code:
+         0: new           #132                // class net/minecraft/world/phys/Vec3
+         3: dup
+         4: aload_0
+         5: invokevirtual #175                // Method net/minecraft/network/FriendlyByteBuf.readDouble:()D
+         8: aload_0
+         9: invokevirtual #175                // Method net/minecraft/network/FriendlyByteBuf.readDouble:()D
+        12: aload_0
+        13: invokevirtual #175                // Method net/minecraft/network/FriendlyByteBuf.readDouble:()D
+        16: invokespecial #178                // Method net/minecraft/world/phys/Vec3."<init>":(DDD)V
+        19: areturn
+
+  static {};
+    descriptor: ()V
+    Code:
+         0: invokedynamic #181,  0            // InvokeDynamic #3:encode:()Lnet/minecraft/network/codec/StreamMemberEncoder;
+         5: invokedynamic #184,  0            // InvokeDynamic #4:decode:()Lnet/minecraft/network/codec/StreamDecoder;
+        10: invokestatic  #185                // InterfaceMethod net/minecraft/network/protocol/Packet.codec:(Lnet/minecraft/network/codec/StreamMemberEncoder;Lnet/minecraft/network/codec/StreamDecoder;)Lnet/minecraft/network/codec/StreamCodec;
+        13: putstatic     #191                // Field STREAM_CODEC:Lnet/minecraft/network/codec/StreamCodec;
+        16: return
+}
+===== net.minecraft.network.protocol.game.ClientboundHurtAnimationPacket =====
+Compiled from "ClientboundHurtAnimationPacket.java"
+public final class net.minecraft.network.protocol.game.ClientboundHurtAnimationPacket extends java.lang.Record implements net.minecraft.network.protocol.Packet<net.minecraft.network.protocol.game.ClientGamePacketListener> {
+  private final int id;
+    descriptor: I
+
+  private final float yaw;
+    descriptor: F
+
+  public static final net.minecraft.network.codec.StreamCodec<net.minecraft.network.FriendlyByteBuf, net.minecraft.network.protocol.game.ClientboundHurtAnimationPacket> STREAM_CODEC;
+    descriptor: Lnet/minecraft/network/codec/StreamCodec;
+
+  public net.minecraft.network.protocol.game.ClientboundHurtAnimationPacket(net.minecraft.world.entity.LivingEntity);
+    descriptor: (Lnet/minecraft/world/entity/LivingEntity;)V
+    Code:
+         0: aload_0
+         1: aload_1
+         2: invokevirtual #17                 // Method net/minecraft/world/entity/LivingEntity.getId:()I
+         5: aload_1
+         6: invokevirtual #23                 // Method net/minecraft/world/entity/LivingEntity.getHurtDir:()F
+         9: invokespecial #27                 // Method "<init>":(IF)V
+        12: return
+
+  private net.minecraft.network.protocol.game.ClientboundHurtAnimationPacket(net.minecraft.network.FriendlyByteBuf);
+    descriptor: (Lnet/minecraft/network/FriendlyByteBuf;)V
+    Code:
+         0: aload_0
+         1: aload_1
+         2: invokevirtual #30                 // Method net/minecraft/network/FriendlyByteBuf.readVarInt:()I
+         5: aload_1
+         6: invokevirtual #35                 // Method net/minecraft/network/FriendlyByteBuf.readFloat:()F
+         9: invokespecial #27                 // Method "<init>":(IF)V
+        12: return
+
+  public net.minecraft.network.protocol.game.ClientboundHurtAnimationPacket(int, float);
+    descriptor: (IF)V
+    Code:
+         0: aload_0
+         1: invokespecial #1                  // Method java/lang/Record."<init>":()V
+         4: aload_0
+         5: iload_1
+         6: putfield      #7                  // Field id:I
+         9: aload_0
+        10: fload_2
+        11: putfield      #13                 // Field yaw:F
+        14: return
+
+  private void write(net.minecraft.network.FriendlyByteBuf);
+    descriptor: (Lnet/minecraft/network/FriendlyByteBuf;)V
+    Code:
+         0: aload_1
+         1: aload_0
+         2: getfield      #7                  // Field id:I
+         5: invokevirtual #38                 // Method net/minecraft/network/FriendlyByteBuf.writeVarInt:(I)Lnet/minecraft/network/FriendlyByteBuf;
+         8: pop
+         9: aload_1
+        10: aload_0
+        11: getfield      #13                 // Field yaw:F
+        14: invokevirtual #42                 // Method net/minecraft/network/FriendlyByteBuf.writeFloat:(F)Lnet/minecraft/network/FriendlyByteBuf;
+        17: pop
+        18: return
+
+  public net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundHurtAnimationPacket> type();
+    descriptor: ()Lnet/minecraft/network/protocol/PacketType;
+    Code:
+         0: getstatic     #46                 // Field net/minecraft/network/protocol/game/GamePacketTypes.CLIENTBOUND_HURT_ANIMATION:Lnet/minecraft/network/protocol/PacketType;
+         3: areturn
+
+  public void handle(net.minecraft.network.protocol.game.ClientGamePacketListener);
+    descriptor: (Lnet/minecraft/network/protocol/game/ClientGamePacketListener;)V
+    Code:
+         0: aload_1
+         1: aload_0
+         2: invokeinterface #52,  2           // InterfaceMethod net/minecraft/network/protocol/game/ClientGamePacketListener.handleHurtAnimation:(Lnet/minecraft/network/protocol/game/ClientboundHurtAnimationPacket;)V
+         7: return
+
+  public final java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+    Code:
+         0: aload_0
+         1: invokedynamic #62,  0             // InvokeDynamic #0:toString:(Lnet/minecraft/network/protocol/game/ClientboundHurtAnimationPacket;)Ljava/lang/String;
+         6: areturn
+
+  public final int hashCode();
+    descriptor: ()I
+    Code:
+         0: aload_0
+         1: invokedynamic #66,  0             // InvokeDynamic #0:hashCode:(Lnet/minecraft/network/protocol/game/ClientboundHurtAnimationPacket;)I
+         6: ireturn
+
+  public final boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+    Code:
+         0: aload_0
+         1: aload_1
+         2: invokedynamic #70,  0             // InvokeDynamic #0:equals:(Lnet/minecraft/network/protocol/game/ClientboundHurtAnimationPacket;Ljava/lang/Object;)Z
+         7: ireturn
+
+  public int id();
+    descriptor: ()I
+    Code:
+         0: aload_0
+         1: getfield      #7                  // Field id:I
+         4: ireturn
+
+  public float yaw();
+    descriptor: ()F
+    Code:
+         0: aload_0
+         1: getfield      #13                 // Field yaw:F
+         4: freturn
+
+  public void handle(net.minecraft.network.PacketListener);
+    descriptor: (Lnet/minecraft/network/PacketListener;)V
+    Code:
+         0: aload_0
+         1: aload_1
+         2: checkcast     #53                 // class net/minecraft/network/protocol/game/ClientGamePacketListener
+         5: invokevirtual #58                 // Method handle:(Lnet/minecraft/network/protocol/game/ClientGamePacketListener;)V
+         8: return
+
+  static {};
+    descriptor: ()V
+    Code:
+         0: invokedynamic #74,  0             // InvokeDynamic #1:encode:()Lnet/minecraft/network/codec/StreamMemberEncoder;
+         5: invokedynamic #78,  0             // InvokeDynamic #2:decode:()Lnet/minecraft/network/codec/StreamDecoder;
+        10: invokestatic  #82                 // InterfaceMethod net/minecraft/network/protocol/Packet.codec:(Lnet/minecraft/network/codec/StreamMemberEncoder;Lnet/minecraft/network/codec/StreamDecoder;)Lnet/minecraft/network/codec/StreamCodec;
+        13: putstatic     #88                 // Field STREAM_CODEC:Lnet/minecraft/network/codec/StreamCodec;
+        16: return
+}
+===== net.minecraft.network.protocol.game.ClientboundPlayerCombatKillPacket =====
+Compiled from "ClientboundPlayerCombatKillPacket.java"
+public final class net.minecraft.network.protocol.game.ClientboundPlayerCombatKillPacket extends java.lang.Record implements net.minecraft.network.protocol.Packet<net.minecraft.network.protocol.game.ClientGamePacketListener> {
+  private final int playerId;
+    descriptor: I
+
+  private final net.minecraft.network.chat.Component message;
+    descriptor: Lnet/minecraft/network/chat/Component;
+
+  public static final net.minecraft.network.codec.StreamCodec<net.minecraft.network.RegistryFriendlyByteBuf, net.minecraft.network.protocol.game.ClientboundPlayerCombatKillPacket> STREAM_CODEC;
+    descriptor: Lnet/minecraft/network/codec/StreamCodec;
+
+  public net.minecraft.network.protocol.game.ClientboundPlayerCombatKillPacket(int, net.minecraft.network.chat.Component);
+    descriptor: (ILnet/minecraft/network/chat/Component;)V
+    Code:
+         0: aload_0
+         1: invokespecial #1                  // Method java/lang/Record."<init>":()V
+         4: aload_0
+         5: iload_1
+         6: putfield      #7                  // Field playerId:I
+         9: aload_0
+        10: aload_2
+        11: putfield      #13                 // Field message:Lnet/minecraft/network/chat/Component;
+        14: return
+
+  public net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundPlayerCombatKillPacket> type();
+    descriptor: ()Lnet/minecraft/network/protocol/PacketType;
+    Code:
+         0: getstatic     #17                 // Field net/minecraft/network/protocol/game/GamePacketTypes.CLIENTBOUND_PLAYER_COMBAT_KILL:Lnet/minecraft/network/protocol/PacketType;
+         3: areturn
+
+  public void handle(net.minecraft.network.protocol.game.ClientGamePacketListener);
+    descriptor: (Lnet/minecraft/network/protocol/game/ClientGamePacketListener;)V
+    Code:
+         0: aload_1
+         1: aload_0
+         2: invokeinterface #23,  2           // InterfaceMethod net/minecraft/network/protocol/game/ClientGamePacketListener.handlePlayerCombatKill:(Lnet/minecraft/network/protocol/game/ClientboundPlayerCombatKillPacket;)V
+         7: return
+
+  public boolean isSkippable();
+    descriptor: ()Z
+    Code:
+         0: iconst_1
+         1: ireturn
+
+  public final java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+    Code:
+         0: aload_0
+         1: invokedynamic #33,  0             // InvokeDynamic #0:toString:(Lnet/minecraft/network/protocol/game/ClientboundPlayerCombatKillPacket;)Ljava/lang/String;
+         6: areturn
+
+  public final int hashCode();
+    descriptor: ()I
+    Code:
+         0: aload_0
+         1: invokedynamic #37,  0             // InvokeDynamic #0:hashCode:(Lnet/minecraft/network/protocol/game/ClientboundPlayerCombatKillPacket;)I
+         6: ireturn
+
+  public final boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+    Code:
+         0: aload_0
+         1: aload_1
+         2: invokedynamic #41,  0             // InvokeDynamic #0:equals:(Lnet/minecraft/network/protocol/game/ClientboundPlayerCombatKillPacket;Ljava/lang/Object;)Z
+         7: ireturn
+
+  public int playerId();
+    descriptor: ()I
+    Code:
+         0: aload_0
+         1: getfield      #7                  // Field playerId:I
+         4: ireturn
+
+  public net.minecraft.network.chat.Component message();
+    descriptor: ()Lnet/minecraft/network/chat/Component;
+    Code:
+         0: aload_0
+         1: getfield      #13                 // Field message:Lnet/minecraft/network/chat/Component;
+         4: areturn
+
+  public void handle(net.minecraft.network.PacketListener);
+    descriptor: (Lnet/minecraft/network/PacketListener;)V
+    Code:
+         0: aload_0
+         1: aload_1
+         2: checkcast     #24                 // class net/minecraft/network/protocol/game/ClientGamePacketListener
+         5: invokevirtual #29                 // Method handle:(Lnet/minecraft/network/protocol/game/ClientGamePacketListener;)V
+         8: return
+
+  static {};
+    descriptor: ()V
+    Code:
+         0: getstatic     #45                 // Field net/minecraft/network/codec/ByteBufCodecs.VAR_INT:Lnet/minecraft/network/codec/StreamCodec;
+         3: invokedynamic #51,  0             // InvokeDynamic #1:apply:()Ljava/util/function/Function;
+         8: getstatic     #55                 // Field net/minecraft/network/chat/ComponentSerialization.TRUSTED_STREAM_CODEC:Lnet/minecraft/network/codec/StreamCodec;
+        11: invokedynamic #60,  0             // InvokeDynamic #2:apply:()Ljava/util/function/Function;
+        16: invokedynamic #61,  0             // InvokeDynamic #3:apply:()Ljava/util/function/BiFunction;
+        21: invokestatic  #64                 // InterfaceMethod net/minecraft/network/codec/StreamCodec.composite:(Lnet/minecraft/network/codec/StreamCodec;Ljava/util/function/Function;Lnet/minecraft/network/codec/StreamCodec;Ljava/util/function/Function;Ljava/util/function/BiFunction;)Lnet/minecraft/network/codec/StreamCodec;
+        24: putstatic     #70                 // Field STREAM_CODEC:Lnet/minecraft/network/codec/StreamCodec;
+        27: return
+}
+===== net.minecraft.network.protocol.game.ClientboundRespawnPacket =====
+Compiled from "ClientboundRespawnPacket.java"
+public final class net.minecraft.network.protocol.game.ClientboundRespawnPacket extends java.lang.Record implements net.minecraft.network.protocol.Packet<net.minecraft.network.protocol.game.ClientGamePacketListener> {
+  private final net.minecraft.network.protocol.game.CommonPlayerSpawnInfo commonPlayerSpawnInfo;
+    descriptor: Lnet/minecraft/network/protocol/game/CommonPlayerSpawnInfo;
+
+  private final byte dataToKeep;
+    descriptor: B
+
+  public static final net.minecraft.network.codec.StreamCodec<net.minecraft.network.RegistryFriendlyByteBuf, net.minecraft.network.protocol.game.ClientboundRespawnPacket> STREAM_CODEC;
+    descriptor: Lnet/minecraft/network/codec/StreamCodec;
+
+  public static final byte KEEP_ATTRIBUTE_MODIFIERS;
+    descriptor: B
+
+  public static final byte KEEP_ENTITY_DATA;
+    descriptor: B
+
+  public static final byte KEEP_ALL_DATA;
+    descriptor: B
+
+  private net.minecraft.network.protocol.game.ClientboundRespawnPacket(net.minecraft.network.RegistryFriendlyByteBuf);
+    descriptor: (Lnet/minecraft/network/RegistryFriendlyByteBuf;)V
+    Code:
+         0: aload_0
+         1: new           #17                 // class net/minecraft/network/protocol/game/CommonPlayerSpawnInfo
+         4: dup
+         5: aload_1
+         6: invokespecial #19                 // Method net/minecraft/network/protocol/game/CommonPlayerSpawnInfo."<init>":(Lnet/minecraft/network/RegistryFriendlyByteBuf;)V
+         9: aload_1
+        10: invokevirtual #22                 // Method net/minecraft/network/RegistryFriendlyByteBuf.readByte:()B
+        13: invokespecial #28                 // Method "<init>":(Lnet/minecraft/network/protocol/game/CommonPlayerSpawnInfo;B)V
+        16: return
+
+  public net.minecraft.network.protocol.game.ClientboundRespawnPacket(net.minecraft.network.protocol.game.CommonPlayerSpawnInfo, byte);
+    descriptor: (Lnet/minecraft/network/protocol/game/CommonPlayerSpawnInfo;B)V
+    Code:
+         0: aload_0
+         1: invokespecial #3                  // Method java/lang/Record."<init>":()V
+         4: aload_0
+         5: aload_1
+         6: putfield      #9                  // Field commonPlayerSpawnInfo:Lnet/minecraft/network/protocol/game/CommonPlayerSpawnInfo;
+         9: aload_0
+        10: iload_2
+        11: putfield      #13                 // Field dataToKeep:B
+        14: return
+
+  private void write(net.minecraft.network.RegistryFriendlyByteBuf);
+    descriptor: (Lnet/minecraft/network/RegistryFriendlyByteBuf;)V
+    Code:
+         0: aload_0
+         1: getfield      #9                  // Field commonPlayerSpawnInfo:Lnet/minecraft/network/protocol/game/CommonPlayerSpawnInfo;
+         4: aload_1
+         5: invokevirtual #31                 // Method net/minecraft/network/protocol/game/CommonPlayerSpawnInfo.write:(Lnet/minecraft/network/RegistryFriendlyByteBuf;)V
+         8: aload_1
+         9: aload_0
+        10: getfield      #13                 // Field dataToKeep:B
+        13: invokevirtual #34                 // Method net/minecraft/network/RegistryFriendlyByteBuf.writeByte:(I)Lnet/minecraft/network/FriendlyByteBuf;
+        16: pop
+        17: return
+
+  public net.minecraft.network.protocol.PacketType<net.minecraft.network.protocol.game.ClientboundRespawnPacket> type();
+    descriptor: ()Lnet/minecraft/network/protocol/PacketType;
+    Code:
+         0: getstatic     #38                 // Field net/minecraft/network/protocol/game/GamePacketTypes.CLIENTBOUND_RESPAWN:Lnet/minecraft/network/protocol/PacketType;
+         3: areturn
+
+  public void handle(net.minecraft.network.protocol.game.ClientGamePacketListener);
+    descriptor: (Lnet/minecraft/network/protocol/game/ClientGamePacketListener;)V
+    Code:
+         0: aload_1
+         1: aload_0
+         2: invokeinterface #44,  2           // InterfaceMethod net/minecraft/network/protocol/game/ClientGamePacketListener.handleRespawn:(Lnet/minecraft/network/protocol/game/ClientboundRespawnPacket;)V
+         7: return
+
+  public boolean shouldKeep(byte);
+    descriptor: (B)Z
+    Code:
+         0: aload_0
+         1: getfield      #13                 // Field dataToKeep:B
+         4: iload_1
+         5: iand
+         6: ifeq          13
+         9: iconst_1
+        10: goto          14
+        13: iconst_0
+        14: ireturn
+
+  public final java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+    Code:
+         0: aload_0
+         1: invokedynamic #54,  0             // InvokeDynamic #0:toString:(Lnet/minecraft/network/protocol/game/ClientboundRespawnPacket;)Ljava/lang/String;
+         6: areturn
+
+  public final int hashCode();
+    descriptor: ()I
+    Code:
+         0: aload_0
+         1: invokedynamic #58,  0             // InvokeDynamic #0:hashCode:(Lnet/minecraft/network/protocol/game/ClientboundRespawnPacket;)I
+         6: ireturn
+
+  public final boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+    Code:
+         0: aload_0
+         1: aload_1
+         2: invokedynamic #62,  0             // InvokeDynamic #0:equals:(Lnet/minecraft/network/protocol/game/ClientboundRespawnPacket;Ljava/lang/Object;)Z
+         7: ireturn
+
+  public net.minecraft.network.protocol.game.CommonPlayerSpawnInfo commonPlayerSpawnInfo();
+    descriptor: ()Lnet/minecraft/network/protocol/game/CommonPlayerSpawnInfo;
+    Code:
+         0: aload_0
+         1: getfield      #9                  // Field commonPlayerSpawnInfo:Lnet/minecraft/network/protocol/game/CommonPlayerSpawnInfo;
+         4: areturn
+
+  public byte dataToKeep();
+    descriptor: ()B
+    Code:
+         0: aload_0
+         1: getfield      #13                 // Field dataToKeep:B
+         4: ireturn
+
+  public void handle(net.minecraft.network.PacketListener);
+    descriptor: (Lnet/minecraft/network/PacketListener;)V
+    Code:
+         0: aload_0
+         1: aload_1
+         2: checkcast     #45                 // class net/minecraft/network/protocol/game/ClientGamePacketListener
+         5: invokevirtual #50                 // Method handle:(Lnet/minecraft/network/protocol/game/ClientGamePacketListener;)V
+         8: return
+
+  static {};
+    descriptor: ()V
+    Code:
+         0: invokedynamic #66,  0             // InvokeDynamic #1:encode:()Lnet/minecraft/network/codec/StreamMemberEncoder;
+         5: invokedynamic #70,  0             // InvokeDynamic #2:decode:()Lnet/minecraft/network/codec/StreamDecoder;
+        10: invokestatic  #74                 // InterfaceMethod net/minecraft/network/protocol/Packet.codec:(Lnet/minecraft/network/codec/StreamMemberEncoder;Lnet/minecraft/network/codec/StreamDecoder;)Lnet/minecraft/network/codec/StreamCodec;
+        13: putstatic     #80                 // Field STREAM_CODEC:Lnet/minecraft/network/codec/StreamCodec;
+        16: return
+}
+===== net.minecraft.network.protocol.game.CommonPlayerSpawnInfo =====
+Compiled from "CommonPlayerSpawnInfo.java"
+public final class net.minecraft.network.protocol.game.CommonPlayerSpawnInfo extends java.lang.Record {
+  private final net.minecraft.core.Holder<net.minecraft.world.level.dimension.DimensionType> dimensionType;
+    descriptor: Lnet/minecraft/core/Holder;
+
+  private final net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> dimension;
+    descriptor: Lnet/minecraft/resources/ResourceKey;
+
+  private final long seed;
+    descriptor: J
+
+  private final net.minecraft.world.level.GameType gameType;
+    descriptor: Lnet/minecraft/world/level/GameType;
+
+  private final net.minecraft.world.level.GameType previousGameType;
+    descriptor: Lnet/minecraft/world/level/GameType;
+
+  private final boolean isDebug;
+    descriptor: Z
+
+  private final boolean isFlat;
+    descriptor: Z
+
+  private final java.util.Optional<net.minecraft.core.GlobalPos> lastDeathLocation;
+    descriptor: Ljava/util/Optional;
+
+  private final int portalCooldown;
+    descriptor: I
+
+  private final int seaLevel;
+    descriptor: I
+
+  public net.minecraft.network.protocol.game.CommonPlayerSpawnInfo(net.minecraft.network.RegistryFriendlyByteBuf);
+    descriptor: (Lnet/minecraft/network/RegistryFriendlyByteBuf;)V
+    Code:
+         0: aload_0
+         1: getstatic     #46                 // Field net/minecraft/world/level/dimension/DimensionType.STREAM_CODEC:Lnet/minecraft/network/codec/StreamCodec;
+         4: aload_1
+         5: invokeinterface #52,  2           // InterfaceMethod net/minecraft/network/codec/StreamCodec.decode:(Ljava/lang/Object;)Ljava/lang/Object;
+        10: checkcast     #58                 // class net/minecraft/core/Holder
+        13: aload_1
+        14: getstatic     #60                 // Field net/minecraft/core/registries/Registries.DIMENSION:Lnet/minecraft/resources/ResourceKey;
+        17: invokevirtual #65                 // Method net/minecraft/network/RegistryFriendlyByteBuf.readResourceKey:(Lnet/minecraft/resources/ResourceKey;)Lnet/minecraft/resources/ResourceKey;
+        20: aload_1
+        21: invokevirtual #71                 // Method net/minecraft/network/RegistryFriendlyByteBuf.readLong:()J
+        24: aload_1
+        25: invokevirtual #75                 // Method net/minecraft/network/RegistryFriendlyByteBuf.readByte:()B
+        28: invokestatic  #79                 // Method net/minecraft/world/level/GameType.byId:(I)Lnet/minecraft/world/level/GameType;
+        31: aload_1
+        32: invokevirtual #75                 // Method net/minecraft/network/RegistryFriendlyByteBuf.readByte:()B
+        35: invokestatic  #85                 // Method net/minecraft/world/level/GameType.byNullableId:(I)Lnet/minecraft/world/level/GameType;
+        38: aload_1
+        39: invokevirtual #88                 // Method net/minecraft/network/RegistryFriendlyByteBuf.readBoolean:()Z
+        42: aload_1
+        43: invokevirtual #88                 // Method net/minecraft/network/RegistryFriendlyByteBuf.readBoolean:()Z
+        46: aload_1
+        47: invokedynamic #92,  0             // InvokeDynamic #0:decode:()Lnet/minecraft/network/codec/StreamDecoder;
+        52: invokevirtual #95                 // Method net/minecraft/network/RegistryFriendlyByteBuf.readOptional:(Lnet/minecraft/network/codec/StreamDecoder;)Ljava/util/Optional;
+        55: aload_1
+        56: invokevirtual #99                 // Method net/minecraft/network/RegistryFriendlyByteBuf.readVarInt:()I
+        59: aload_1
+        60: invokevirtual #99                 // Method net/minecraft/network/RegistryFriendlyByteBuf.readVarInt:()I
+        63: invokespecial #103                // Method "<init>":(Lnet/minecraft/core/Holder;Lnet/minecraft/resources/ResourceKey;JLnet/minecraft/world/level/GameType;Lnet/minecraft/world/level/GameType;ZZLjava/util/Optional;II)V
+        66: return
+
+  public net.minecraft.network.protocol.game.CommonPlayerSpawnInfo(net.minecraft.core.Holder<net.minecraft.world.level.dimension.DimensionType>, net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level>, long, net.minecraft.world.level.GameType, net.minecraft.world.level.GameType, boolean, boolean, java.util.Optional<net.minecraft.core.GlobalPos>, int, int);
+    descriptor: (Lnet/minecraft/core/Holder;Lnet/minecraft/resources/ResourceKey;JLnet/minecraft/world/level/GameType;Lnet/minecraft/world/level/GameType;ZZLjava/util/Optional;II)V
+    Code:
+         0: aload_0
+         1: invokespecial #1                  // Method java/lang/Record."<init>":()V
+         4: aload_0
+         5: aload_1
+         6: putfield      #7                  // Field dimensionType:Lnet/minecraft/core/Holder;
+         9: aload_0
+        10: aload_2
+        11: putfield      #13                 // Field dimension:Lnet/minecraft/resources/ResourceKey;
+        14: aload_0
+        15: lload_3
+        16: putfield      #17                 // Field seed:J
+        19: aload_0
+        20: aload         5
+        22: putfield      #21                 // Field gameType:Lnet/minecraft/world/level/GameType;
+        25: aload_0
+        26: aload         6
+        28: putfield      #25                 // Field previousGameType:Lnet/minecraft/world/level/GameType;
+        31: aload_0
+        32: iload         7
+        34: putfield      #28                 // Field isDebug:Z
+        37: aload_0
+        38: iload         8
+        40: putfield      #32                 // Field isFlat:Z
+        43: aload_0
+        44: aload         9
+        46: putfield      #35                 // Field lastDeathLocation:Ljava/util/Optional;
+        49: aload_0
+        50: iload         10
+        52: putfield      #39                 // Field portalCooldown:I
+        55: aload_0
+        56: iload         11
+        58: putfield      #43                 // Field seaLevel:I
+        61: return
+
+  public void write(net.minecraft.network.RegistryFriendlyByteBuf);
+    descriptor: (Lnet/minecraft/network/RegistryFriendlyByteBuf;)V
+    Code:
+         0: getstatic     #46                 // Field net/minecraft/world/level/dimension/DimensionType.STREAM_CODEC:Lnet/minecraft/network/codec/StreamCodec;
+         3: aload_1
+         4: aload_0
+         5: getfield      #7                  // Field dimensionType:Lnet/minecraft/core/Holder;
+         8: invokeinterface #106,  3          // InterfaceMethod net/minecraft/network/codec/StreamCodec.encode:(Ljava/lang/Object;Ljava/lang/Object;)V
+        13: aload_1
+        14: aload_0
+        15: getfield      #13                 // Field dimension:Lnet/minecraft/resources/ResourceKey;
+        18: invokevirtual #110                // Method net/minecraft/network/RegistryFriendlyByteBuf.writeResourceKey:(Lnet/minecraft/resources/ResourceKey;)V
+        21: aload_1
+        22: aload_0
+        23: getfield      #17                 // Field seed:J
+        26: invokevirtual #114                // Method net/minecraft/network/RegistryFriendlyByteBuf.writeLong:(J)Lnet/minecraft/network/FriendlyByteBuf;
+        29: pop
+        30: aload_1
+        31: aload_0
+        32: getfield      #21                 // Field gameType:Lnet/minecraft/world/level/GameType;
+        35: invokevirtual #118                // Method net/minecraft/world/level/GameType.getId:()I
+        38: invokevirtual #121                // Method net/minecraft/network/RegistryFriendlyByteBuf.writeByte:(I)Lnet/minecraft/network/FriendlyByteBuf;
+        41: pop
+        42: aload_1
+        43: aload_0
+        44: getfield      #25                 // Field previousGameType:Lnet/minecraft/world/level/GameType;
+        47: invokestatic  #125                // Method net/minecraft/world/level/GameType.getNullableId:(Lnet/minecraft/world/level/GameType;)I
+        50: invokevirtual #121                // Method net/minecraft/network/RegistryFriendlyByteBuf.writeByte:(I)Lnet/minecraft/network/FriendlyByteBuf;
+        53: pop
+        54: aload_1
+        55: aload_0
+        56: getfield      #28                 // Field isDebug:Z
+        59: invokevirtual #129                // Method net/minecraft/network/RegistryFriendlyByteBuf.writeBoolean:(Z)Lnet/minecraft/network/FriendlyByteBuf;
+        62: pop
+        63: aload_1
+        64: aload_0
+        65: getfield      #32                 // Field isFlat:Z
+        68: invokevirtual #129                // Method net/minecraft/network/RegistryFriendlyByteBuf.writeBoolean:(Z)Lnet/minecraft/network/FriendlyByteBuf;
+        71: pop
+        72: aload_1
+        73: aload_0
+        74: getfield      #35                 // Field lastDeathLocation:Ljava/util/Optional;
+        77: invokedynamic #133,  0            // InvokeDynamic #1:encode:()Lnet/minecraft/network/codec/StreamEncoder;
+        82: invokevirtual #136                // Method net/minecraft/network/RegistryFriendlyByteBuf.writeOptional:(Ljava/util/Optional;Lnet/minecraft/network/codec/StreamEncoder;)V
+        85: aload_1
+        86: aload_0
+        87: getfield      #39                 // Field portalCooldown:I
+        90: invokevirtual #140                // Method net/minecraft/network/RegistryFriendlyByteBuf.writeVarInt:(I)Lnet/minecraft/network/FriendlyByteBuf;
+        93: pop
+        94: aload_1
+        95: aload_0
+        96: getfield      #43                 // Field seaLevel:I
+        99: invokevirtual #140                // Method net/minecraft/network/RegistryFriendlyByteBuf.writeVarInt:(I)Lnet/minecraft/network/FriendlyByteBuf;
+       102: pop
+       103: return
+
+  public final java.lang.String toString();
+    descriptor: ()Ljava/lang/String;
+    Code:
+         0: aload_0
+         1: invokedynamic #143,  0            // InvokeDynamic #2:toString:(Lnet/minecraft/network/protocol/game/CommonPlayerSpawnInfo;)Ljava/lang/String;
+         6: areturn
+
+  public final int hashCode();
+    descriptor: ()I
+    Code:
+         0: aload_0
+         1: invokedynamic #147,  0            // InvokeDynamic #2:hashCode:(Lnet/minecraft/network/protocol/game/CommonPlayerSpawnInfo;)I
+         6: ireturn
+
+  public final boolean equals(java.lang.Object);
+    descriptor: (Ljava/lang/Object;)Z
+    Code:
+         0: aload_0
+         1: aload_1
+         2: invokedynamic #151,  0            // InvokeDynamic #2:equals:(Lnet/minecraft/network/protocol/game/CommonPlayerSpawnInfo;Ljava/lang/Object;)Z
+         7: ireturn
+
+  public net.minecraft.core.Holder<net.minecraft.world.level.dimension.DimensionType> dimensionType();
+    descriptor: ()Lnet/minecraft/core/Holder;
+    Code:
+         0: aload_0
+         1: getfield      #7                  // Field dimensionType:Lnet/minecraft/core/Holder;
+         4: areturn
+
+  public net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> dimension();
+    descriptor: ()Lnet/minecraft/resources/ResourceKey;
+    Code:
+         0: aload_0
+         1: getfield      #13                 // Field dimension:Lnet/minecraft/resources/ResourceKey;
+         4: areturn
+
+  public long seed();
+    descriptor: ()J
+    Code:
+         0: aload_0
+         1: getfield      #17                 // Field seed:J
+         4: lreturn
+
+  public net.minecraft.world.level.GameType gameType();
+    descriptor: ()Lnet/minecraft/world/level/GameType;
+    Code:
+         0: aload_0
+         1: getfield      #21                 // Field gameType:Lnet/minecraft/world/level/GameType;
+         4: areturn
+
+  public net.minecraft.world.level.GameType previousGameType();
+    descriptor: ()Lnet/minecraft/world/level/GameType;
+    Code:
+         0: aload_0
+         1: getfield      #25                 // Field previousGameType:Lnet/minecraft/world/level/GameType;
+         4: areturn
+
+  public boolean isDebug();
+    descriptor: ()Z
+    Code:
+         0: aload_0
+         1: getfield      #28                 // Field isDebug:Z
+         4: ireturn
+
+  public boolean isFlat();
+    descriptor: ()Z
+    Code:
+         0: aload_0
+         1: getfield      #32                 // Field isFlat:Z
+         4: ireturn
+
+  public java.util.Optional<net.minecraft.core.GlobalPos> lastDeathLocation();
+    descriptor: ()Ljava/util/Optional;
+    Code:
+         0: aload_0
+         1: getfield      #35                 // Field lastDeathLocation:Ljava/util/Optional;
+         4: areturn
+
+  public int portalCooldown();
+    descriptor: ()I
+    Code:
+         0: aload_0
+         1: getfield      #39                 // Field portalCooldown:I
+         4: ireturn
+
+  public int seaLevel();
+    descriptor: ()I
+    Code:
+         0: aload_0
+         1: getfield      #43                 // Field seaLevel:I
+         4: ireturn
+}
