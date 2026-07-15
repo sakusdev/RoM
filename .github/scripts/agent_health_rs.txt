@@ -53,14 +53,18 @@ mod tests {
 
     #[test]
     fn validates_finite_non_negative_floats() {
-        let mut vitals = Vitals::default();
-        vitals.health = f32::NAN;
+        let vitals = Vitals {
+            health: f32::NAN,
+            ..Vitals::default()
+        };
         assert!(matches!(
             encode_set_health(vitals),
             Err(HealthEncodeError::InvalidHealth { .. })
         ));
-        let mut vitals = Vitals::default();
-        vitals.saturation = -1.0;
+        let vitals = Vitals {
+            saturation: -1.0,
+            ..Vitals::default()
+        };
         assert_eq!(
             encode_set_health(vitals),
             Err(HealthEncodeError::InvalidSaturation { value: -1.0 })
