@@ -1,0 +1,76 @@
+name: Inspect 26.1.2 mapping metadata
+
+on:
+  pull_request:
+    types: [reopened]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-inspect-version-mappings
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    if: >-
+      github.event.pull_request.number == 61 &&
+      github.event.pull_request.head.ref == 'agent/complete-server-features'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/complete-server-features
+          fetch-depth: 0
+      - name: Inspect official version metadata
+        shell: bash
+        run: |
+          set +e
+          manifest_status=0
+          curl -fsSL https://piston-meta.mojang.com/mc/game/version_manifest_v2.json \
+            -o /tmp/version-manifest.json || manifest_status=$?
+          version_url=""
+          version_status=0
+          mappings_url=""
+          if [ "$manifest_status" -eq 0 ]; then
+            version_url=$(jq -r '.versions[] | select(.id == "26.1.2") | .url' /tmp/version-manifest.json)
+            if [ -n "$version_url" ] && [ "$version_url" != null ]; then
+              curl -fsSL "$version_url" -o /tmp/version.json || version_status=$?
+              if [ "$version_status" -eq 0 ]; then
+                mappings_url=$(jq -r '.downloads.server_mappings.url // empty' /tmp/version.json)
+              fi
+            else
+              version_status=90
+            fi
+          fi
+          mappings_status=0
+          if [ -n "$mappings_url" ]; then
+            curl -fsSL "$mappings_url" -o /tmp/server-mappings.txt || mappings_status=$?
+          else
+            mappings_status=91
+          fi
+
+          {
+            echo "manifest_status=$manifest_status"
+            echo "version_url=$version_url"
+            echo "version_status=$version_status"
+            echo "mappings_url=$mappings_url"
+            echo "mappings_status=$mappings_status"
+            if [ -f /tmp/version.json ]; then
+              echo "version_download_keys:"
+              jq '.downloads | keys' /tmp/version.json
+              echo "version_downloads:"
+              jq '.downloads' /tmp/version.json
+            fi
+            if [ -f /tmp/server-mappings.txt ]; then
+              echo "mapping_size=$(wc -c < /tmp/server-mappings.txt)"
+              echo "combat_class_matches:"
+              grep -nE 'Clientbound(SetHealth|DamageEvent|HurtAnimation|PlayerCombatKill|Respawn)Packet|CommonPlayerSpawnInfo' /tmp/server-mappings.txt || true
+            fi
+          } > .github/version-mapping-diagnostic.txt
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/version-mapping-diagnostic.txt
+          git commit -m "Record official mapping metadata diagnostics"
+          git push origin HEAD:agent/complete-server-features
