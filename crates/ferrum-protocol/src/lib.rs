@@ -103,6 +103,7 @@ pub enum PacketKind {
     RotateHead,
     SetEntityData,
     SetEquipment,
+    SetHealth,
     PlayerInfoUpdate,
     PlayerInfoRemove,
 }
@@ -169,6 +170,7 @@ impl PacketKind {
         Self::RotateHead,
         Self::SetEntityData,
         Self::SetEquipment,
+        Self::SetHealth,
         Self::PlayerInfoUpdate,
         Self::PlayerInfoRemove,
     ];
@@ -282,6 +284,7 @@ impl PacketKind {
             | Self::RotateHead
             | Self::SetEntityData
             | Self::SetEquipment
+            | Self::SetHealth
             | Self::PlayerInfoUpdate
             | Self::PlayerInfoRemove => ProtocolPhase::Play,
         }

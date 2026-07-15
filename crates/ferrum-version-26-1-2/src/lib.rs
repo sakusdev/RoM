@@ -94,6 +94,7 @@ pub fn protocol_profile() -> Result<ProtocolProfile, ProfileError> {
         (PacketKind::DefaultSpawnPosition, 0x61),
         (PacketKind::PlayerPosition, 0x48),
         (PacketKind::SystemChat, 0x79),
+        (PacketKind::SetHealth, 0x68),
         (PacketKind::AcceptTeleportation, 0x00),
         (PacketKind::PlayDisconnect, 0x20),
         (PacketKind::KeepAliveRequest, 0x2c),
@@ -170,6 +171,7 @@ mod tests {
         assert_eq!(packets.require(PacketKind::RegistryData).unwrap(), 0x07);
         assert_eq!(packets.require(PacketKind::FeatureFlags).unwrap(), 0x0c);
         assert_eq!(packets.require(PacketKind::UpdateTags).unwrap(), 0x0d);
+        assert_eq!(packets.require(PacketKind::SetHealth).unwrap(), 0x68);
         assert_eq!(packets.require(PacketKind::ChunkBatchStart).unwrap(), 0x0c);
         assert_eq!(
             packets.require(PacketKind::ChunkBatchFinished).unwrap(),

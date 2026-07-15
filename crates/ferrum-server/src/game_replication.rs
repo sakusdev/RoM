@@ -9,14 +9,14 @@ use std::{
 use anyhow::{Context, Result, bail};
 use ferrum_game::{
     EntityId, EquipmentSlot, GameEvent, GameMode, GameState, PLAYER_INVENTORY_SLOTS, PlayerState,
-    PlayerUuid, Transform, Velocity,
+    PlayerUuid, Transform, Velocity, Vitals,
 };
 use ferrum_play::{
     DataComponentProtocolRegistry, EncodedEntityMovement, EntityMovementKind,
     EntityProtocolRegistry, EquipmentEntry, ItemProtocolRegistry, PlayerInfoEntry,
     encode_add_entity, encode_empty_entity_data, encode_entity_movement, encode_player_info_remove,
     encode_player_info_update, encode_remove_entities, encode_rotate_head, encode_set_equipment,
-    encode_teleport_entity,
+    encode_set_health, encode_teleport_entity,
 };
 use ferrum_protocol::PacketKind;
 
@@ -415,6 +415,14 @@ fn dispatch_event(
     exit.events = exit.events.saturating_add(1);
     match event {
         GameEvent::PlayerConnected { uuid, name, .. } => {
+            if let Some(vitals) = runtime
+                .with_state(|state| state.player(uuid).map(|player| player.vitals))
+                .context("cannot read connected player vitals")?
+            {
+                if let Some(connection) = connections.get_mut(&uuid) {
+                    queue_set_health(connection, vitals, exit)?;
+                }
+            }
             if entity_replication_enabled(&config.entity_protocol_ids) {
                 let snapshot = player_snapshot(runtime, uuid)?.with_context(|| {
                     format!("connected player {uuid:?} is missing from authoritative state")
@@ -637,6 +645,12 @@ fn dispatch_event(
                 true,
                 exit,
             );
+        }
+        GameEvent::PlayerDamaged { .. } => {}
+        GameEvent::PlayerVitalsChanged { uuid, vitals } => {
+            if let Some(connection) = connections.get_mut(&uuid) {
+                queue_set_health(connection, vitals, exit)?;
+            }
         }
         GameEvent::PlayerKilled { uuid } => {
             target_chat(connections, uuid, "You died".to_owned(), false, exit)
@@ -985,6 +999,21 @@ fn queue_player_absolute_teleport(
     Ok(())
 }
 
+fn queue_set_health(
+    connection: &mut ReplicationConnection,
+    vitals: Vitals,
+    exit: &mut GameReplicationExit,
+) -> Result<()> {
+    connection.queue(
+        PlayOutput::ProtocolPacket {
+            kind: PacketKind::SetHealth,
+            payload: encode_set_health(vitals).context("cannot encode player health")?,
+        },
+        exit,
+    );
+    Ok(())
+}
+
 fn target_chat(
     connections: &mut BTreeMap<PlayerUuid, ReplicationConnection>,
     uuid: PlayerUuid,
@@ -1060,7 +1089,7 @@ mod tests {
         workers.ingest_available(inputs, 64).unwrap();
     }
 
-    fn recv_output(
+    fn recv_raw_output(
         writer: &crate::play_connection::PlayWriterEndpoint,
         workers: &mut ferrum_runtime::WorkerRuntime<
             crate::authoritative_runtime::PlayInput,
@@ -1084,6 +1113,29 @@ mod tests {
                     panic!("replication runtime disconnected")
                 }
             }
+        }
+    }
+
+    fn recv_output(
+        writer: &crate::play_connection::PlayWriterEndpoint,
+        workers: &mut ferrum_runtime::WorkerRuntime<
+            crate::authoritative_runtime::PlayInput,
+            PlayOutput,
+        >,
+        inputs: &mut BoundedInputQueue<crate::authoritative_runtime::PlayInput>,
+    ) -> PlayOutput {
+        loop {
+            let output = recv_raw_output(writer, workers, inputs);
+            if matches!(
+                output,
+                PlayOutput::ProtocolPacket {
+                    kind: PacketKind::SetHealth,
+                    ..
+                }
+            ) {
+                continue;
+            }
+            return output;
         }
     }
 
@@ -1631,6 +1683,81 @@ mod tests {
         assert_eq!(equipment[entity_bytes] & 0x7f, 0);
         assert_eq!(read_varint(&equipment[entity_bytes + 1..]).0, 1);
         assert!(steve_writer.try_recv_output().is_err());
+        service.shutdown().unwrap();
+    }
+
+    #[test]
+    fn synchronizes_initial_and_changed_health_only_to_the_subject() {
+        let game = SharedGameRuntime::vanilla_overworld();
+        let service = spawn_game_replication(&game, GameReplicationConfig::default()).unwrap();
+        let steve = PlayerUuid::new(401);
+        let alex = PlayerUuid::new(402);
+        let (connector, mut workers) = worker_channel(NonZeroUsize::new(128).unwrap());
+        let (steve_reader, steve_writer) = register_play_connection(
+            &connector,
+            ConnectionId::new(401),
+            NonZeroUsize::new(32).unwrap(),
+        )
+        .unwrap();
+        let (alex_reader, alex_writer) = register_play_connection(
+            &connector,
+            ConnectionId::new(402),
+            NonZeroUsize::new(32).unwrap(),
+        )
+        .unwrap();
+        let mut inputs = BoundedInputQueue::try_new(128).unwrap();
+        ingest(&mut workers, &mut inputs);
+
+        service.control().register(steve, steve_reader).unwrap();
+        game.connect_player(steve, "Steve", spawn()).unwrap();
+        assert_eq!(
+            recv_raw_output(&steve_writer, &mut workers, &mut inputs),
+            PlayOutput::ProtocolPacket {
+                kind: PacketKind::SetHealth,
+                payload: vec![0x41, 0xa0, 0, 0, 0x14, 0x40, 0xa0, 0, 0],
+            }
+        );
+
+        service.control().register(alex, alex_reader).unwrap();
+        game.connect_player(alex, "Alex", spawn()).unwrap();
+        assert!(matches!(
+            recv_raw_output(&alex_writer, &mut workers, &mut inputs),
+            PlayOutput::ProtocolPacket {
+                kind: PacketKind::SetHealth,
+                ..
+            }
+        ));
+        assert!(matches!(
+            recv_output(&steve_writer, &mut workers, &mut inputs),
+            PlayOutput::SystemChat { message, .. } if message == "Alex joined the game"
+        ));
+
+        game.damage_player(steve, 4.0).unwrap();
+        match recv_raw_output(&steve_writer, &mut workers, &mut inputs) {
+            PlayOutput::ProtocolPacket {
+                kind: PacketKind::SetHealth,
+                payload,
+            } => {
+                assert_eq!(f32::from_be_bytes(payload[0..4].try_into().unwrap()), 16.0);
+                assert_eq!(payload[4], 20);
+                assert_eq!(f32::from_be_bytes(payload[5..9].try_into().unwrap()), 5.0);
+            }
+            output => panic!("expected health packet, got {output:?}"),
+        }
+        assert!(alex_writer.try_recv_output().is_err());
+
+        game.damage_player(steve, 100.0).unwrap();
+        assert!(matches!(
+            recv_raw_output(&steve_writer, &mut workers, &mut inputs),
+            PlayOutput::ProtocolPacket {
+                kind: PacketKind::SetHealth,
+                payload,
+            } if f32::from_be_bytes(payload[0..4].try_into().unwrap()) == 0.0
+        ));
+        assert!(matches!(
+            recv_output(&steve_writer, &mut workers, &mut inputs),
+            PlayOutput::SystemChat { message, overlay: false } if message == "You died"
+        ));
         service.shutdown().unwrap();
     }
 }

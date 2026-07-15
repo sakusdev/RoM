@@ -5,6 +5,7 @@
 mod block_interaction;
 mod chunk_stream;
 mod entity;
+mod health;
 mod inventory;
 mod movement;
 
@@ -20,6 +21,7 @@ pub use entity::{
     encode_player_info_remove, encode_player_info_update, encode_remove_entities,
     encode_rotate_head, encode_teleport_entity,
 };
+pub use health::{HealthEncodeError, encode_set_health};
 pub use inventory::{
     DataComponentProtocolRegistry, EquipmentEntry, InventoryDecodeError, InventoryEncodeError,
     ItemProtocolRegistry, decode_close_container, decode_container_click,

@@ -6,7 +6,7 @@ use thiserror::Error;
 use crate::{
     ContainerClick, ContainerError, ContainerMutation, ContainerSnapshot, Difficulty, EntityError,
     EntityId, EntityStore, EntityType, EntityUuid, GameMode, InventoryError, ItemStack,
-    PlayerError, PlayerState, PlayerUuid, Transform,
+    PlayerError, PlayerState, PlayerUuid, Transform, Vitals,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -88,6 +88,17 @@ pub enum GameEvent {
         uuid: PlayerUuid,
         previous: u8,
         current: u8,
+    },
+    PlayerDamaged {
+        uuid: PlayerUuid,
+        entity_id: EntityId,
+        amount: f32,
+        previous: Vitals,
+        current: Vitals,
+    },
+    PlayerVitalsChanged {
+        uuid: PlayerUuid,
+        vitals: Vitals,
     },
     PlayerKilled {
         uuid: PlayerUuid,
@@ -471,7 +482,95 @@ impl GameState {
         }])
     }
 
+    pub fn damage_player(
+        &mut self,
+        uuid: PlayerUuid,
+        amount: f32,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
+        let entity_id = self.connected_entity_id(uuid)?;
+        let (previous, current) = {
+            let player = self
+                .players
+                .get_mut(&uuid)
+                .ok_or(GameStateError::UnknownPlayer { uuid })?;
+            if player.abilities.invulnerable || player.vitals.is_dead() {
+                return Ok(Vec::new());
+            }
+            let previous = player.vitals;
+            player.vitals.damage(amount)?;
+            (previous, player.vitals)
+        };
+        if previous == current {
+            return Ok(Vec::new());
+        }
+        let mut events = vec![
+            GameEvent::PlayerDamaged {
+                uuid,
+                entity_id,
+                amount,
+                previous,
+                current,
+            },
+            GameEvent::PlayerVitalsChanged {
+                uuid,
+                vitals: current,
+            },
+        ];
+        if !previous.is_dead() && current.is_dead() {
+            events.extend(self.finish_player_death(uuid)?);
+        }
+        Ok(events)
+    }
+
+    pub fn heal_player(
+        &mut self,
+        uuid: PlayerUuid,
+        amount: f32,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
+        self.connected_entity_id(uuid)?;
+        let (previous, current) = {
+            let player = self
+                .players
+                .get_mut(&uuid)
+                .ok_or(GameStateError::UnknownPlayer { uuid })?;
+            if player.vitals.is_dead() {
+                return Err(GameStateError::PlayerDead { uuid });
+            }
+            let previous = player.vitals;
+            player.vitals.heal(amount)?;
+            (previous, player.vitals)
+        };
+        if previous == current {
+            return Ok(Vec::new());
+        }
+        Ok(vec![GameEvent::PlayerVitalsChanged {
+            uuid,
+            vitals: current,
+        }])
+    }
+
     pub fn kill_player(&mut self, uuid: PlayerUuid) -> Result<Vec<GameEvent>, GameStateError> {
+        self.connected_entity_id(uuid)?;
+        let current = {
+            let player = self
+                .players
+                .get_mut(&uuid)
+                .ok_or(GameStateError::UnknownPlayer { uuid })?;
+            if player.vitals.is_dead() {
+                return Ok(Vec::new());
+            }
+            player.vitals.health = 0.0;
+            player.vitals
+        };
+        let mut events = vec![GameEvent::PlayerVitalsChanged {
+            uuid,
+            vitals: current,
+        }];
+        events.extend(self.finish_player_death(uuid)?);
+        Ok(events)
+    }
+
+    fn finish_player_death(&mut self, uuid: PlayerUuid) -> Result<Vec<GameEvent>, GameStateError> {
         let keep_inventory = matches!(
             self.game_rules.get("keepInventory"),
             Some(GameRuleValue::Boolean(true))
@@ -480,7 +579,6 @@ impl GameState {
             .players
             .get_mut(&uuid)
             .ok_or(GameStateError::UnknownPlayer { uuid })?;
-        player.vitals.health = 0.0;
         let mut events = vec![GameEvent::PlayerKilled { uuid }];
         if !keep_inventory {
             let before = player.inventory.slots().to_vec();
@@ -662,6 +760,8 @@ pub enum GameStateError {
     PlayerNotConnected { uuid: PlayerUuid },
     #[error("connected player {uuid:?} has no entity")]
     PlayerMissingEntity { uuid: PlayerUuid },
+    #[error("player {uuid:?} is dead and must respawn before healing")]
+    PlayerDead { uuid: PlayerUuid },
 }
 
 #[cfg(test)]
@@ -777,5 +877,60 @@ mod tests {
         state.tick();
         assert_eq!(state.time().game_time, 1);
         assert_eq!(state.time().day_time, 0);
+    }
+
+    #[test]
+    fn damage_heal_and_death_publish_authoritative_vitals() {
+        let uuid = PlayerUuid::new(30);
+        let mut state = GameState::default();
+        state.connect_player(uuid, "Steve", spawn()).unwrap();
+        state.player_mut(uuid).unwrap().vitals.absorption = 2.0;
+
+        let damaged = state.damage_player(uuid, 5.0).unwrap();
+        assert!(matches!(
+            damaged.as_slice(),
+            [
+                GameEvent::PlayerDamaged {
+                    amount,
+                    previous,
+                    current,
+                    ..
+                },
+                GameEvent::PlayerVitalsChanged { vitals, .. }
+            ] if *amount == 5.0
+                && previous.health == 20.0
+                && previous.absorption == 2.0
+                && current.health == 17.0
+                && current.absorption == 0.0
+                && *vitals == *current
+        ));
+
+        let healed = state.heal_player(uuid, 2.0).unwrap();
+        assert!(matches!(
+            healed.as_slice(),
+            [GameEvent::PlayerVitalsChanged { vitals, .. }] if vitals.health == 19.0
+        ));
+
+        let fatal = state.damage_player(uuid, 100.0).unwrap();
+        assert!(matches!(fatal[0], GameEvent::PlayerDamaged { .. }));
+        assert!(matches!(
+            fatal[1],
+            GameEvent::PlayerVitalsChanged { vitals, .. } if vitals.health == 0.0
+        ));
+        assert!(matches!(fatal[2], GameEvent::PlayerKilled { .. }));
+        assert!(matches!(
+            state.heal_player(uuid, 1.0),
+            Err(GameStateError::PlayerDead { .. })
+        ));
+    }
+
+    #[test]
+    fn invulnerable_players_ignore_damage() {
+        let uuid = PlayerUuid::new(31);
+        let mut state = GameState::default();
+        state.connect_player(uuid, "Alex", spawn()).unwrap();
+        state.set_game_mode(uuid, GameMode::Creative).unwrap();
+        assert!(state.damage_player(uuid, 20.0).unwrap().is_empty());
+        assert_eq!(state.player(uuid).unwrap().vitals.health, 20.0);
     }
 }
