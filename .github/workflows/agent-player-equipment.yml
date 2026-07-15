@@ -32,8 +32,32 @@ jobs:
           : > "$log"
           status=0
           set +e
-          python3 .github/scripts/agent_player_equipment.py 2>&1 | tee -a "$log"
+
+          python3 - <<'PY' 2>&1 | tee -a "$log"
+          from pathlib import Path
+
+          path = Path('.github/scripts/agent_player_equipment.py')
+          text = path.read_text()
+          start = text.index('    text = text.replace(\n        """                    &config.entity_protocol_ids,')
+          end = text.index('    text = replace_once(\n        text,\n        """    connections:', start)
+          replacement = '''    run_start = text.index("fn run_replication(")
+              run_end = text.index("fn process_commands(", run_start)
+              run = text[run_start:run_end]
+              if run.count("&config.entity_protocol_ids,") != 2:
+                  raise SystemExit(
+                      f"dispatch config calls: expected 2, found {run.count('&config.entity_protocol_ids,')}"
+                  )
+              run = run.replace("&config.entity_protocol_ids,", "&config,")
+              text = text[:run_start] + run + text[run_end:]
+          '''
+          path.write_text(text[:start] + replacement + text[end:])
+          PY
           status=${PIPESTATUS[0]}
+
+          if [ "$status" -eq 0 ]; then
+            python3 .github/scripts/agent_player_equipment.py 2>&1 | tee -a "$log"
+            status=${PIPESTATUS[0]}
+          fi
           if [ "$status" -eq 0 ]; then
             cargo fmt --all 2>&1 | tee -a "$log"
             status=${PIPESTATUS[0]}
