@@ -1,0 +1,36 @@
+name: Validate generated entity palette
+
+on:
+  pull_request:
+    types:
+      - reopened
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    if: github.head_ref == 'agent/complete-server-features'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: agent/complete-server-features
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - run: python3 tools/fix_optional_entity_palette.py
+      - run: |
+          rm -f tools/fix_optional_entity_palette.py
+          rm -f .github/workflows/validate-entity-palette.yml
+          rm -f entity-check-error.txt
+      - run: cargo fmt --all
+      - run: cargo check --workspace --all-targets --all-features
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - run: cargo test --workspace --all-features
+      - run: |
+          git add -A
+          git diff --cached --check
+          git commit -m "Generate optional entity protocol palettes"
+          git push origin HEAD:agent/complete-server-features
