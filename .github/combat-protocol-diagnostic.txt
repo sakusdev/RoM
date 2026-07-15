@@ -1,0 +1,7 @@
+generator_status=1
+official_jar=/tmp/rom-inspect/cache/official/26.1.2/server.jar
+packet_report=missing
+generated_files:
+matching_packet_entries:
+Error: LinkageError occurred while loading main class net.minecraft.bundler.Main
+	java.lang.UnsupportedClassVersionError: net/minecraft/bundler/Main has been compiled by a more recent version of the Java Runtime (class file version 69.0), this version of the Java Runtime only recognizes class file versions up to 65.0
