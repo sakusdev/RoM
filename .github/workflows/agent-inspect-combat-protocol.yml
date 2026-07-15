@@ -5,7 +5,7 @@ on:
     types: [reopened]
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: agent-inspect-combat-protocol
@@ -21,34 +21,70 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: agent/complete-server-features
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
-      - name: Prepare official source and generate reports
+      - name: Inspect official generated packet report
         shell: bash
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           cargo run -p rom-bootstrap -- prepare \
             --instance /tmp/rom-inspect \
             --version 26.1.2 \
             --accept-minecraft-eula \
-            --json | tee /tmp/prepare.json
+            --json > /tmp/prepare.json
           jar=$(jq -r '.official_server_jar' /tmp/prepare.json)
-          echo "OFFICIAL_JAR=$jar"
-          unzip -l "$jar" | head -80
           mkdir -p /tmp/generated
           set +e
           java -DbundlerMainClass=net.minecraft.data.Main -jar "$jar" \
-            --reports --output /tmp/generated 2>&1 | tee /tmp/generator.log
-          status=${PIPESTATUS[0]}
+            --reports --output /tmp/generated > /tmp/generator.log 2>&1
+          status=$?
           set -e
-          echo "GENERATOR_STATUS=$status"
-          find /tmp/generated -maxdepth 4 -type f | sort | head -100
           report=$(find /tmp/generated -path '*/reports/packets.json' -print -quit)
-          if [ -n "$report" ]; then
-            echo "PACKET_REPORT=$report"
-            jq '.. | objects | to_entries[]? | select(.key | test("set_health|damage_event|hurt_animation|combat|respawn"))' "$report" || true
-            grep -nE 'set_health|damage_event|hurt_animation|combat|respawn' "$report" | head -100 || true
-          fi
+          {
+            echo "generator_status=$status"
+            echo "official_jar=$jar"
+            echo "packet_report=${report:-missing}"
+            echo "generated_files:"
+            find /tmp/generated -maxdepth 4 -type f | sort | sed -n '1,80p'
+            echo "matching_packet_entries:"
+            if [ -n "$report" ]; then
+              python3 - "$report" <<'PY'
+          import json
+          import sys
+
+          report = json.load(open(sys.argv[1], encoding="utf-8"))
+          needles = ("set_health", "damage_event", "hurt_animation", "combat", "respawn")
+
+          def walk(value, path="$"):
+              if isinstance(value, dict):
+                  rendered = json.dumps(value, sort_keys=True, separators=(",", ":"))
+                  if any(needle in rendered.lower() for needle in needles):
+                      direct = any(
+                          isinstance(item, str)
+                          and any(needle in item.lower() for needle in needles)
+                          for item in value.values()
+                      )
+                      if direct:
+                          print(path)
+                          print(json.dumps(value, indent=2, sort_keys=True))
+                  for key, child in value.items():
+                      walk(child, f"{path}.{key}")
+              elif isinstance(value, list):
+                  for index, child in enumerate(value):
+                      walk(child, f"{path}[{index}]")
+
+          walk(report)
+          PY
+            else
+              sed -n '1,160p' /tmp/generator.log
+            fi
+          } > .github/combat-protocol-diagnostic.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/combat-protocol-diagnostic.txt
+          git commit -m "Record combat protocol report diagnostics"
+          git push origin HEAD:agent/complete-server-features
