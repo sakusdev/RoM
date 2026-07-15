@@ -118,14 +118,14 @@ if new_status not in text:
     if old_status not in text:
         raise SystemExit("missing admin status route anchor")
     text = text.replace(old_status, new_status, 1)
-old_header_control = '''        if value
+old_header_control = r'''        if value
             .bytes()
             .any(|byte| matches!(byte, b'\r' | b'\n' | b'\0'))
         {
             bail!("HTTP header value contains invalid characters");
         }
 '''
-new_header_control = '''        if value
+new_header_control = r'''        if value
             .bytes()
             .any(|byte| byte.is_ascii_control() && byte != b'\t')
         {
@@ -246,7 +246,7 @@ extra_tests = '''
         let status = exchange(
             address,
             &format!(
-                "GET /api/status HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n"
+                "GET /api/status HTTP/1.1\\r\\nHost: {address}\\r\\nConnection: close\\r\\n\\r\\n"
             ),
         );
         assert!(status.starts_with("HTTP/1.1 200 OK"));
@@ -256,7 +256,7 @@ extra_tests = '''
         let command = exchange(
             address,
             &format!(
-                "POST /api/command HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                "POST /api/command HTTP/1.1\\r\\nHost: {address}\\r\\nContent-Type: application/json\\r\\nContent-Length: {}\\r\\nConnection: close\\r\\n\\r\\n{body}",
                 body.len()
             ),
         );
