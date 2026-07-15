@@ -38,7 +38,7 @@ jobs:
           crlf_escape = '\\r\\n'
           doubled_crlf_escape = '\\\\r\\\\n'
           count = text.count(crlf_escape)
-          if count != 8:
+          if count != 10:
               raise SystemExit(f'unexpected CRLF escape count: {count}')
           text = text.replace(crlf_escape, doubled_crlf_escape)
           path.write_text(text)
