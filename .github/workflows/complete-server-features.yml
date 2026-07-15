@@ -4,17 +4,24 @@ on:
   push:
     branches:
       - agent/complete-server-features
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
 
 permissions:
   contents: write
 
 jobs:
   implement:
+    if: github.event_name == 'push' || github.head_ref == 'agent/complete-server-features'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: agent/complete-server-features
 
       - name: Wait for implementation script
         id: ready
