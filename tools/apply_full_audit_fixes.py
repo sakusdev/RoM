@@ -438,7 +438,7 @@ new_manifest = '''fn read_manifest<R: Read + io::Seek>(archive: &mut ZipArchive<
 }
 
 fn read_bounded_bytes(
-    mut reader: impl Read,
+    reader: impl Read,
     expected_size: u64,
     limit: u64,
 ) -> io::Result<Option<Vec<u8>>> {
@@ -509,7 +509,7 @@ old_json = '''    let Ok(mut entry) = archive.by_name(name) else {
         .with_context(|| format!("cannot read {name}"))?;
     serde_json::from_str(&text)
 '''
-new_json = '''    let Ok(mut entry) = archive.by_name(name) else {
+new_json = '''    let Ok(entry) = archive.by_name(name) else {
         return Ok(None);
     };
     let expected_size = entry.size();
