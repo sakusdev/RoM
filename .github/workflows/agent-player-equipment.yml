@@ -59,22 +59,11 @@ jobs:
           register_replacement = '''    command_start = text.index("fn process_commands(")
               command_end = text.index("fn dispatch_event(", command_start)
               command = text[command_start:command_end]
-              old = """                                    snapshot,
-                                               entity_protocol_ids,
-                                               exit,
-              """
-              if command.count(old) != 1:
+              if command.count("entity_protocol_ids,") != 1:
                   raise SystemExit(
-                      f"register spawn config: expected one command anchor, found {command.count(old)}"
+                      f"register spawn config: expected one remaining argument, found {command.count('entity_protocol_ids,')}"
                   )
-              command = command.replace(
-                  old,
-                  """                                    snapshot,
-                                               config,
-                                               exit,
-              """,
-                  1,
-              )
+              command = command.replace("entity_protocol_ids,", "config,", 1)
               text = text[:command_start] + command + text[command_end:]
           '''
           path.write_text(text[:start] + register_replacement + text[end:])
