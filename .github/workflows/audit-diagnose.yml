@@ -1,0 +1,58 @@
+name: Audit diagnostics
+
+on:
+  pull_request:
+    types: [reopened]
+
+jobs:
+  diagnose:
+    if: github.head_ref == 'agent/admin-web-gui'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/admin-web-gui
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Apply audited fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/apply_full_audit_fixes.py
+          cargo fmt --all
+          git diff --binary > applied-audit.diff
+      - name: Run diagnostics
+        id: validate
+        shell: bash
+        run: |
+          set +e
+          cargo fmt --all --check > fmt.log 2>&1
+          echo $? > fmt.status
+          cargo check --workspace --all-targets --all-features > check.log 2>&1
+          echo $? > check.status
+          cargo clippy --workspace --all-targets --all-features -- -D warnings > clippy.log 2>&1
+          echo $? > clippy.status
+          cargo test --workspace --all-features > test.log 2>&1
+          echo $? > test.status
+          RUSTDOCFLAGS='-D warnings' cargo doc --workspace --all-features --no-deps > doc.log 2>&1
+          echo $? > doc.status
+          exit 0
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-diagnostics
+          path: |
+            applied-audit.diff
+            fmt.log
+            fmt.status
+            check.log
+            check.status
+            clippy.log
+            clippy.status
+            test.log
+            test.status
+            doc.log
+            doc.status
+          retention-days: 7
