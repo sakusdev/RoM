@@ -25,38 +25,80 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - name: Apply entity replication implementation
+      - name: Implement, validate, and commit
+        shell: bash
         run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/scripts/agent_entity_replication.py')
+          text = path.read_text()
+          old = '''old_dispatch = "dispatch_event(event, &mut connections, &mut exit);"
+          if text.count(old_dispatch) != 2:
+              raise SystemExit(f"expected two dispatch anchors, found {text.count(old_dispatch)}")
+          text = text.replace(
+              old_dispatch,
+              "dispatch_event(\n                    event,\n                    &runtime,\n                    &config.entity_protocol_ids,\n                    &mut connections,\n                    &mut exit,\n                )?;",
+          )
+          '''
+          new = '''replace_once(
+              "dispatch_event(event, &mut connections, &mut exit);",
+              "dispatch_event(event, &runtime, &config.entity_protocol_ids, &mut connections, &mut exit)?;",
+          )
+          replace_once(
+              "Ok(event) => dispatch_event(event, &mut connections, &mut exit),",
+              "Ok(event) => dispatch_event(event, &runtime, &config.entity_protocol_ids, &mut connections, &mut exit)?,",
+          )
+          '''
+          if text.count(old) != 1:
+              raise SystemExit(f'cannot patch dispatch transform: found {text.count(old)} anchors')
+          path.write_text(text.replace(old, new, 1))
+          PY
+
+          log=/tmp/entity-replication-validation.log
+          : > "$log"
+          status=0
           set +e
-          python3 .github/scripts/agent_entity_replication.py > /tmp/entity-transform.log 2>&1
-          status=$?
-          cat /tmp/entity-transform.log
-          if [ "$status" -ne 0 ]; then
-            git checkout -- crates/ferrum-server/src/game_replication.rs
-            cp /tmp/entity-transform.log .github/entity-replication-diagnostic.txt
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add .github/entity-replication-diagnostic.txt
-            git commit -m "Record entity replication transform failure"
-            git push origin HEAD:agent/complete-server-features
-            exit "$status"
+          python3 .github/scripts/agent_entity_replication.py 2>&1 | tee -a "$log"
+          status=${PIPESTATUS[0]}
+          if [ "$status" -eq 0 ]; then
+            cargo fmt --all 2>&1 | tee -a "$log"
+            status=${PIPESTATUS[0]}
           fi
-      - name: Remove temporary automation
-        run: rm .github/scripts/agent_entity_replication.py .github/workflows/agent-entity-replication.yml .github/entity-replication-diagnostic.txt 2>/dev/null || true
-      - name: Format
-        run: cargo fmt --all
-      - name: Validate formatting
-        run: cargo fmt --all --check
-      - name: Check workspace
-        run: cargo check --workspace --all-targets --all-features
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-      - name: Test workspace
-        run: cargo test --workspace --all-features
-      - name: Commit validated source
-        run: |
+          if [ "$status" -eq 0 ]; then
+            cargo fmt --all --check 2>&1 | tee -a "$log"
+            status=${PIPESTATUS[0]}
+          fi
+          if [ "$status" -eq 0 ]; then
+            cargo check --workspace --all-targets --all-features 2>&1 | tee -a "$log"
+            status=${PIPESTATUS[0]}
+          fi
+          if [ "$status" -eq 0 ]; then
+            cargo clippy --workspace --all-targets --all-features -- -D warnings 2>&1 | tee -a "$log"
+            status=${PIPESTATUS[0]}
+          fi
+          if [ "$status" -eq 0 ]; then
+            cargo test --workspace --all-features 2>&1 | tee -a "$log"
+            status=${PIPESTATUS[0]}
+          fi
+          set -e
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ "$status" -ne 0 ]; then
+            git checkout -- crates/ferrum-server/src/game_replication.rs
+            cp "$log" .github/entity-replication-diagnostic.txt
+            git add .github/entity-replication-diagnostic.txt
+            if ! git diff --cached --quiet; then
+              git commit -m "Record entity replication validation failure"
+              git push origin HEAD:agent/complete-server-features
+            fi
+            exit "$status"
+          fi
+
+          rm .github/scripts/agent_entity_replication.py
+          rm .github/workflows/agent-entity-replication.yml
+          rm -f .github/entity-replication-diagnostic.txt
           git add -A
           git diff --cached --quiet && exit 0
           git commit -m "Replicate live player entities"
