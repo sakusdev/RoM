@@ -66,22 +66,18 @@ jobs:
 
           path = Path('crates/ferrum-server/src/game_replication.rs')
           text = path.read_text()
-          block = '''            if let Some(vitals) = runtime
-                  .with_state(|state| state.player(uuid).map(|player| player.vitals))
-                  .context("cannot read connected player vitals")?
-              {
-                  if let Some(connection) = connections.get_mut(&uuid) {
-                      queue_set_health(connection, vitals, exit)?;
-                  }
-              }
-          '''
-          if text.count(block) != 1:
-              raise SystemExit(f'initial health block: expected one, found {text.count(block)}')
-          text = text.replace(block, '', 1)
+          connected_start = text.index('        GameEvent::PlayerConnected')
+          connected_end = text.index('        GameEvent::PlayerDisconnected', connected_start)
+          connected = text[connected_start:connected_end]
+          health_start = connected.index('            if let Some(vitals) = runtime')
+          health_end = connected.index('            broadcast_except(', health_start)
+          health = connected[health_start:health_end]
+          connected = connected[:health_start] + connected[health_end:]
           anchor = '        GameEvent::PlayerConnected { uuid, name, .. } => {\n'
-          if text.count(anchor) != 1:
-              raise SystemExit(f'player connected arm: expected one, found {text.count(anchor)}')
-          path.write_text(text.replace(anchor, anchor + block, 1))
+          if connected.count(anchor) != 1:
+              raise SystemExit(f'player connected arm: expected one, found {connected.count(anchor)}')
+          connected = connected.replace(anchor, anchor + health, 1)
+          path.write_text(text[:connected_start] + connected + text[connected_end:])
           PY
             status=${PIPESTATUS[0]}
           fi
