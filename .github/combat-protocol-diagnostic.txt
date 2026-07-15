@@ -19,3 +19,31 @@ generated_files:
 /tmp/generated/reports/packets.json
 /tmp/generated/reports/registries.json
 matching_packet_entries:
+$.play.clientbound.minecraft:damage_event
+{
+  "protocol_id": 25
+}
+$.play.clientbound.minecraft:hurt_animation
+{
+  "protocol_id": 42
+}
+$.play.clientbound.minecraft:player_combat_end
+{
+  "protocol_id": 66
+}
+$.play.clientbound.minecraft:player_combat_enter
+{
+  "protocol_id": 67
+}
+$.play.clientbound.minecraft:player_combat_kill
+{
+  "protocol_id": 68
+}
+$.play.clientbound.minecraft:respawn
+{
+  "protocol_id": 82
+}
+$.play.clientbound.minecraft:set_health
+{
+  "protocol_id": 104
+}
