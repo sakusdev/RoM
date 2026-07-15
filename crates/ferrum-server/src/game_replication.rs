@@ -8,13 +8,15 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use ferrum_game::{
-    EntityId, GameEvent, GameMode, GameState, PLAYER_INVENTORY_SLOTS, PlayerUuid, Transform,
-    Velocity,
+    EntityId, EquipmentSlot, GameEvent, GameMode, GameState, PLAYER_INVENTORY_SLOTS, PlayerState,
+    PlayerUuid, Transform, Velocity,
 };
 use ferrum_play::{
-    EncodedEntityMovement, EntityMovementKind, EntityProtocolRegistry, PlayerInfoEntry,
+    DataComponentProtocolRegistry, EncodedEntityMovement, EntityMovementKind,
+    EntityProtocolRegistry, EquipmentEntry, ItemProtocolRegistry, PlayerInfoEntry,
     encode_add_entity, encode_empty_entity_data, encode_entity_movement, encode_player_info_remove,
-    encode_player_info_update, encode_remove_entities, encode_rotate_head, encode_teleport_entity,
+    encode_player_info_update, encode_remove_entities, encode_rotate_head, encode_set_equipment,
+    encode_teleport_entity,
 };
 use ferrum_protocol::PacketKind;
 
@@ -36,6 +38,8 @@ pub struct GameReplicationConfig {
     pub pending_output_limit: NonZeroUsize,
     pub poll_interval: Duration,
     pub entity_protocol_ids: EntityProtocolRegistry,
+    pub item_protocol_ids: ItemProtocolRegistry,
+    pub data_component_protocol_ids: DataComponentProtocolRegistry,
 }
 
 impl Default for GameReplicationConfig {
@@ -47,6 +51,8 @@ impl Default for GameReplicationConfig {
                 .expect("pending output limit is non-zero"),
             poll_interval: DEFAULT_POLL_INTERVAL,
             entity_protocol_ids: EntityProtocolRegistry::default(),
+            item_protocol_ids: ItemProtocolRegistry::default(),
+            data_component_protocol_ids: DataComponentProtocolRegistry::default(),
         }
     }
 }
@@ -73,6 +79,8 @@ struct PlayerEntitySnapshot {
     game_mode: GameMode,
     transform: Transform,
     velocity: Velocity,
+    equipment: Vec<EquipmentEntry>,
+    selected_hotbar: u8,
 }
 
 #[derive(Debug)]
@@ -271,14 +279,7 @@ fn run_replication(
     let mut connections = BTreeMap::new();
     let mut exit = GameReplicationExit::default();
     loop {
-        if process_commands(
-            &runtime,
-            &commands,
-            &mut connections,
-            config.pending_output_limit.get(),
-            &config.entity_protocol_ids,
-            &mut exit,
-        )? {
+        if process_commands(&runtime, &commands, &mut connections, &config, &mut exit)? {
             flush_connections(&mut connections, &mut exit);
             exit.deferred_outputs = connections
                 .values()
@@ -289,22 +290,12 @@ fn run_replication(
 
         match subscription.recv_timeout(config.poll_interval) {
             Ok(event) => {
-                dispatch_event(
-                    event,
-                    &runtime,
-                    &config.entity_protocol_ids,
-                    &mut connections,
-                    &mut exit,
-                )?;
+                dispatch_event(event, &runtime, &config, &mut connections, &mut exit)?;
                 for _ in 1..MAX_EVENTS_PER_POLL {
                     match subscription.try_recv() {
-                        Ok(event) => dispatch_event(
-                            event,
-                            &runtime,
-                            &config.entity_protocol_ids,
-                            &mut connections,
-                            &mut exit,
-                        )?,
+                        Ok(event) => {
+                            dispatch_event(event, &runtime, &config, &mut connections, &mut exit)?
+                        }
                         Err(TryRecvError::Empty) => break,
                         Err(TryRecvError::Disconnected) => {
                             bail!("game event publisher disconnected")
@@ -323,8 +314,7 @@ fn process_commands(
     runtime: &SharedGameRuntime,
     commands: &Receiver<ReplicationCommand>,
     connections: &mut BTreeMap<PlayerUuid, ReplicationConnection>,
-    pending_limit: usize,
-    entity_protocol_ids: &EntityProtocolRegistry,
+    config: &GameReplicationConfig,
     exit: &mut GameReplicationExit,
 ) -> Result<bool> {
     for _ in 0..MAX_COMMANDS_PER_POLL {
@@ -347,17 +337,13 @@ fn process_commands(
                     continue;
                 }
 
-                let mut connection = ReplicationConnection::new(endpoint, pending_limit);
-                if entity_replication_enabled(entity_protocol_ids) {
+                let mut connection =
+                    ReplicationConnection::new(endpoint, config.pending_output_limit.get());
+                if entity_replication_enabled(&config.entity_protocol_ids) {
                     let initialization = online_player_snapshots(runtime).and_then(|snapshots| {
                         for snapshot in snapshots {
                             if snapshot.uuid != uuid {
-                                queue_player_spawn(
-                                    &mut connection,
-                                    snapshot,
-                                    entity_protocol_ids,
-                                    exit,
-                                )?;
+                                queue_player_spawn(&mut connection, snapshot, config, exit)?;
                             }
                         }
                         Ok(())
@@ -422,14 +408,14 @@ fn process_commands(
 fn dispatch_event(
     event: GameEvent,
     runtime: &SharedGameRuntime,
-    entity_protocol_ids: &EntityProtocolRegistry,
+    config: &GameReplicationConfig,
     connections: &mut BTreeMap<PlayerUuid, ReplicationConnection>,
     exit: &mut GameReplicationExit,
 ) -> Result<()> {
     exit.events = exit.events.saturating_add(1);
     match event {
         GameEvent::PlayerConnected { uuid, name, .. } => {
-            if entity_replication_enabled(entity_protocol_ids) {
+            if entity_replication_enabled(&config.entity_protocol_ids) {
                 let snapshot = player_snapshot(runtime, uuid)?.with_context(|| {
                     format!("connected player {uuid:?} is missing from authoritative state")
                 })?;
@@ -438,12 +424,7 @@ fn dispatch_event(
                 }
                 for (target, connection) in connections.iter_mut() {
                     if *target != uuid {
-                        queue_player_spawn(
-                            connection,
-                            snapshot.clone(),
-                            entity_protocol_ids,
-                            exit,
-                        )?;
+                        queue_player_spawn(connection, snapshot.clone(), config, exit)?;
                     }
                 }
             }
@@ -462,7 +443,7 @@ fn dispatch_event(
             name,
             entity_id,
         } => {
-            if entity_replication_enabled(entity_protocol_ids) {
+            if entity_replication_enabled(&config.entity_protocol_ids) {
                 for (target, connection) in connections.iter_mut() {
                     if *target != uuid {
                         queue_player_remove(connection, uuid, entity_id, exit)?;
@@ -496,7 +477,7 @@ fn dispatch_event(
             entity_id,
             transform,
         } => {
-            if entity_replication_enabled(entity_protocol_ids) {
+            if entity_replication_enabled(&config.entity_protocol_ids) {
                 let snapshot = player_snapshot(runtime, uuid)?;
                 for (target, connection) in connections.iter_mut() {
                     if *target == uuid {
@@ -509,22 +490,12 @@ fn dispatch_event(
                         Some(tracked) => {
                             queue_player_remove(connection, uuid, Some(tracked.entity_id), exit)?;
                             if let Some(snapshot) = snapshot.clone() {
-                                queue_player_spawn(
-                                    connection,
-                                    snapshot,
-                                    entity_protocol_ids,
-                                    exit,
-                                )?;
+                                queue_player_spawn(connection, snapshot, config, exit)?;
                             }
                         }
                         None => {
                             if let Some(snapshot) = snapshot.clone() {
-                                queue_player_spawn(
-                                    connection,
-                                    snapshot,
-                                    entity_protocol_ids,
-                                    exit,
-                                )?;
+                                queue_player_spawn(connection, snapshot, config, exit)?;
                             }
                         }
                     }
@@ -539,7 +510,7 @@ fn dispatch_event(
             if let Some(connection) = connections.get_mut(&uuid) {
                 connection.queue_teleport(transform, exit);
             }
-            if entity_replication_enabled(entity_protocol_ids) {
+            if entity_replication_enabled(&config.entity_protocol_ids) {
                 let snapshot = player_snapshot(runtime, uuid)?;
                 for (target, connection) in connections.iter_mut() {
                     if *target == uuid {
@@ -552,22 +523,12 @@ fn dispatch_event(
                         Some(tracked) => {
                             queue_player_remove(connection, uuid, Some(tracked.entity_id), exit)?;
                             if let Some(snapshot) = snapshot.clone() {
-                                queue_player_spawn(
-                                    connection,
-                                    snapshot,
-                                    entity_protocol_ids,
-                                    exit,
-                                )?;
+                                queue_player_spawn(connection, snapshot, config, exit)?;
                             }
                         }
                         None => {
                             if let Some(snapshot) = snapshot.clone() {
-                                queue_player_spawn(
-                                    connection,
-                                    snapshot,
-                                    entity_protocol_ids,
-                                    exit,
-                                )?;
+                                queue_player_spawn(connection, snapshot, config, exit)?;
                             }
                         }
                     }
@@ -582,7 +543,7 @@ fn dispatch_event(
                 true,
                 exit,
             );
-            if entity_replication_enabled(entity_protocol_ids) {
+            if entity_replication_enabled(&config.entity_protocol_ids) {
                 if let Some(snapshot) = player_snapshot(runtime, uuid)? {
                     for connection in connections.values_mut() {
                         queue_player_info_update(connection, &snapshot, exit)?;
@@ -599,8 +560,31 @@ fn dispatch_event(
             item,
         } => target_chat(connections, uuid, format!("+{inserted} {item}"), true, exit),
         GameEvent::InventorySlotChanged { uuid, slot, stack } => {
+            let equipment_update = if entity_replication_enabled(&config.entity_protocol_ids) {
+                player_snapshot(runtime, uuid)?.and_then(|snapshot| {
+                    equipment_slot_for_inventory_index(slot, snapshot.selected_hotbar).map(
+                        |equipment_slot| {
+                            (
+                                snapshot.entity_id,
+                                EquipmentEntry::new(equipment_slot, stack.clone()),
+                            )
+                        },
+                    )
+                })
+            } else {
+                None
+            };
             if let Some(connection) = connections.get_mut(&uuid) {
-                connection.queue(PlayOutput::SetPlayerInventory { slot, stack }, exit);
+                connection.queue(
+                    PlayOutput::SetPlayerInventory {
+                        slot,
+                        stack: stack.clone(),
+                    },
+                    exit,
+                );
+            }
+            if let Some((entity_id, entry)) = equipment_update {
+                queue_equipment_except(connections, uuid, entity_id, &[entry], config, exit)?;
             }
         }
         GameEvent::ContainerContentChanged { uuid, snapshot } => {
@@ -657,10 +641,29 @@ fn dispatch_event(
         GameEvent::PlayerKilled { uuid } => {
             target_chat(connections, uuid, "You died".to_owned(), false, exit)
         }
-        GameEvent::SelectedHotbarChanged { .. }
-        | GameEvent::TimeChanged { .. }
-        | GameEvent::SaveRequested
-        | GameEvent::ShutdownRequested => {}
+        GameEvent::SelectedHotbarChanged { uuid, current, .. } => {
+            if entity_replication_enabled(&config.entity_protocol_ids) {
+                if let Some(snapshot) = player_snapshot(runtime, uuid)? {
+                    let entry = snapshot
+                        .equipment
+                        .iter()
+                        .find(|entry| entry.slot == EquipmentSlot::MainHand)
+                        .cloned()
+                        .unwrap_or_else(|| EquipmentEntry::new(EquipmentSlot::MainHand, None));
+                    debug_assert_eq!(snapshot.selected_hotbar, current);
+                    queue_equipment_except(
+                        connections,
+                        uuid,
+                        snapshot.entity_id,
+                        &[entry],
+                        config,
+                        exit,
+                    )?;
+                }
+            }
+        }
+        GameEvent::TimeChanged { .. } | GameEvent::SaveRequested | GameEvent::ShutdownRequested => {
+        }
     }
     Ok(())
 }
@@ -718,6 +721,8 @@ fn player_snapshot_from_state(
         game_mode: player.game_mode,
         transform: entity.transform,
         velocity: entity.velocity,
+        equipment: player_equipment(player),
+        selected_hotbar: player.inventory.selected_hotbar(),
     }))
 }
 
@@ -745,10 +750,10 @@ fn queue_player_info_update(
 fn queue_player_spawn(
     connection: &mut ReplicationConnection,
     snapshot: PlayerEntitySnapshot,
-    registry: &EntityProtocolRegistry,
+    config: &GameReplicationConfig,
     exit: &mut GameReplicationExit,
 ) -> Result<()> {
-    if !entity_replication_enabled(registry) {
+    if !entity_replication_enabled(&config.entity_protocol_ids) {
         return Ok(());
     }
     queue_player_info_update(connection, &snapshot, exit)?;
@@ -758,7 +763,7 @@ fn queue_player_spawn(
         "minecraft:player",
         snapshot.transform,
         snapshot.velocity,
-        registry,
+        &config.entity_protocol_ids,
     )
     .context("cannot encode player add-entity packet")?
     .context("player entity protocol id is unavailable")?;
@@ -777,6 +782,15 @@ fn queue_player_spawn(
         },
         exit,
     );
+    if snapshot.equipment.iter().any(|entry| entry.stack.is_some()) {
+        queue_player_equipment(
+            connection,
+            snapshot.entity_id,
+            &snapshot.equipment,
+            config,
+            exit,
+        )?;
+    }
     connection.queue(
         PlayOutput::ProtocolPacket {
             kind: PacketKind::RotateHead,
@@ -786,6 +800,79 @@ fn queue_player_spawn(
         exit,
     );
     connection.entities.insert(snapshot.uuid, snapshot);
+    Ok(())
+}
+
+fn player_equipment(player: &PlayerState) -> Vec<EquipmentEntry> {
+    [
+        EquipmentSlot::MainHand,
+        EquipmentSlot::OffHand,
+        EquipmentSlot::Feet,
+        EquipmentSlot::Legs,
+        EquipmentSlot::Chest,
+        EquipmentSlot::Head,
+    ]
+    .into_iter()
+    .map(|slot| EquipmentEntry::new(slot, player.inventory.equipment(slot).cloned()))
+    .collect()
+}
+
+fn equipment_slot_for_inventory_index(
+    inventory_index: usize,
+    selected_hotbar: u8,
+) -> Option<EquipmentSlot> {
+    [
+        EquipmentSlot::MainHand,
+        EquipmentSlot::OffHand,
+        EquipmentSlot::Feet,
+        EquipmentSlot::Legs,
+        EquipmentSlot::Chest,
+        EquipmentSlot::Head,
+    ]
+    .into_iter()
+    .find(|slot| slot.inventory_index(selected_hotbar) == inventory_index)
+}
+
+fn queue_player_equipment(
+    connection: &mut ReplicationConnection,
+    entity_id: EntityId,
+    entries: &[EquipmentEntry],
+    config: &GameReplicationConfig,
+    exit: &mut GameReplicationExit,
+) -> Result<()> {
+    let Some(payload) = encode_set_equipment(
+        entity_id,
+        entries,
+        &config.item_protocol_ids,
+        &config.data_component_protocol_ids,
+    )
+    .context("cannot encode player equipment")?
+    else {
+        return Ok(());
+    };
+    connection.queue(
+        PlayOutput::ProtocolPacket {
+            kind: PacketKind::SetEquipment,
+            payload,
+        },
+        exit,
+    );
+    Ok(())
+}
+
+fn queue_equipment_except(
+    connections: &mut BTreeMap<PlayerUuid, ReplicationConnection>,
+    excluded: PlayerUuid,
+    entity_id: EntityId,
+    entries: &[EquipmentEntry],
+    config: &GameReplicationConfig,
+    exit: &mut GameReplicationExit,
+) -> Result<()> {
+    for (uuid, connection) in connections {
+        if *uuid != excluded && connection.entities.contains_key(&excluded) {
+            queue_player_equipment(connection, entity_id, entries, config, exit)?;
+        }
+    }
     Ok(())
 }
 
@@ -948,7 +1035,7 @@ fn flush_connections(
 mod tests {
     use super::*;
     use crate::play_connection::register_play_connection;
-    use ferrum_game::{CommandSource, Transform};
+    use ferrum_game::{CommandSource, HOTBAR_START, ItemStack, Transform};
     use ferrum_runtime::{BoundedInputQueue, ConnectionId, worker_channel};
 
     fn spawn() -> Transform {
@@ -958,6 +1045,7 @@ mod tests {
     fn entity_config() -> GameReplicationConfig {
         GameReplicationConfig {
             entity_protocol_ids: EntityProtocolRegistry::new([("minecraft:player", 148)]).unwrap(),
+            item_protocol_ids: ItemProtocolRegistry::new([("minecraft:stone", 1)]).unwrap(),
             ..GameReplicationConfig::default()
         }
     }
@@ -1411,6 +1499,137 @@ mod tests {
             PacketKind::TeleportEntity,
         );
         assert_eq!(read_varint(&payload).0, steve_entity_id.get() as i32);
+        assert!(steve_writer.try_recv_output().is_err());
+        service.shutdown().unwrap();
+    }
+
+    #[test]
+    fn synchronizes_initial_equipment_and_selected_hotbar_changes() {
+        let game = SharedGameRuntime::vanilla_overworld();
+        let service = spawn_game_replication(&game, entity_config()).unwrap();
+        let steve = PlayerUuid::new(301);
+        let alex = PlayerUuid::new(302);
+        let (connector, mut workers) = worker_channel(NonZeroUsize::new(256).unwrap());
+        let (steve_reader, steve_writer) = register_play_connection(
+            &connector,
+            ConnectionId::new(301),
+            NonZeroUsize::new(128).unwrap(),
+        )
+        .unwrap();
+        let (alex_reader, alex_writer) = register_play_connection(
+            &connector,
+            ConnectionId::new(302),
+            NonZeroUsize::new(128).unwrap(),
+        )
+        .unwrap();
+        let mut inputs = BoundedInputQueue::try_new(256).unwrap();
+        ingest(&mut workers, &mut inputs);
+
+        service.control().register(steve, steve_reader).unwrap();
+        game.connect_player(steve, "Steve", spawn()).unwrap();
+        recv_protocol(
+            &steve_writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::PlayerInfoUpdate,
+        );
+        let steve_entity_id = game
+            .with_state(|state| state.player(steve).and_then(|player| player.entity_id))
+            .unwrap()
+            .unwrap();
+        let stone = ItemStack::new("minecraft:stone", 1).unwrap();
+        game.with_state_mut(|state| {
+            state
+                .player_mut(steve)
+                .unwrap()
+                .inventory
+                .set_slot(HOTBAR_START, Some(stone.clone()))
+                .unwrap();
+            Ok(())
+        })
+        .unwrap();
+
+        service.control().register(alex, alex_reader).unwrap();
+        for kind in [
+            PacketKind::PlayerInfoUpdate,
+            PacketKind::AddEntity,
+            PacketKind::SetEntityData,
+        ] {
+            recv_protocol(&alex_writer, &mut workers, &mut inputs, kind);
+        }
+        let equipment = recv_protocol(
+            &alex_writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::SetEquipment,
+        );
+        let (entity_id, entity_bytes) = read_varint(&equipment);
+        assert_eq!(entity_id, steve_entity_id.get() as i32);
+        assert_eq!(equipment[entity_bytes] & 0x7f, 0);
+        let (count, count_bytes) = read_varint(&equipment[entity_bytes + 1..]);
+        assert_eq!(count, 1);
+        let item_offset = entity_bytes + 1 + count_bytes;
+        assert_eq!(read_varint(&equipment[item_offset..]).0, 1);
+        recv_protocol(
+            &alex_writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::RotateHead,
+        );
+
+        game.connect_player(alex, "Alex", spawn()).unwrap();
+        for kind in [
+            PacketKind::PlayerInfoUpdate,
+            PacketKind::AddEntity,
+            PacketKind::SetEntityData,
+            PacketKind::RotateHead,
+        ] {
+            recv_protocol(&steve_writer, &mut workers, &mut inputs, kind);
+        }
+        assert!(matches!(
+            recv_output(&steve_writer, &mut workers, &mut inputs),
+            PlayOutput::SystemChat { .. }
+        ));
+        recv_protocol(
+            &alex_writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::PlayerInfoUpdate,
+        );
+
+        game.with_state_mut(|state| {
+            state
+                .player_mut(steve)
+                .unwrap()
+                .inventory
+                .set_slot(HOTBAR_START + 1, Some(stone.clone()))
+                .unwrap();
+            Ok(())
+        })
+        .unwrap();
+        game.publish(&[GameEvent::InventorySlotChanged {
+            uuid: steve,
+            slot: HOTBAR_START + 1,
+            stack: Some(stone),
+        }])
+        .unwrap();
+        assert!(matches!(
+            recv_output(&steve_writer, &mut workers, &mut inputs),
+            PlayOutput::SetPlayerInventory { slot, .. } if slot == HOTBAR_START + 1
+        ));
+        assert!(alex_writer.try_recv_output().is_err());
+
+        game.select_hotbar(steve, 1).unwrap();
+        let equipment = recv_protocol(
+            &alex_writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::SetEquipment,
+        );
+        let (entity_id, entity_bytes) = read_varint(&equipment);
+        assert_eq!(entity_id, steve_entity_id.get() as i32);
+        assert_eq!(equipment[entity_bytes] & 0x7f, 0);
+        assert_eq!(read_varint(&equipment[entity_bytes + 1..]).0, 1);
         assert!(steve_writer.try_recv_output().is_err());
         service.shutdown().unwrap();
     }

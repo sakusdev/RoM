@@ -240,6 +240,8 @@ struct PersistenceConfig {
 struct RuntimeRegistryData {
     configuration_payloads: Vec<Vec<u8>>,
     entity_protocol_ids: EntityProtocolRegistry,
+    item_protocol_ids: ItemProtocolRegistry,
+    data_component_protocol_ids: DataComponentProtocolRegistry,
 }
 
 #[derive(Debug)]
@@ -271,6 +273,8 @@ impl ServerState {
             RuntimeRegistryData {
                 configuration_payloads: registry_payloads,
                 entity_protocol_ids: EntityProtocolRegistry::default(),
+                item_protocol_ids: ItemProtocolRegistry::default(),
+                data_component_protocol_ids: DataComponentProtocolRegistry::default(),
             },
             config.play_policy.clone(),
             None,
@@ -292,6 +296,8 @@ impl ServerState {
         let RuntimeRegistryData {
             configuration_payloads,
             entity_protocol_ids,
+            item_protocol_ids,
+            data_component_protocol_ids,
         } = registries;
         let center = play_runtime::spawn_chunk(&world);
         let game_state = match game_state {
@@ -322,6 +328,8 @@ impl ServerState {
             &game_runtime,
             GameReplicationConfig {
                 entity_protocol_ids,
+                item_protocol_ids,
+                data_component_protocol_ids,
                 ..GameReplicationConfig::default()
             },
         )?;
@@ -353,6 +361,8 @@ impl ServerState {
             RuntimeRegistryData {
                 configuration_payloads: registry_payloads,
                 entity_protocol_ids: EntityProtocolRegistry::default(),
+                item_protocol_ids: ItemProtocolRegistry::default(),
+                data_component_protocol_ids: DataComponentProtocolRegistry::default(),
             },
             play_policy,
             Some(store),
@@ -604,8 +614,8 @@ fn run(cli: Cli) -> Result<()> {
         )
     };
     config.runtime_profile = Some(runtime_profile);
-    config.item_protocol_ids = item_protocol_ids;
-    config.data_component_protocol_ids = data_component_protocol_ids;
+    config.item_protocol_ids = item_protocol_ids.clone();
+    config.data_component_protocol_ids = data_component_protocol_ids.clone();
     let game_state = load_game_state(&game_state_path, &world_profile.dimension)?;
     let loaded_chunks = match load_world_state(&world_state_path, &world_profile)? {
         Some(store) => Some(store),
@@ -630,6 +640,8 @@ fn run(cli: Cli) -> Result<()> {
         RuntimeRegistryData {
             configuration_payloads: registry_payloads,
             entity_protocol_ids,
+            item_protocol_ids,
+            data_component_protocol_ids,
         },
         config.play_policy.clone(),
         loaded_chunks,

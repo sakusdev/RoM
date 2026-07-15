@@ -1,1 +1,0 @@
-register spawn config: expected one command anchor, found 0

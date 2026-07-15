@@ -21,10 +21,10 @@ pub use entity::{
     encode_rotate_head, encode_teleport_entity,
 };
 pub use inventory::{
-    DataComponentProtocolRegistry, InventoryDecodeError, InventoryEncodeError,
+    DataComponentProtocolRegistry, EquipmentEntry, InventoryDecodeError, InventoryEncodeError,
     ItemProtocolRegistry, decode_close_container, decode_container_click,
     decode_creative_slot_update, encode_item_stack, encode_set_container_content,
-    encode_set_container_slot, encode_set_player_inventory,
+    encode_set_container_slot, encode_set_equipment, encode_set_player_inventory,
     encode_set_player_inventory_with_components,
 };
 pub use movement::{
