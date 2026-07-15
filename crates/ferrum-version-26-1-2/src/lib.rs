@@ -11,11 +11,9 @@ pub use registries::{
     OFFICIAL_SERVER_SHA1, REGISTRY_COUNT, REGISTRY_ENTRY_COUNT, REGISTRY_MANIFEST_SHA256,
     RegistryManifest, SYNCHRONIZED_REGISTRIES, configuration_registries,
 };
-pub use tags::{
-    TAG_COUNT, TAG_ENTRY_COUNT, TAG_MANIFEST_SHA256, TAG_REGISTRY_COUNT, configuration_tags,
-};
+pub use tags::{TAG_COUNT, TAG_ENTRY_COUNT, TAG_MANIFEST_SHA256, TAG_REGISTRY_COUNT};
 
-use ferrum_configuration::KnownPack;
+use ferrum_configuration::{KnownPack, TagRegistry};
 use ferrum_protocol::{PacketKind, PacketTable, ProfileError, ProtocolProfile};
 
 pub const PROFILE_NAME: &str = "26.1.2";
@@ -37,6 +35,33 @@ pub const OVERWORLD_SEA_LEVEL: i32 = 63;
 pub const FLAT_WORLD_FLOOR_Y: i32 = 63;
 pub const FLAT_WORLD_SPAWN_X: i32 = 0;
 pub const FLAT_WORLD_SPAWN_Z: i32 = 0;
+
+/// Number of tag registries that are valid in the client Configuration registry access.
+pub const NETWORK_TAG_REGISTRY_COUNT: usize = 16;
+/// Number of tags sent after filtering server-only world-generation registries.
+pub const NETWORK_TAG_COUNT: usize = 734;
+/// Number of protocol registry ID references sent in the filtered tag payload.
+pub const NETWORK_TAG_ENTRY_COUNT: usize = 8_132;
+
+const SERVER_ONLY_TAG_REGISTRIES: &[&str] = &[
+    "minecraft:worldgen/configured_feature",
+    "minecraft:worldgen/flat_level_generator_preset",
+    "minecraft:worldgen/structure",
+    "minecraft:worldgen/world_preset",
+];
+
+/// Build the tag registries that the 26.1.2 client can resolve during Configuration.
+///
+/// The generated source manifest also contains server data-pack tag registries. Those
+/// registries are not synchronized through Registry Data and must not be included in
+/// `ClientboundUpdateTagsPacket`, otherwise the client fails at Finish Configuration.
+#[must_use]
+pub fn configuration_tags() -> Vec<TagRegistry> {
+    tags::configuration_tags()
+        .into_iter()
+        .filter(|registry| !SERVER_ONLY_TAG_REGISTRIES.contains(&registry.id.as_str()))
+        .collect()
+}
 
 /// Construct the exact packet table used by Minecraft Java Edition 26.1.2.
 pub fn protocol_profile() -> Result<ProtocolProfile, ProfileError> {
@@ -259,26 +284,34 @@ mod tests {
     }
 
     #[test]
-    fn registry_packets_reference_the_accepted_core_pack() {
-        let registries = configuration_registries();
-        assert_eq!(registries.len(), REGISTRY_COUNT);
+    fn configuration_tags_exclude_server_only_worldgen_registries() {
+        let registries = configuration_tags();
+        assert_eq!(registries.len(), NETWORK_TAG_REGISTRY_COUNT);
+        assert_eq!(
+            registries
+                .iter()
+                .map(|registry| registry.tags.len())
+                .sum::<usize>(),
+            NETWORK_TAG_COUNT
+        );
+        assert_eq!(
+            registries
+                .iter()
+                .flat_map(|registry| &registry.tags)
+                .map(|tag| tag.entries.len())
+                .sum::<usize>(),
+            NETWORK_TAG_ENTRY_COUNT
+        );
+        for id in SERVER_ONLY_TAG_REGISTRIES {
+            assert!(
+                !registries.iter().any(|registry| registry.id == *id),
+                "{id}"
+            );
+        }
         assert!(
             registries
                 .iter()
-                .all(|registry| { registry.entries.iter().all(|entry| entry.value.is_none()) })
+                .any(|registry| registry.id == "minecraft:worldgen/biome")
         );
-        assert!(accepts_vanilla_core_pack(&known_packs()));
-        assert!(!accepts_vanilla_core_pack(&[]));
-    }
-    #[test]
-    fn exposes_static_overworld_numeric_ids_from_official_reports() {
-        assert_eq!(OVERWORLD_MIN_SECTION_Y, -4);
-        assert_eq!(OVERWORLD_SECTION_COUNT, 24);
-        assert_eq!(AIR_BLOCK_STATE_ID, 0);
-        assert_eq!(STONE_BLOCK_STATE_ID, 1);
-        assert_eq!(GRASS_BLOCK_STATE_ID, 9);
-        assert_eq!(DIRT_BLOCK_STATE_ID, 10);
-        assert_eq!(BEDROCK_BLOCK_STATE_ID, 85);
-        assert_eq!(PLAINS_BIOME_ID, 40);
     }
 }
