@@ -1,0 +1,23 @@
+manifest_status=0
+version_url=https://piston-meta.mojang.com/v1/packages/b0004e16ba0789e3e8ef109a2f3808ca200b3c31/26.1.2.json
+version_status=0
+mappings_url=
+mappings_status=91
+version_download_keys:
+[
+  "client",
+  "server"
+]
+version_downloads:
+{
+  "client": {
+    "sha1": "4e618f09a0c649dde3fdf829df443ce0b8831e65",
+    "size": 38113927,
+    "url": "https://piston-data.mojang.com/v1/objects/4e618f09a0c649dde3fdf829df443ce0b8831e65/client.jar"
+  },
+  "server": {
+    "sha1": "97ccd4c0ed3f81bbb7bfacddd1090b0c56f9bc51",
+    "size": 60417480,
+    "url": "https://piston-data.mojang.com/v1/objects/97ccd4c0ed3f81bbb7bfacddd1090b0c56f9bc51/server.jar"
+  }
+}
