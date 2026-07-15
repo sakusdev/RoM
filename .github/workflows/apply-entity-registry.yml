@@ -4,12 +4,16 @@ on:
   push:
     branches:
       - agent/complete-server-features
+  pull_request:
+    types:
+      - reopened
 
 permissions:
   contents: write
 
 jobs:
   implement:
+    if: github.event_name == 'push' || github.head_ref == 'agent/complete-server-features'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
