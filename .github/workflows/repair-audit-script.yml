@@ -1,0 +1,51 @@
+name: Repair audit script
+
+on:
+  pull_request:
+    types: [reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.head_ref == 'agent/admin-web-gui' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/admin-web-gui
+          fetch-depth: 0
+      - name: Repair Python escape-sensitive anchors
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('tools/apply_full_audit_fixes.py')
+          text = path.read_text()
+
+          replacements = [
+              ("old_header_control = '''", "old_header_control = r'''"),
+              ("new_header_control = '''", "new_header_control = r'''"),
+          ]
+          for old, new in replacements:
+              if text.count(old) != 1:
+                  raise SystemExit(f'unexpected anchor count for {old!r}: {text.count(old)}')
+              text = text.replace(old, new, 1)
+
+          crlf_escape = '\\r\\n'
+          doubled_crlf_escape = '\\\\r\\\\n'
+          count = text.count(crlf_escape)
+          if count != 8:
+              raise SystemExit(f'unexpected CRLF escape count: {count}')
+          text = text.replace(crlf_escape, doubled_crlf_escape)
+          path.write_text(text)
+          PY
+          rm -f .github/workflows/repair-audit-script.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add tools/apply_full_audit_fixes.py .github/workflows/repair-audit-script.yml
+          git commit -m 'Fix audit transformation anchors'
+          git push origin HEAD:agent/admin-web-gui
