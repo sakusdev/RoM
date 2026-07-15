@@ -1,9 +1,6 @@
 name: Apply entity registry integration
 
 on:
-  push:
-    branches:
-      - agent/complete-server-features
   pull_request:
     types:
       - reopened
@@ -13,7 +10,7 @@ permissions:
 
 jobs:
   implement:
-    if: github.event_name == 'push' || github.head_ref == 'agent/complete-server-features'
+    if: github.head_ref == 'agent/complete-server-features'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,7 +28,7 @@ jobs:
           set -e
           if [[ $status -ne 0 ]]; then
             rm -f .github/workflows/apply-entity-registry.yml
-            git add entity-transform-error.log .github/workflows/apply-entity-registry.yml
+            git add -A
             git commit -m "Record entity transformation failure"
             git push origin HEAD:agent/complete-server-features
             exit $status
