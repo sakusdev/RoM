@@ -250,6 +250,7 @@ mod tests {
             |writer, output| {
                 match output {
                     PlayOutput::Packet(bytes) => writer.write_all(&bytes)?,
+                    PlayOutput::ProtocolPacket { .. } => {}
                     PlayOutput::KeepAliveRequest(id) => writer.write_all(&id.to_be_bytes())?,
                     PlayOutput::SystemChat { .. }
                     | PlayOutput::PlayerTeleport { .. }
@@ -347,6 +348,7 @@ mod tests {
             Duration::from_millis(1),
             |_, output| match output {
                 PlayOutput::Packet(_)
+                | PlayOutput::ProtocolPacket { .. }
                 | PlayOutput::KeepAliveRequest(_)
                 | PlayOutput::SystemChat { .. }
                 | PlayOutput::PlayerTeleport { .. }

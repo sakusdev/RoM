@@ -2216,11 +2216,25 @@ fn spawn_live_play_writer(
     let set_container_slot = profile.packets().id(PacketKind::SetContainerSlot);
     let item_protocol_ids = item_protocol_ids.clone();
     let data_component_protocol_ids = data_component_protocol_ids.clone();
+    let protocol_profile = profile.clone();
     spawn_play_writer(
         endpoint,
         writer,
         Duration::from_millis(PLAY_WRITER_WAIT_MILLIS),
         move |writer, output| match output {
+            PlayOutput::ProtocolPacket { kind, payload } => {
+                if let Some(packet_id) = protocol_profile.packets().id(kind) {
+                    write_packet(
+                        writer,
+                        &build_packet(packet_id, |body| {
+                            body.extend_from_slice(&payload);
+                            Ok(())
+                        })?,
+                    )?;
+                    writer.flush()?;
+                }
+                Ok(PlayWriterDirective::Continue)
+            }
             PlayOutput::SetPlayerInventory { slot, stack } => {
                 if let Some(packet_id) = set_player_inventory
                     && let Some(payload) = encode_set_player_inventory_with_components(
@@ -2353,7 +2367,8 @@ fn write_live_play_output<W: Write>(
             )?;
             PlayWriterDirective::Continue
         }
-        PlayOutput::SetPlayerInventory { .. }
+        PlayOutput::ProtocolPacket { .. }
+        | PlayOutput::SetPlayerInventory { .. }
         | PlayOutput::SetContainerContent { .. }
         | PlayOutput::SetContainerSlot { .. } => {
             bail!("inventory output requires the version-aware live Play writer")

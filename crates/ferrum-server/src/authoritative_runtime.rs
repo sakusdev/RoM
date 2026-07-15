@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use ferrum_game::{ItemStack, Transform};
 use ferrum_play::PlayerMovement;
+use ferrum_protocol::PacketKind;
 use ferrum_runtime::{
     BoundedInputQueue, ConnectionId, FixedRateClock, Tick, WorkerIngressReport, WorkerOutputError,
     WorkerRuntime,
@@ -24,6 +25,8 @@ pub enum PlayInput {
 pub enum PlayOutput {
     /// Unframed protocol packet bytes including the packet ID.
     Packet(Vec<u8>),
+    /// Version-neutral packet body resolved through the active packet table.
+    ProtocolPacket { kind: PacketKind, payload: Vec<u8> },
     /// Request a protocol-aware Keep Alive packet with this identifier.
     KeepAliveRequest(i64),
     /// Request a protocol-aware Play disconnect with this reason.
