@@ -23,7 +23,20 @@ jobs:
       - run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-      - run: python3 tools/apply_entity_registry.py
+      - name: Apply or record exact failure
+        run: |
+          set +e
+          python3 tools/apply_entity_registry.py > entity-transform-error.log 2>&1
+          status=$?
+          set -e
+          if [[ $status -ne 0 ]]; then
+            rm -f .github/workflows/apply-entity-registry.yml
+            git add entity-transform-error.log .github/workflows/apply-entity-registry.yml
+            git commit -m "Record entity transformation failure"
+            git push origin HEAD:agent/complete-server-features
+            exit $status
+          fi
+          rm -f entity-transform-error.log
       - run: |
           rm -f tools/apply_entity_registry.py
           rm -f .github/workflows/apply-entity-registry.yml
