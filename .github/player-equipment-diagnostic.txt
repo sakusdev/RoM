@@ -1,1 +1,1 @@
-dispatch config calls were not both updated
+register spawn config: expected one anchor, found 5
