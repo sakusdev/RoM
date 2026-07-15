@@ -90,10 +90,11 @@ RoM does not redistribute the official server JAR. The JAR remains in the user's
 - Development offline-mode login with Java-compatible offline UUIDs
 - Login Acknowledged and Configuration transitions
 - Known Packs negotiation for `minecraft/core/26.1.2`
-- Feature Flags, all synchronized registry data, the complete official 26.1.2 network tag manifest, and Finish Configuration
+- Feature Flags, all synchronized registry data, the client-synchronized subset of the official 26.1.2 network tag manifest, and Finish Configuration
 - Join Game, initial chunks, player position, teleport acknowledgement, and dynamic chunk views
 - Configurable Keep Alive and disconnect encoding
 - Live online-player count in status responses
+- Offline-mode player chat accepted from the generated `chat` packet and replicated through authoritative gameplay events
 
 ```text
 Handshake

@@ -4,7 +4,7 @@ use super::{
 };
 use crate::codec::{PacketReader, build_packet, read_packet};
 use anyhow::{Context, Result, bail};
-use ferrum_game::{CommandSource, PlayerUuid as GamePlayerUuid, Transform};
+use ferrum_game::{CommandSource, GameEvent, PlayerUuid as GamePlayerUuid, Transform};
 use ferrum_play::{
     BlockPosition, ItemProtocolRegistry, PlayerMovement, PlayerState, decode_close_container,
     decode_container_click, decode_creative_slot_update, decode_player_action,
@@ -49,6 +49,7 @@ const MAX_BLOCK_INTERACTION_REACH: f64 = 6.0;
 const MAX_BLOCK_INTERACTION_REACH_SQUARED: f64 =
     MAX_BLOCK_INTERACTION_REACH * MAX_BLOCK_INTERACTION_REACH;
 const MAX_CHAT_COMMAND_BYTES: usize = 32_767;
+const MAX_CHAT_MESSAGE_BYTES: usize = 256;
 
 type LocalWorldRuntime = DeterministicRuntime<ChunkStore, WorldEvent>;
 
@@ -111,6 +112,21 @@ impl<'a> GameplaySync<'a> {
             })?
             .context("authoritative player is missing while executing a command")?;
         Ok(self.runtime.execute_command(&source, command)?.feedback)
+    }
+
+    fn broadcast_chat(self, message: &str) -> Result<()> {
+        let name = self
+            .runtime
+            .with_state(|state| {
+                state
+                    .player(self.player_uuid)
+                    .map(|player| player.name.clone())
+            })?
+            .context("authoritative player is missing while broadcasting chat")?;
+        self.runtime.publish(&[GameEvent::Broadcast {
+            message: format!("<{name}> {message}"),
+        }])?;
+        Ok(())
     }
 
     fn select_hotbar(self, selected_hotbar: u8) -> Result<()> {
@@ -638,6 +654,12 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
                         send_system_chat(writer, profile, &feedback, play_reader)?;
                     }
                 }
+                Some(PacketKind::ChatMessage) => {
+                    let message = decode_chat_message(&mut packet_reader)?;
+                    if let Some(gameplay) = gameplay {
+                        gameplay.broadcast_chat(&message)?;
+                    }
+                }
                 Some(PacketKind::SetCarriedItem) => {
                     let selected_hotbar = decode_hotbar_selection(&mut packet_reader)?;
                     if let Some(gameplay) = gameplay {
@@ -732,6 +754,26 @@ fn decode_chat_command(reader: &mut PacketReader<'_>) -> Result<String> {
         bail!("chat command packet contains trailing bytes");
     }
     Ok(command)
+}
+
+fn decode_chat_message(reader: &mut PacketReader<'_>) -> Result<String> {
+    let message = reader.read_string()?;
+    if message.is_empty()
+        || message.len() > MAX_CHAT_MESSAGE_BYTES
+        || message.chars().any(char::is_control)
+    {
+        bail!(
+            "chat message must contain 1..={MAX_CHAT_MESSAGE_BYTES} bytes and no control characters"
+        );
+    }
+
+    // Modern offline-mode chat packets carry timestamp/signature/last-seen
+    // metadata after the message. RoM does not claim secure-chat verification
+    // yet, but it accepts and bounds the complete outer packet before reaching
+    // this decoder instead of incorrectly treating those fields as trailing
+    // garbage.
+    let _metadata = reader.take_remaining();
+    Ok(message)
 }
 
 fn decode_hotbar_selection(reader: &mut PacketReader<'_>) -> Result<u8> {
@@ -1188,7 +1230,7 @@ mod tests {
     }
 
     #[test]
-    fn decodes_chat_commands_and_hotbar_selection_exactly() {
+    fn decodes_chat_messages_commands_and_hotbar_selection() {
         let mut command = Vec::new();
         write_string(&mut command, "list").unwrap();
         assert_eq!(
@@ -1196,6 +1238,18 @@ mod tests {
             "list"
         );
         assert!(decode_chat_command(&mut PacketReader::new(&[0])).is_err());
+
+        let mut message = Vec::new();
+        write_string(&mut message, "hello world").unwrap();
+        message.extend_from_slice(&123_i64.to_be_bytes());
+        assert_eq!(
+            decode_chat_message(&mut PacketReader::new(&message)).unwrap(),
+            "hello world"
+        );
+        assert!(decode_chat_message(&mut PacketReader::new(&[0])).is_err());
+        let mut control = Vec::new();
+        write_string(&mut control, "bad\nmessage").unwrap();
+        assert!(decode_chat_message(&mut PacketReader::new(&control)).is_err());
 
         assert_eq!(
             decode_hotbar_selection(&mut PacketReader::new(&5_i16.to_be_bytes())).unwrap(),
