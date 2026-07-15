@@ -86,7 +86,8 @@ jobs:
           label = text.index('"client command all"')
           block_start = text.rfind('    text = replace_once(', 0, label)
           block_end = text.index('    text = replace_once(', label)
-          replacement = '''    all_start = text.index("    pub const ALL:")
+          replacement = '''    packet_kind_impl = text.index("impl PacketKind {")
+              all_start = text.index("    pub const ALL:", packet_kind_impl)
               all_end = text.index("    #[must_use]\\n    pub const fn phase", all_start)
               all_section = text[all_start:all_end]
               needle = "        Self::ClientTickEnd,\\n"
