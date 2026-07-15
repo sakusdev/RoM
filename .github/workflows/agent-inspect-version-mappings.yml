@@ -1,4 +1,4 @@
-name: Inspect 26.1.2 mapping metadata
+name: Inspect 26.1.2 packet bytecode
 
 on:
   pull_request:
@@ -22,55 +22,114 @@ jobs:
         with:
           ref: agent/complete-server-features
           fetch-depth: 0
-      - name: Inspect official version metadata
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - name: Scan official game class constants
         shell: bash
         run: |
-          set +e
-          manifest_status=0
-          curl -fsSL https://piston-meta.mojang.com/mc/game/version_manifest_v2.json \
-            -o /tmp/version-manifest.json || manifest_status=$?
-          version_url=""
-          version_status=0
-          mappings_url=""
-          if [ "$manifest_status" -eq 0 ]; then
-            version_url=$(jq -r '.versions[] | select(.id == "26.1.2") | .url' /tmp/version-manifest.json)
-            if [ -n "$version_url" ] && [ "$version_url" != null ]; then
-              curl -fsSL "$version_url" -o /tmp/version.json || version_status=$?
-              if [ "$version_status" -eq 0 ]; then
-                mappings_url=$(jq -r '.downloads.server_mappings.url // empty' /tmp/version.json)
-              fi
-            else
-              version_status=90
-            fi
-          fi
-          mappings_status=0
-          if [ -n "$mappings_url" ]; then
-            curl -fsSL "$mappings_url" -o /tmp/server-mappings.txt || mappings_status=$?
-          else
-            mappings_status=91
-          fi
+          set -euo pipefail
+          cargo run -p rom-bootstrap -- prepare \
+            --instance /tmp/rom-inspect \
+            --version 26.1.2 \
+            --accept-minecraft-eula \
+            --json > /tmp/prepare.json
+          outer=$(jq -r '.official_server_jar' /tmp/prepare.json)
+          python3 - "$outer" <<'PY'
+          import sys
+          import zipfile
+
+          outer = sys.argv[1]
+          with zipfile.ZipFile(outer) as archive:
+              names = sorted(
+                  name for name in archive.namelist()
+                  if name.startswith("META-INF/versions/") and name.endswith(".jar")
+              )
+              if not names:
+                  raise SystemExit("official bundle has no inner game jar")
+              with open("/tmp/game.jar", "wb") as output:
+                  output.write(archive.read(names[0]))
+              print(names[0])
+          PY
+
+          python3 - /tmp/game.jar <<'PY' > /tmp/constant-matches.txt
+          import io
+          import struct
+          import sys
+          import zipfile
+
+          needles = (
+              "set_health",
+              "damage_event",
+              "hurt_animation",
+              "player_combat_kill",
+              "respawn",
+          )
+
+          def u1(stream):
+              return stream.read(1)[0]
+
+          def u2(stream):
+              return struct.unpack(">H", stream.read(2))[0]
+
+          def skip(stream, count):
+              data = stream.read(count)
+              if len(data) != count:
+                  raise EOFError
+
+          def utf8_constants(data):
+              stream = io.BytesIO(data)
+              if stream.read(4) != b"\xca\xfe\xba\xbe":
+                  return []
+              skip(stream, 4)
+              count = u2(stream)
+              values = []
+              index = 1
+              while index < count:
+                  tag = u1(stream)
+                  if tag == 1:
+                      length = u2(stream)
+                      values.append(stream.read(length).decode("utf-8", "replace"))
+                  elif tag in (3, 4):
+                      skip(stream, 4)
+                  elif tag in (5, 6):
+                      skip(stream, 8)
+                      index += 1
+                  elif tag in (7, 8, 16, 19, 20):
+                      skip(stream, 2)
+                  elif tag in (9, 10, 11, 12, 17, 18):
+                      skip(stream, 4)
+                  elif tag == 15:
+                      skip(stream, 3)
+                  else:
+                      raise ValueError(f"unknown constant tag {tag}")
+                  index += 1
+              return values
+
+          with zipfile.ZipFile(sys.argv[1]) as archive:
+              for name in archive.namelist():
+                  if not name.endswith(".class"):
+                      continue
+                  values = utf8_constants(archive.read(name))
+                  matched = sorted({needle for needle in needles if any(needle in value for value in values)})
+                  if matched:
+                      print(name[:-6].replace("/", ".") + "\t" + ",".join(matched))
+          PY
 
           {
-            echo "manifest_status=$manifest_status"
-            echo "version_url=$version_url"
-            echo "version_status=$version_status"
-            echo "mappings_url=$mappings_url"
-            echo "mappings_status=$mappings_status"
-            if [ -f /tmp/version.json ]; then
-              echo "version_download_keys:"
-              jq '.downloads | keys' /tmp/version.json
-              echo "version_downloads:"
-              jq '.downloads' /tmp/version.json
-            fi
-            if [ -f /tmp/server-mappings.txt ]; then
-              echo "mapping_size=$(wc -c < /tmp/server-mappings.txt)"
-              echo "combat_class_matches:"
-              grep -nE 'Clientbound(SetHealth|DamageEvent|HurtAnimation|PlayerCombatKill|Respawn)Packet|CommonPlayerSpawnInfo' /tmp/server-mappings.txt || true
-            fi
+            echo "constant_matches:"
+            cat /tmp/constant-matches.txt
+            echo "javap_matches:"
+            while IFS=$'\t' read -r class needles; do
+              echo "===== $class [$needles] ====="
+              javap -classpath /tmp/game.jar -p -c -verbose "$class" | sed -n '1,1400p'
+            done < /tmp/constant-matches.txt
           } > .github/version-mapping-diagnostic.txt
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .github/version-mapping-diagnostic.txt
-          git commit -m "Record official mapping metadata diagnostics"
+          git commit -m "Record official packet bytecode diagnostics"
           git push origin HEAD:agent/complete-server-features
