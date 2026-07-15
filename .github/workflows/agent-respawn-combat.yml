@@ -38,6 +38,7 @@ jobs:
 
           path = Path('.github/scripts/agent_respawn_combat.py')
           text = path.read_text()
+
           old = '''        """pub struct JoinGame {
           """,
                   """#[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,7 +81,31 @@ jobs:
           """,'''
           if text.count(old) != 1:
               raise SystemExit(f'join-game derive patch: expected one anchor, found {text.count(old)}')
-          path.write_text(text.replace(old, new, 1))
+          text = text.replace(old, new, 1)
+
+          label = text.index('"client command all"')
+          block_start = text.rfind('    text = replace_once(', 0, label)
+          block_end = text.index('    text = replace_once(', label)
+          replacement = '''    all_start = text.index("    pub const ALL:")
+              all_end = text.index("    #[must_use]\\n    pub const fn phase", all_start)
+              all_section = text[all_start:all_end]
+              all_section = replace_once(
+                  all_section,
+                  """        Self::KeepAliveResponse,
+              Self::ClientTickEnd,
+              Self::MovePlayerPosition,
+          """,
+                  """        Self::KeepAliveResponse,
+              Self::ClientTickEnd,
+              Self::ClientCommand,
+              Self::MovePlayerPosition,
+          """,
+                  "client command all",
+              )
+              text = text[:all_start] + all_section + text[all_end:]
+          '''
+          text = text[:block_start] + replacement + text[block_end:]
+          path.write_text(text)
           PY
           status=${PIPESTATUS[0]}
 
