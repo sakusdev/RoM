@@ -27,7 +27,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
-      - name: Inspect official generated packet report
+      - name: Inspect official packet report and mapped bytecode
         shell: bash
         run: |
           set -euo pipefail
@@ -36,49 +36,68 @@ jobs:
             --version 26.1.2 \
             --accept-minecraft-eula \
             --json > /tmp/prepare.json
-          jar=$(jq -r '.official_server_jar' /tmp/prepare.json)
+          outer=$(jq -r '.official_server_jar' /tmp/prepare.json)
           mkdir -p /tmp/generated
-          set +e
-          java -DbundlerMainClass=net.minecraft.data.Main -jar "$jar" \
+          java -DbundlerMainClass=net.minecraft.data.Main -jar "$outer" \
             --reports --output /tmp/generated > /tmp/generator.log 2>&1
-          status=$?
-          set -e
-          report=$(find /tmp/generated -path '*/reports/packets.json' -print -quit)
-          {
-            echo "generator_status=$status"
-            echo "official_jar=$jar"
-            echo "packet_report=${report:-missing}"
-            echo "generated_files:"
-            find /tmp/generated -maxdepth 4 -type f | sort | sed -n '1,80p'
-            echo "matching_packet_entries:"
-            if [ -n "$report" ]; then
-              python3 - "$report" <<'PY'
-          import json
+          report=/tmp/generated/reports/packets.json
+
+          curl -fsSL https://piston-meta.mojang.com/mc/game/version_manifest_v2.json \
+            -o /tmp/version-manifest.json
+          version_url=$(jq -r '.versions[] | select(.id == "26.1.2") | .url' /tmp/version-manifest.json)
+          curl -fsSL "$version_url" -o /tmp/version.json
+          mappings_url=$(jq -r '.downloads.server_mappings.url' /tmp/version.json)
+          curl -fsSL "$mappings_url" -o /tmp/server-mappings.txt
+
+          inner=$(unzip -Z1 "$outer" | grep -E '^META-INF/versions/.+\.jar$' | head -1)
+          unzip -p "$outer" "$inner" > /tmp/game.jar
+
+          python3 - /tmp/server-mappings.txt <<'PY' > /tmp/packet-classes.tsv
+          import re
           import sys
 
-          report = json.load(open(sys.argv[1], encoding="utf-8"))
-          needles = ("set_health", "damage_event", "hurt_animation", "combat", "respawn")
-
-          def walk(value, path="$"):
-              if isinstance(value, dict):
-                  for key, child in value.items():
-                      child_path = f"{path}.{key}"
-                      if any(needle in key.lower() for needle in needles):
-                          print(child_path)
-                          print(json.dumps(child, indent=2, sort_keys=True))
-                      walk(child, child_path)
-              elif isinstance(value, list):
-                  for index, child in enumerate(value):
-                      walk(child, f"{path}[{index}]")
-
-          walk(report)
+          targets = [
+              "net.minecraft.network.protocol.game.ClientboundSetHealthPacket",
+              "net.minecraft.network.protocol.game.ClientboundDamageEventPacket",
+              "net.minecraft.network.protocol.game.ClientboundHurtAnimationPacket",
+              "net.minecraft.network.protocol.game.ClientboundPlayerCombatKillPacket",
+              "net.minecraft.network.protocol.game.ClientboundRespawnPacket",
+              "net.minecraft.network.protocol.game.CommonPlayerSpawnInfo",
+          ]
+          patterns = {target: re.compile(rf"^{re.escape(target)} -> ([^:]+):$") for target in targets}
+          lines = open(sys.argv[1], encoding="utf-8").read().splitlines()
+          for target in targets:
+              obfuscated = None
+              for line in lines:
+                  match = patterns[target].match(line)
+                  if match:
+                      obfuscated = match.group(1)
+                      break
+              if obfuscated is None:
+                  raise SystemExit(f"missing mapping for {target}")
+              print(f"{target}\t{obfuscated}")
           PY
-            else
-              sed -n '1,160p' /tmp/generator.log
-            fi
+
+          {
+            echo "official_packet_ids:"
+            jq '{damage_event: .play.clientbound["minecraft:damage_event"], hurt_animation: .play.clientbound["minecraft:hurt_animation"], player_combat_kill: .play.clientbound["minecraft:player_combat_kill"], respawn: .play.clientbound["minecraft:respawn"], set_health: .play.clientbound["minecraft:set_health"]}' "$report"
+            echo "mapped_classes:"
+            cat /tmp/packet-classes.tsv
+            echo "mapping_blocks:"
+            while IFS=$'\t' read -r mapped obfuscated; do
+              echo "===== $mapped -> $obfuscated ====="
+              awk -v class="$mapped" '
+                $0 == class " -> " obf ":" { printing=1 }
+                printing && /^[^ ]/ && $0 != class " -> " obf ":" { exit }
+                printing { print }
+              ' obf="$obfuscated" /tmp/server-mappings.txt
+              echo "----- javap -----"
+              javap -classpath /tmp/game.jar -p -c "$obfuscated" || true
+            done < /tmp/packet-classes.tsv
           } > .github/combat-protocol-diagnostic.txt
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .github/combat-protocol-diagnostic.txt
-          git commit -m "Record combat protocol report diagnostics"
+          git commit -m "Record mapped combat packet schemas"
           git push origin HEAD:agent/complete-server-features
