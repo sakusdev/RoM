@@ -27,7 +27,20 @@ jobs:
           rm -f entity-check-error.txt
       - run: cargo fmt --all
       - run: cargo check --workspace --all-targets --all-features
-      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - name: Clippy or record exact failure
+        run: |
+          set +e
+          cargo clippy --workspace --all-targets --all-features -- -D warnings > entity-clippy-error.txt 2>&1
+          status=$?
+          set -e
+          if [[ $status -ne 0 ]]; then
+            git add -A
+            git diff --cached --check
+            git commit -m "Record entity palette Clippy failure"
+            git push origin HEAD:agent/complete-server-features
+            exit $status
+          fi
+          rm -f entity-clippy-error.txt
       - run: cargo test --workspace --all-features
       - run: |
           git add -A
