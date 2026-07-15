@@ -236,6 +236,12 @@ struct PersistenceConfig {
     world: WorldServiceConfig,
 }
 
+#[derive(Debug, Clone, Default)]
+struct RuntimeRegistryData {
+    configuration_payloads: Vec<Vec<u8>>,
+    entity_protocol_ids: EntityProtocolRegistry,
+}
+
 #[derive(Debug)]
 struct ServerState {
     online_players: AtomicI32,
@@ -262,8 +268,10 @@ impl ServerState {
         Self::with_runtime(
             config.online_players,
             play_runtime::builtin_world_profile(),
-            registry_payloads,
-            EntityProtocolRegistry::default(),
+            RuntimeRegistryData {
+                configuration_payloads: registry_payloads,
+                entity_protocol_ids: EntityProtocolRegistry::default(),
+            },
             config.play_policy.clone(),
             None,
             None,
@@ -275,13 +283,16 @@ impl ServerState {
     fn with_runtime(
         initial_online_players: i32,
         world: RomPackWorld,
-        registry_payloads: Vec<Vec<u8>>,
-        entity_protocol_ids: EntityProtocolRegistry,
+        registries: RuntimeRegistryData,
         play_policy: PlayPolicy,
         loaded_chunks: Option<ChunkStore>,
         game_state: Option<GameState>,
         persistence: PersistenceConfig,
     ) -> Result<Self> {
+        let RuntimeRegistryData {
+            configuration_payloads,
+            entity_protocol_ids,
+        } = registries;
         let center = play_runtime::spawn_chunk(&world);
         let game_state = match game_state {
             Some(state) => {
@@ -318,7 +329,7 @@ impl ServerState {
             online_players: AtomicI32::new(initial_online_players),
             next_connection_id: AtomicU64::new(1),
             world: shared_world,
-            registry_payloads,
+            registry_payloads: configuration_payloads,
             shared_play_runtime,
             game_runtime,
             game_service,
@@ -339,8 +350,10 @@ impl ServerState {
         Self::with_runtime(
             initial_online_players,
             world,
-            registry_payloads,
-            EntityProtocolRegistry::default(),
+            RuntimeRegistryData {
+                configuration_payloads: registry_payloads,
+                entity_protocol_ids: EntityProtocolRegistry::default(),
+            },
             play_policy,
             Some(store),
             None,
@@ -614,8 +627,10 @@ fn run(cli: Cli) -> Result<()> {
     let state = Arc::new(ServerState::with_runtime(
         config.online_players,
         world_profile,
-        registry_payloads,
-        entity_protocol_ids,
+        RuntimeRegistryData {
+            configuration_payloads: registry_payloads,
+            entity_protocol_ids,
+        },
         config.play_policy.clone(),
         loaded_chunks,
         Some(game_state),
