@@ -61,18 +61,12 @@ jobs:
 
           def walk(value, path="$"):
               if isinstance(value, dict):
-                  rendered = json.dumps(value, sort_keys=True, separators=(",", ":"))
-                  if any(needle in rendered.lower() for needle in needles):
-                      direct = any(
-                          isinstance(item, str)
-                          and any(needle in item.lower() for needle in needles)
-                          for item in value.values()
-                      )
-                      if direct:
-                          print(path)
-                          print(json.dumps(value, indent=2, sort_keys=True))
                   for key, child in value.items():
-                      walk(child, f"{path}.{key}")
+                      child_path = f"{path}.{key}"
+                      if any(needle in key.lower() for needle in needles):
+                          print(child_path)
+                          print(json.dumps(child, indent=2, sort_keys=True))
+                      walk(child, child_path)
               elif isinstance(value, list):
                   for index, child in enumerate(value):
                       walk(child, f"{path}[{index}]")
