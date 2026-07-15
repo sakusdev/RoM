@@ -1,0 +1,54 @@
+name: Inspect 26.1.2 combat protocol
+
+on:
+  pull_request:
+    types: [reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-inspect-combat-protocol
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    if: >-
+      github.event.pull_request.number == 61 &&
+      github.event.pull_request.head.ref == 'agent/complete-server-features'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/complete-server-features
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Prepare official source and generate reports
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cargo run -p rom-bootstrap -- prepare \
+            --instance /tmp/rom-inspect \
+            --version 26.1.2 \
+            --accept-minecraft-eula \
+            --json | tee /tmp/prepare.json
+          jar=$(jq -r '.official_server_jar' /tmp/prepare.json)
+          echo "OFFICIAL_JAR=$jar"
+          unzip -l "$jar" | head -80
+          mkdir -p /tmp/generated
+          set +e
+          java -DbundlerMainClass=net.minecraft.data.Main -jar "$jar" \
+            --reports --output /tmp/generated 2>&1 | tee /tmp/generator.log
+          status=${PIPESTATUS[0]}
+          set -e
+          echo "GENERATOR_STATUS=$status"
+          find /tmp/generated -maxdepth 4 -type f | sort | head -100
+          report=$(find /tmp/generated -path '*/reports/packets.json' -print -quit)
+          if [ -n "$report" ]; then
+            echo "PACKET_REPORT=$report"
+            jq '.. | objects | to_entries[]? | select(.key | test("set_health|damage_event|hurt_animation|combat|respawn"))' "$report" || true
+            grep -nE 'set_health|damage_event|hurt_animation|combat|respawn' "$report" | head -100 || true
+          fi
