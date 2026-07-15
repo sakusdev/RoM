@@ -39,6 +39,101 @@ jobs:
           path = Path('.github/scripts/agent_respawn_combat.py')
           text = path.read_text()
 
+          function_start = text.index('def patch_protocol_lib')
+          function_end = text.index('\n\ndef patch_packet_catalog', function_start)
+          replacement = r'''def patch_protocol_lib(text: str) -> str:
+              text = replace_once(
+                  text,
+                  """    KeepAliveResponse,
+              ClientTickEnd,
+              MovePlayerPosition,
+          """,
+                  """    KeepAliveResponse,
+              ClientTickEnd,
+              ClientCommand,
+              MovePlayerPosition,
+          """,
+                  "client command variant",
+              )
+              text = replace_once(
+                  text,
+                  """    SetEquipment,
+              SetHealth,
+              PlayerInfoUpdate,
+          """,
+                  """    SetEquipment,
+              SetHealth,
+              HurtAnimation,
+              PlayerCombatKill,
+              Respawn,
+              PlayerInfoUpdate,
+          """,
+                  "combat packet variants",
+              )
+
+              packet_kind_impl = text.index("impl PacketKind {")
+              all_start = text.index("    pub const ALL:", packet_kind_impl)
+              all_end = text.index("    pub const CORE:", all_start)
+              all_section = text[all_start:all_end]
+              for needle, insertion, label in [
+                  (
+                      "        Self::ClientTickEnd,\n",
+                      "        Self::ClientCommand,\n",
+                      "client command all",
+                  ),
+                  (
+                      "        Self::SetHealth,\n",
+                      "        Self::HurtAnimation,\n        Self::PlayerCombatKill,\n        Self::Respawn,\n",
+                      "combat all",
+                  ),
+              ]:
+                  if all_section.count(needle) != 1:
+                      raise SystemExit(
+                          f"{label}: expected one anchor, found {all_section.count(needle)}"
+                      )
+                  all_section = all_section.replace(needle, needle + insertion, 1)
+              text = text[:all_start] + all_section + text[all_end:]
+
+              phase_start = text.index("    pub const fn phase", packet_kind_impl)
+              direction_start = text.index("    pub const fn direction", phase_start)
+              phase_section = text[phase_start:direction_start]
+              for needle, insertion, label in [
+                  (
+                      "            | Self::ClientTickEnd\n",
+                      "            | Self::ClientCommand\n",
+                      "client command phase",
+                  ),
+                  (
+                      "            | Self::SetHealth\n",
+                      "            | Self::HurtAnimation\n            | Self::PlayerCombatKill\n            | Self::Respawn\n",
+                      "combat phase",
+                  ),
+              ]:
+                  if phase_section.count(needle) != 1:
+                      raise SystemExit(
+                          f"{label}: expected one anchor, found {phase_section.count(needle)}"
+                      )
+                  phase_section = phase_section.replace(needle, needle + insertion, 1)
+              text = text[:phase_start] + phase_section + text[direction_start:]
+
+              direction_start = text.index("    pub const fn direction", packet_kind_impl)
+              direction_end = text.index("\n}\n\n#[derive", direction_start)
+              direction_section = text[direction_start:direction_end]
+              needle = "            | Self::ClientTickEnd\n"
+              if direction_section.count(needle) != 1:
+                  raise SystemExit(
+                      f"client command direction: expected one anchor, found {direction_section.count(needle)}"
+                  )
+              direction_section = direction_section.replace(
+                  needle,
+                  needle + "            | Self::ClientCommand\n",
+                  1,
+              )
+              text = text[:direction_start] + direction_section + text[direction_end:]
+              return text
+          '''
+          text = text[:function_start] + replacement + text[function_end:]
+
           old = '''        """pub struct JoinGame {
           """,
                   """#[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,29 +176,7 @@ jobs:
           """,'''
           if text.count(old) != 1:
               raise SystemExit(f'join-game derive patch: expected one anchor, found {text.count(old)}')
-          text = text.replace(old, new, 1)
-
-          label = text.index('"client command all"')
-          block_start = text.rfind('    text = replace_once(', 0, label)
-          block_end = text.index('    text = replace_once(', label)
-          replacement = '''    packet_kind_impl = text.index("impl PacketKind {")
-              all_start = text.index("    pub const ALL:", packet_kind_impl)
-              all_end = text.index("    pub const CORE:", all_start)
-              all_section = text[all_start:all_end]
-              needle = "        Self::ClientTickEnd,\\n"
-              if all_section.count(needle) != 1:
-                  raise SystemExit(
-                      f"client command all: expected one ClientTickEnd, found {all_section.count(needle)}"
-                  )
-              all_section = all_section.replace(
-                  needle,
-                  needle + "        Self::ClientCommand,\\n",
-                  1,
-              )
-              text = text[:all_start] + all_section + text[all_end:]
-          '''
-          text = text[:block_start] + replacement + text[block_end:]
-          path.write_text(text)
+          path.write_text(text.replace(old, new, 1))
           PY
           status=${PIPESTATUS[0]}
 
