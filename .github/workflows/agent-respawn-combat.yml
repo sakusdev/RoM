@@ -253,7 +253,92 @@ jobs:
           if block.count(old_call) != 3:
               raise SystemExit(f'health receive conversion: expected 3 calls, found {block.count(old_call)}')
           block = block.replace(old_call, replacement)
-          path.write_text(text[:start] + block + text[end:])
+          text = text[:start] + block + text[end:]
+          path.write_text(text)
+          PY
+            status=${PIPESTATUS[0]}
+          fi
+          if [ "$status" -eq 0 ]; then
+            python3 - <<'PY' 2>&1 | tee -a "$log"
+          from pathlib import Path
+
+          path = Path('crates/ferrum-server/src/game_replication.rs')
+          text = path.read_text()
+
+          health_start = text.index(
+              '    fn synchronizes_initial_and_changed_health_only_to_the_subject()'
+          )
+          health_end = text.index('\n    }', health_start) + len('\n    }')
+          health = text[health_start:health_end]
+          hurt_receive = '''        recv_protocol(
+                      &steve_writer,
+                      &mut workers,
+                      &mut inputs,
+                      PacketKind::HurtAnimation,
+                  );
+          '''
+          for damage_call in [
+              '        game.damage_player(steve, 4.0).unwrap();\n',
+              '        game.damage_player(steve, 100.0).unwrap();\n',
+          ]:
+              if health.count(damage_call) != 1:
+                  raise SystemExit(
+                      f'health damage anchor {damage_call.strip()}: expected one, '
+                      f'found {health.count(damage_call)}'
+                  )
+              health = health.replace(damage_call, damage_call + hurt_receive, 1)
+
+          old_death = '''        assert!(matches!(
+                      recv_output(&steve_writer, &mut workers, &mut inputs),
+                      PlayOutput::SystemChat { message, overlay: false } if message == "You died"
+                  ));'''
+          new_death = '''        recv_protocol(
+                      &steve_writer,
+                      &mut workers,
+                      &mut inputs,
+                      PacketKind::PlayerCombatKill,
+                  );
+                  assert!(matches!(
+                      recv_output(&steve_writer, &mut workers, &mut inputs),
+                      PlayOutput::SetContainerContent {
+                          container_id: 0,
+                          ..
+                      }
+                  ));'''
+          if health.count(old_death) != 1:
+              raise SystemExit(
+                  f'health death output: expected one anchor, found {health.count(old_death)}'
+              )
+          health = health.replace(old_death, new_death, 1)
+          text = text[:health_start] + health + text[health_end:]
+
+          combat_start = text.index(
+              '    fn sends_hurt_death_respawn_teleport_and_health_in_order()'
+          )
+          combat_end = text.index('\n    }', combat_start) + len('\n    }')
+          combat = text[combat_start:combat_end]
+          combat_kill = '''        recv_protocol(
+                      &writer,
+                      &mut workers,
+                      &mut inputs,
+                      PacketKind::PlayerCombatKill,
+                  );
+          '''
+          container_snapshot = '''        assert!(matches!(
+                      recv_output(&writer, &mut workers, &mut inputs),
+                      PlayOutput::SetContainerContent {
+                          container_id: 0,
+                          ..
+                      }
+                  ));
+          '''
+          if combat.count(combat_kill) != 1:
+              raise SystemExit(
+                  f'combat kill receive: expected one anchor, found {combat.count(combat_kill)}'
+              )
+          combat = combat.replace(combat_kill, combat_kill + container_snapshot, 1)
+          text = text[:combat_start] + combat + text[combat_end:]
+          path.write_text(text)
           PY
             status=${PIPESTATUS[0]}
           fi
