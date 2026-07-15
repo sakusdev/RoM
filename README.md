@@ -180,8 +180,10 @@ system shell. Commands include `help`, `list`, `say hello`, `save-all`, and
 `stop`.
 
 Use `--no-admin-gui` to disable it and `--admin-bind` to choose another address.
-A non-loopback bind is rejected unless `--admin-token` is supplied. On Termux
-or Pixel Terminal, leave the loopback default and open
+A non-loopback bind is rejected unless `--admin-token` is supplied; remote
+binds require at least 16 visible ASCII characters. The built-in endpoint is
+plain HTTP, so expose it only on a trusted LAN or place it behind a TLS reverse
+proxy. On Termux or Pixel Terminal, leave the loopback default and open
 `http://127.0.0.1:25575` in the Android browser.
 
 ```bash

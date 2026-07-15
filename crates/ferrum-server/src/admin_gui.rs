@@ -18,6 +18,8 @@ use super::ServerState;
 const MAX_HEADER_BYTES: usize = 16 * 1024;
 const MAX_BODY_BYTES: usize = 4 * 1024;
 const MAX_COMMAND_BYTES: usize = 1_024;
+const MAX_TOKEN_BYTES: usize = 256;
+const MIN_REMOTE_TOKEN_BYTES: usize = 16;
 const ACCEPT_POLL_MILLIS: u64 = 50;
 const STREAM_TIMEOUT_SECONDS: u64 = 2;
 
@@ -33,14 +35,19 @@ pub struct AdminGuiConfig {
 
 impl AdminGuiConfig {
     pub fn validate(&self) -> Result<()> {
-        if self
-            .token
-            .as_deref()
-            .is_some_and(|token| token.trim().is_empty())
-        {
-            bail!("admin GUI token cannot be empty");
-        }
-        if !self.bind.ip().is_loopback() && self.token.is_none() {
+        if let Some(token) = self.token.as_deref() {
+            if token.is_empty() || token.len() > MAX_TOKEN_BYTES {
+                bail!("admin GUI token must contain 1..={MAX_TOKEN_BYTES} bytes");
+            }
+            if !token.bytes().all(|byte| byte.is_ascii_graphic()) {
+                bail!("admin GUI token must contain visible ASCII characters only");
+            }
+            if !self.bind.ip().is_loopback() && token.len() < MIN_REMOTE_TOKEN_BYTES {
+                bail!(
+                    "a non-loopback admin GUI bind requires a token of at least {MIN_REMOTE_TOKEN_BYTES} bytes"
+                );
+            }
+        } else if !self.bind.ip().is_loopback() {
             bail!(
                 "admin GUI bind {} is not loopback; provide --admin-token before exposing it",
                 self.bind
@@ -72,7 +79,10 @@ impl AdminGuiHandle {
     }
 }
 
-pub fn spawn_admin_gui(config: AdminGuiConfig, state: Arc<ServerState>) -> Result<AdminGuiHandle> {
+pub fn spawn_admin_gui(
+    mut config: AdminGuiConfig,
+    state: Arc<ServerState>,
+) -> Result<AdminGuiHandle> {
     config.validate()?;
     let listener = TcpListener::bind(config.bind)
         .with_context(|| format!("cannot bind admin GUI on {}", config.bind))?;
@@ -82,6 +92,7 @@ pub fn spawn_admin_gui(config: AdminGuiConfig, state: Arc<ServerState>) -> Resul
     let local_addr = listener
         .local_addr()
         .context("cannot read admin GUI listener address")?;
+    config.bind = local_addr;
     let join = thread::Builder::new()
         .name("rom-admin-gui".to_owned())
         .spawn(move || run_admin_gui(listener, config, state))
@@ -132,6 +143,14 @@ fn handle_connection(
     let request = read_request(stream)?;
     let path = request.path.split('?').next().unwrap_or(&request.path);
 
+    if config.token.is_none() && !is_allowed_loopback_host(&request, config.bind) {
+        return write_json_error(
+            stream,
+            421,
+            "Host does not match the local admin GUI listener",
+        );
+    }
+
     if request.method == "GET" && path == "/" {
         return write_response(
             stream,
@@ -148,10 +167,14 @@ fn handle_connection(
     }
 
     match (request.method.as_str(), path) {
-        ("GET", "/api/status") => {
-            let body = metrics.status_json(config, state)?;
-            write_json(stream, 200, &body)
-        }
+        ("GET", "/api/status") => match metrics.status_json(config, state) {
+            Ok(body) => write_json(stream, 200, &body),
+            Err(error) => write_json_error(
+                stream,
+                500,
+                &format!("cannot collect admin status: {error:#}"),
+            ),
+        },
         ("POST", "/api/command") => handle_command(stream, &request, state),
         _ => write_json_error(stream, 404, "route not found"),
     }
@@ -441,9 +464,9 @@ fn read_request<R: Read>(reader: &mut R) -> Result<HttpRequest> {
         }
         if value
             .bytes()
-            .any(|byte| matches!(byte, b'\r' | b'\n' | b'\0'))
+            .any(|byte| byte.is_ascii_control() && byte != b'\t')
         {
-            bail!("HTTP header value contains invalid characters");
+            bail!("HTTP header value contains invalid control characters");
         }
         if headers
             .insert(name.clone(), value.trim().to_owned())
@@ -487,8 +510,8 @@ fn read_request<R: Read>(reader: &mut R) -> Result<HttpRequest> {
     }
     let body = buffer[body_start..body_start + content_length].to_vec();
     Ok(HttpRequest {
-        method: method.to_owned(),
-        path: path.to_owned(),
+        method,
+        path,
         headers,
         body,
     })
@@ -500,6 +523,25 @@ fn is_http_token_byte(byte: u8) -> bool {
 
 fn find_header_end(buffer: &[u8]) -> Option<usize> {
     buffer.windows(4).position(|window| window == b"\r\n\r\n")
+}
+
+fn is_allowed_loopback_host(request: &HttpRequest, bind: SocketAddr) -> bool {
+    let Some(host) = request.headers.get("host") else {
+        return false;
+    };
+    let host = host.trim();
+    let port = bind.port();
+    for name in ["localhost", "127.0.0.1", "[::1]"] {
+        if host.eq_ignore_ascii_case(name) || host.eq_ignore_ascii_case(&format!("{name}:{port}")) {
+            return true;
+        }
+    }
+    let exact = if bind.ip().is_ipv6() {
+        format!("[{}]:{port}", bind.ip())
+    } else {
+        format!("{}:{port}", bind.ip())
+    };
+    host.eq_ignore_ascii_case(&exact)
 }
 
 fn is_authorized(request: &HttpRequest, token: Option<&str>) -> bool {
@@ -557,6 +599,7 @@ fn write_response<W: Write>(
         404 => "Not Found",
         413 => "Payload Too Large",
         415 => "Unsupported Media Type",
+        421 => "Misdirected Request",
         500 => "Internal Server Error",
         _ => "Response",
     };
@@ -631,8 +674,13 @@ mod tests {
             max_players: 20,
         };
         assert!(config.validate().is_err());
+        let short = AdminGuiConfig {
+            token: Some("short".to_owned()),
+            ..config.clone()
+        };
+        assert!(short.validate().is_err());
         let secure = AdminGuiConfig {
-            token: Some("secret".to_owned()),
+            token: Some("correct-horse-42".to_owned()),
             ..config
         };
         assert!(secure.validate().is_ok());
@@ -693,6 +741,89 @@ mod tests {
         assert!(output.contains("X-Frame-Options: DENY"));
         assert!(output.contains("Content-Security-Policy:"));
         assert!(output.ends_with("\r\n\r\nok"));
+    }
+
+    #[test]
+    fn token_and_host_validation_reject_ambiguous_inputs() {
+        let loopback = AdminGuiConfig {
+            bind: "127.0.0.1:25575".parse().unwrap(),
+            token: Some("contains space".to_owned()),
+            disk_path: PathBuf::from("."),
+            version_name: "test".to_owned(),
+            protocol: 1,
+            max_players: 20,
+        };
+        assert!(loopback.validate().is_err());
+
+        let local = request([("host", "127.0.0.1:25575")]);
+        assert!(is_allowed_loopback_host(
+            &local,
+            "127.0.0.1:25575".parse().unwrap()
+        ));
+        let localhost = request([("host", "localhost:25575")]);
+        assert!(is_allowed_loopback_host(
+            &localhost,
+            "127.0.0.1:25575".parse().unwrap()
+        ));
+        let rebound = request([("host", "attacker.example:25575")]);
+        assert!(!is_allowed_loopback_host(
+            &rebound,
+            "127.0.0.1:25575".parse().unwrap()
+        ));
+    }
+
+    #[test]
+    fn live_dashboard_serves_status_and_authoritative_commands() {
+        use std::net::Shutdown;
+
+        fn exchange(address: SocketAddr, request: &str) -> String {
+            let mut stream = TcpStream::connect(address).unwrap();
+            stream.write_all(request.as_bytes()).unwrap();
+            stream.shutdown(Shutdown::Write).unwrap();
+            let mut response = String::new();
+            stream.read_to_string(&mut response).unwrap();
+            response
+        }
+
+        let state = Arc::new(ServerState::new(&crate::ServerConfig::default()));
+        let handle = spawn_admin_gui(
+            AdminGuiConfig {
+                bind: "127.0.0.1:0".parse().unwrap(),
+                token: None,
+                disk_path: PathBuf::from("."),
+                version_name: "test".to_owned(),
+                protocol: 1,
+                max_players: 20,
+            },
+            Arc::clone(&state),
+        )
+        .unwrap();
+        let address = handle.local_addr();
+        let status = exchange(
+            address,
+            &format!("GET /api/status HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n"),
+        );
+        assert!(status.starts_with("HTTP/1.1 200 OK"));
+        assert!(status.contains("\"cpu_percent\""));
+
+        let body = r#"{"command":"help"}"#;
+        let command = exchange(
+            address,
+            &format!(
+                "POST /api/command HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            ),
+        );
+        assert!(command.starts_with("HTTP/1.1 200 OK"));
+        assert!(command.contains("\"ok\":true"));
+
+        state.shutdown_signal().store(true, Ordering::Release);
+        handle.join().unwrap();
+        let state = match Arc::try_unwrap(state) {
+            Ok(state) => state,
+            Err(_) => panic!("admin GUI retained the server state after shutdown"),
+        };
+        state.shutdown().unwrap();
     }
 
     #[test]

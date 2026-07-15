@@ -4,9 +4,6 @@ on:
   push:
   pull_request:
 
-permissions:
-  contents: write
-
 jobs:
   test:
     strategy:
@@ -38,70 +35,3 @@ jobs:
           path: |
             clippy.log
             test.log
-
-  apply-audit-fixes:
-    if: github.event_name == 'pull_request' && github.head_ref == 'agent/admin-web-gui' && github.actor != 'github-actions[bot]'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: agent/admin-web-gui
-          fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - name: Apply audited fixes
-        shell: bash
-        run: |
-          set -euo pipefail
-          python tools/apply_full_audit_fixes.py
-          cargo fmt --all
-      - name: Validate all code paths
-        shell: bash
-        run: |
-          set -o pipefail
-          cargo fmt --all --check
-          cargo check --workspace --all-targets --all-features 2>&1 | tee check.log
-          cargo clippy --workspace --all-targets --all-features -- -D warnings 2>&1 | tee clippy-all.log
-          cargo test --workspace --all-features 2>&1 | tee test-all.log
-          RUSTDOCFLAGS='-D warnings' cargo doc --workspace --all-features --no-deps 2>&1 | tee doc.log
-      - name: Run RustSec dependency audit
-        shell: bash
-        run: |
-          set +e
-          cargo install cargo-audit --locked > cargo-audit-install.log 2>&1
-          install_status=$?
-          if [ "$install_status" -eq 0 ]; then
-            cargo audit --json > cargo-audit.json 2> cargo-audit.stderr
-            echo $? > cargo-audit.status
-          else
-            echo "$install_status" > cargo-audit.status
-            printf '{"warning":"cargo-audit installation failed"}\n' > cargo-audit.json
-          fi
-          exit 0
-      - name: Upload audit evidence
-        uses: actions/upload-artifact@v4
-        with:
-          name: post-fix-full-audit
-          path: |
-            check.log
-            clippy-all.log
-            test-all.log
-            doc.log
-            cargo-audit.json
-            cargo-audit.stderr
-            cargo-audit.status
-            cargo-audit-install.log
-          retention-days: 7
-      - name: Commit validated source-only changes
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          rm -f tools/apply_full_audit_fixes.py
-          git fetch origin master --depth=1
-          git checkout FETCH_HEAD -- .github/workflows/ci.yml
-          git add -A
-          git commit -m 'Harden GUI and audited input paths'
-          git push origin HEAD:agent/admin-web-gui

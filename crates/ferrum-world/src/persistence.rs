@@ -115,7 +115,7 @@ impl WorldSnapshot {
                         actual: non_empty,
                     }
                 })?;
-                if usize::from(section.fluid_count) > BLOCKS_PER_SECTION {
+                if section.fluid_count > non_empty_block_count {
                     return Err(WorldPersistenceError::InvalidFluidCount {
                         position,
                         section_index,
@@ -267,6 +267,18 @@ mod tests {
         assert!(matches!(
             snapshot.restore(),
             Err(WorldPersistenceError::InvalidBlockCount { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_fluid_count_greater_than_non_air_blocks() {
+        let mut snapshot = store().snapshot();
+        let section = &mut snapshot.chunks[0].sections[0];
+        section.blocks.fill(section.air);
+        section.fluid_count = 1;
+        assert!(matches!(
+            snapshot.restore(),
+            Err(WorldPersistenceError::InvalidFluidCount { .. })
         ));
     }
 

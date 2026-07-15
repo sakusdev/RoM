@@ -8,6 +8,9 @@ use std::{
 };
 use zip::ZipArchive;
 
+const MAX_ARCHIVE_ENTRIES: usize = 250_000;
+const MAX_JSON_ENTRY_BYTES: u64 = 4 * 1024 * 1024;
+
 #[derive(Debug, Clone, Serialize)]
 pub struct FabricReport {
     pub schema_version: u32,
@@ -66,6 +69,13 @@ pub fn inspect_fabric_jar(path: &Path) -> Result<FabricReport> {
     let file = File::open(path).with_context(|| format!("cannot open {}", path.display()))?;
     let mut archive =
         ZipArchive::new(file).with_context(|| format!("cannot read JAR {}", path.display()))?;
+    if archive.len() > MAX_ARCHIVE_ENTRIES {
+        anyhow::bail!(
+            "JAR {} contains {} entries, exceeding limit {MAX_ARCHIVE_ENTRIES}",
+            path.display(),
+            archive.len()
+        );
+    }
     let mut warnings = Vec::new();
     let metadata = read_fabric_metadata(&mut archive, &mut warnings)?;
     let mut mixin_paths = metadata
@@ -167,13 +177,22 @@ fn read_json_entry<R: Read + Seek>(
     archive: &mut ZipArchive<R>,
     name: &str,
 ) -> Result<Option<Value>> {
-    let Ok(mut entry) = archive.by_name(name) else {
+    let Ok(entry) = archive.by_name(name) else {
         return Ok(None);
     };
-    let mut text = String::new();
+    let expected_size = entry.size();
+    if expected_size > MAX_JSON_ENTRY_BYTES {
+        anyhow::bail!("{name} exceeds the {MAX_JSON_ENTRY_BYTES}-byte JSON limit");
+    }
+    let mut bytes = Vec::with_capacity(expected_size as usize);
     entry
-        .read_to_string(&mut text)
+        .take(MAX_JSON_ENTRY_BYTES + 1)
+        .read_to_end(&mut bytes)
         .with_context(|| format!("cannot read {name}"))?;
+    if bytes.len() as u64 != expected_size || bytes.len() as u64 > MAX_JSON_ENTRY_BYTES {
+        anyhow::bail!("{name} changed size while reading or exceeds the JSON limit");
+    }
+    let text = String::from_utf8(bytes).with_context(|| format!("{name} is not UTF-8"))?;
     serde_json::from_str(&text)
         .map(Some)
         .with_context(|| format!("{name} is not valid JSON"))
