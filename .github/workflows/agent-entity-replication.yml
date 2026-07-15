@@ -26,9 +26,23 @@ jobs:
         with:
           components: rustfmt, clippy
       - name: Apply entity replication implementation
-        run: python3 .github/scripts/agent_entity_replication.py
+        run: |
+          set +e
+          python3 .github/scripts/agent_entity_replication.py > /tmp/entity-transform.log 2>&1
+          status=$?
+          cat /tmp/entity-transform.log
+          if [ "$status" -ne 0 ]; then
+            git checkout -- crates/ferrum-server/src/game_replication.rs
+            cp /tmp/entity-transform.log .github/entity-replication-diagnostic.txt
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add .github/entity-replication-diagnostic.txt
+            git commit -m "Record entity replication transform failure"
+            git push origin HEAD:agent/complete-server-features
+            exit "$status"
+          fi
       - name: Remove temporary automation
-        run: rm .github/scripts/agent_entity_replication.py .github/workflows/agent-entity-replication.yml
+        run: rm .github/scripts/agent_entity_replication.py .github/workflows/agent-entity-replication.yml .github/entity-replication-diagnostic.txt 2>/dev/null || true
       - name: Format
         run: cargo fmt --all
       - name: Validate formatting
