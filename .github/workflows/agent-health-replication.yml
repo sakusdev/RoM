@@ -1,0 +1,89 @@
+name: Complete authoritative health replication
+
+on:
+  pull_request:
+    types: [reopened]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-complete-authoritative-health
+  cancel-in-progress: false
+
+jobs:
+  implement-and-validate:
+    if: >-
+      github.event.pull_request.number == 61 &&
+      github.event.pull_request.head.ref == 'agent/complete-server-features'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/complete-server-features
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Implement, validate, and commit
+        shell: bash
+        run: |
+          log=/tmp/health-replication-validation.log
+          : > "$log"
+          status=0
+          set +e
+          cp .github/scripts/agent_health_rs.txt crates/ferrum-play/src/health.rs
+          python3 .github/scripts/agent_health_replication.py 2>&1 | tee -a "$log"
+          status=${PIPESTATUS[0]}
+          if [ "$status" -eq 0 ]; then
+            cargo fmt --all 2>&1 | tee -a "$log"
+            status=${PIPESTATUS[0]}
+          fi
+          if [ "$status" -eq 0 ]; then
+            cargo fmt --all --check 2>&1 | tee -a "$log"
+            status=${PIPESTATUS[0]}
+          fi
+          if [ "$status" -eq 0 ]; then
+            cargo check --workspace --all-targets --all-features 2>&1 | tee -a "$log"
+            status=${PIPESTATUS[0]}
+          fi
+          if [ "$status" -eq 0 ]; then
+            cargo clippy --workspace --all-targets --all-features -- -D warnings 2>&1 | tee -a "$log"
+            status=${PIPESTATUS[0]}
+          fi
+          if [ "$status" -eq 0 ]; then
+            cargo test --workspace --all-features 2>&1 | tee -a "$log"
+            status=${PIPESTATUS[0]}
+          fi
+          set -e
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ "$status" -ne 0 ]; then
+            git checkout -- \
+              crates/ferrum-protocol/src/lib.rs \
+              crates/ferrum-protocol/src/packet_catalog.rs \
+              crates/ferrum-version-26-1-2/src/lib.rs \
+              crates/ferrum-play/src/lib.rs \
+              crates/ferrum-game/src/state.rs \
+              crates/ferrum-server/src/game_runtime.rs \
+              crates/ferrum-server/src/game_replication.rs \
+              docs/SERVER_ROADMAP.md
+            rm -f crates/ferrum-play/src/health.rs
+            cp "$log" .github/health-replication-diagnostic.txt
+            git add .github/health-replication-diagnostic.txt
+            if ! git diff --cached --quiet; then
+              git commit -m "Record authoritative health validation failure"
+              git push origin HEAD:agent/complete-server-features
+            fi
+            exit "$status"
+          fi
+
+          rm .github/scripts/agent_health_replication.py
+          rm .github/scripts/agent_health_rs.txt
+          rm .github/workflows/agent-health-replication.yml
+          rm -f .github/health-replication-diagnostic.txt
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "Replicate authoritative player health"
+          git push origin HEAD:agent/complete-server-features
