@@ -38,9 +38,10 @@ jobs:
 
           path = Path('.github/scripts/agent_player_equipment.py')
           text = path.read_text()
+
           start = text.index('    text = text.replace(\n        """                    &config.entity_protocol_ids,')
           end = text.index('    text = replace_once(\n        text,\n        """    connections:', start)
-          replacement = '''    run_start = text.index("fn run_replication(")
+          dispatch_replacement = '''    run_start = text.index("fn run_replication(")
               run_end = text.index("fn process_commands(", run_start)
               run = text[run_start:run_end]
               if run.count("&config.entity_protocol_ids,") != 2:
@@ -50,7 +51,33 @@ jobs:
               run = run.replace("&config.entity_protocol_ids,", "&config,")
               text = text[:run_start] + run + text[run_end:]
           '''
-          path.write_text(text[:start] + replacement + text[end:])
+          text = text[:start] + dispatch_replacement + text[end:]
+
+          label = text.index('"register spawn config"')
+          start = text.rfind('    text = replace_once(', 0, label)
+          end = text.index('    text = replace_once(', label)
+          register_replacement = '''    command_start = text.index("fn process_commands(")
+              command_end = text.index("fn dispatch_event(", command_start)
+              command = text[command_start:command_end]
+              old = """                                    snapshot,
+                                               entity_protocol_ids,
+                                               exit,
+              """
+              if command.count(old) != 1:
+                  raise SystemExit(
+                      f"register spawn config: expected one command anchor, found {command.count(old)}"
+                  )
+              command = command.replace(
+                  old,
+                  """                                    snapshot,
+                                               config,
+                                               exit,
+              """,
+                  1,
+              )
+              text = text[:command_start] + command + text[command_end:]
+          '''
+          path.write_text(text[:start] + register_replacement + text[end:])
           PY
           status=${PIPESTATUS[0]}
 
