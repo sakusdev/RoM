@@ -448,9 +448,6 @@ pub fn validate_rompack(pack: &RomPack, limits: RomPackLimits) -> Result<()> {
         }
     }
 
-    if pack.entity_types.is_empty() {
-        bail!("version pack does not contain an entity-type registry");
-    }
     if pack.entity_types.len() > limits.max_entity_types {
         bail!("version pack contains too many entity-type registry records");
     }
@@ -480,12 +477,13 @@ pub fn validate_rompack(pack: &RomPack, limits: RomPackLimits) -> Result<()> {
             );
         }
     }
-    if !pack
-        .entity_types
-        .iter()
-        .any(|entity_type| entity_type.entity_type == "minecraft:player")
+    if !pack.entity_types.is_empty()
+        && !pack
+            .entity_types
+            .iter()
+            .any(|entity_type| entity_type.entity_type == "minecraft:player")
     {
-        bail!("version pack entity-type registry is missing minecraft:player");
+        bail!("non-empty version-pack entity-type registry is missing minecraft:player");
     }
 
     if pack.data_components.len() > limits.max_data_components {

@@ -820,11 +820,12 @@ fn load_version_pack(path: &Path, config: &ServerConfig) -> Result<LoadedVersion
             .map(|entity_type| (entity_type.entity_type.clone(), entity_type.protocol_id)),
     )
     .context("cannot build entity protocol registry from version pack")?;
-    if entity_protocol_ids
-        .protocol_id("minecraft:player")
-        .is_none()
+    if !pack.entity_types.is_empty()
+        && entity_protocol_ids
+            .protocol_id("minecraft:player")
+            .is_none()
     {
-        bail!("version pack entity protocol registry is missing minecraft:player");
+        bail!("non-empty version pack entity protocol registry is missing minecraft:player");
     }
     let item_protocol_ids = ItemProtocolRegistry::new(
         pack.items

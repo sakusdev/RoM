@@ -640,6 +640,7 @@ fn resolve_protocol_registries(
     }
     Ok(RegistryProtocolReport {
         items: Vec::new(),
+        entity_types: Vec::new(),
         data_components: Vec::new(),
     })
 }
