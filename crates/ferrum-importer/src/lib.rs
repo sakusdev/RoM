@@ -18,6 +18,10 @@ use std::{
 use thiserror::Error;
 use zip::ZipArchive;
 
+const MAX_ARCHIVE_ENTRIES: usize = 250_000;
+const MAX_CLASS_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
+
 #[derive(Debug, Clone, Default)]
 pub struct ImportOptions {
     /// Optional JVM-internal or dotted class prefix.
@@ -54,6 +58,12 @@ pub enum ImportError {
         #[source]
         source: zip::result::ZipError,
     },
+    #[error("ZIP/JAR {path} contains {actual} entries, exceeding limit {limit}")]
+    EntryLimit {
+        path: PathBuf,
+        actual: usize,
+        limit: usize,
+    },
 }
 
 pub fn inspect_jar(
@@ -73,6 +83,13 @@ pub fn inspect_jar(
         path: path.to_owned(),
         source,
     })?;
+    if archive.len() > MAX_ARCHIVE_ENTRIES {
+        return Err(ImportError::EntryLimit {
+            path: path.to_owned(),
+            actual: archive.len(),
+            limit: MAX_ARCHIVE_ENTRIES,
+        });
+    }
 
     let archive_entries = archive.len();
     let manifest = read_manifest(&mut archive);
@@ -118,17 +135,32 @@ pub fn inspect_jar(
         }
 
         class_entries_seen += 1;
-        let mut bytes = Vec::with_capacity(entry.size().min(16 * 1024 * 1024) as usize);
-        if let Err(error) = entry.read_to_end(&mut bytes) {
-            errors.push(EntryError {
-                archive_path: entry_name,
-                stage: ErrorStage::ArchiveRead,
-                message: error.to_string(),
-                classfile_major: None,
-                classfile_minor: None,
-            });
-            continue;
-        }
+        let expected_size = entry.size();
+        let bytes = match read_bounded_bytes(&mut entry, expected_size, MAX_CLASS_BYTES) {
+            Ok(Some(bytes)) => bytes,
+            Ok(None) => {
+                errors.push(EntryError {
+                    archive_path: entry_name,
+                    stage: ErrorStage::ArchiveRead,
+                    message: format!(
+                        "class entry size {expected_size} exceeds {MAX_CLASS_BYTES} bytes or changed while reading"
+                    ),
+                    classfile_major: None,
+                    classfile_minor: None,
+                });
+                continue;
+            }
+            Err(error) => {
+                errors.push(EntryError {
+                    archive_path: entry_name,
+                    stage: ErrorStage::ArchiveRead,
+                    message: error.to_string(),
+                    classfile_major: None,
+                    classfile_minor: None,
+                });
+                continue;
+            }
+        };
 
         match inspect_class_bytes_with_options(
             &entry_name,
@@ -344,9 +376,27 @@ fn normalize_prefix(prefix: &str) -> String {
 
 fn read_manifest<R: Read + io::Seek>(archive: &mut ZipArchive<R>) -> Option<String> {
     let mut entry = archive.by_name("META-INF/MANIFEST.MF").ok()?;
-    let mut manifest = String::new();
-    entry.read_to_string(&mut manifest).ok()?;
-    Some(manifest)
+    let expected_size = entry.size();
+    let bytes = read_bounded_bytes(&mut entry, expected_size, MAX_MANIFEST_BYTES).ok()??;
+    String::from_utf8(bytes).ok()
+}
+
+fn read_bounded_bytes(
+    reader: impl Read,
+    expected_size: u64,
+    limit: u64,
+) -> io::Result<Option<Vec<u8>>> {
+    if expected_size > limit {
+        return Ok(None);
+    }
+    let mut bytes = Vec::with_capacity(expected_size as usize);
+    reader
+        .take(limit.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 != expected_size || bytes.len() as u64 > limit {
+        return Ok(None);
+    }
+    Ok(Some(bytes))
 }
 
 fn classfile_header_version(bytes: &[u8]) -> (Option<u16>, Option<u16>) {
@@ -366,6 +416,14 @@ mod tests {
     fn prefix_normalization_accepts_dotted_names() {
         assert_eq!(normalize_prefix("net.minecraft"), "net/minecraft");
         assert_eq!(normalize_prefix("/net/minecraft"), "net/minecraft");
+    }
+
+    #[test]
+    fn bounded_reader_rejects_oversized_or_mismatched_entries() {
+        let exact = read_bounded_bytes(&b"abcd"[..], 4, 4).unwrap();
+        assert_eq!(exact.unwrap(), b"abcd");
+        assert!(read_bounded_bytes(&b"abcde"[..], 5, 4).unwrap().is_none());
+        assert!(read_bounded_bytes(&b"abc"[..], 4, 4).unwrap().is_none());
     }
 
     #[test]

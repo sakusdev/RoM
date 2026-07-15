@@ -23,4 +23,5 @@ ferrum-runtime = { path = "../ferrum-runtime" }
 ferrum-version-26-1-2 = { path = "../ferrum-version-26-1-2" }
 ferrum-world = { path = "../ferrum-world" }
 serde_json.workspace = true
+sysinfo.workspace = true
 thiserror.workspace = true

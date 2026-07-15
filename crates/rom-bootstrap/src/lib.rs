@@ -566,7 +566,7 @@ fn verify_file(path: &Path, expected_sha1: &str, expected_size: u64) -> Result<b
 fn sha1_file(path: &Path) -> Result<String> {
     let mut file = File::open(path).with_context(|| format!("cannot open {}", path.display()))?;
     let mut hasher = Sha1::new();
-    let mut buffer = [0_u8; 64 * 1024];
+    let mut buffer = vec![0_u8; 64 * 1024];
     loop {
         let read = file
             .read(&mut buffer)

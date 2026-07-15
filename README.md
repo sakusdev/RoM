@@ -167,6 +167,32 @@ If it still disconnects, keep the exact client error and the final `connection c
 - `keepInventory` handling
 - Synchronization, rejection, snapshot, and drop metrics
 
+### Admin web GUI
+
+`ferrum-server` starts a lightweight local dashboard at
+[`http://127.0.0.1:25575`](http://127.0.0.1:25575) by default. It is embedded in
+the native binary and loads no external assets.
+
+The dashboard displays CPU, memory, and instance-filesystem disk usage, server
+uptime, online players, game ticks, and entity count. Its command box uses the
+same authoritative parser as standard input and never invokes an operating-
+system shell. Commands include `help`, `list`, `say hello`, `save-all`, and
+`stop`.
+
+Use `--no-admin-gui` to disable it and `--admin-bind` to choose another address.
+A non-loopback bind is rejected unless `--admin-token` is supplied; remote
+binds require at least 16 visible ASCII characters. The built-in endpoint is
+plain HTTP, so expose it only on a trusted LAN or place it behind a TLS reverse
+proxy. On Termux or Pixel Terminal, leave the loopback default and open
+`http://127.0.0.1:25575` in the Android browser.
+
+```bash
+ferrum-server \
+  --config ./rom-instance/server.toml \
+  --version-pack ./rom-instance/versions/26.1.2/26.1.2.rompack \
+  --admin-bind 127.0.0.1:25575
+```
+
 ### Runtime architecture
 
 - Version-neutral 20 TPS scheduling primitives
