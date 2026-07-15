@@ -32,9 +32,34 @@ jobs:
           : > "$log"
           status=0
           set +e
-          cp .github/scripts/agent_health_rs.txt crates/ferrum-play/src/health.rs
-          python3 .github/scripts/agent_health_replication.py 2>&1 | tee -a "$log"
+
+          python3 - <<'PY' 2>&1 | tee -a "$log"
+          from pathlib import Path
+
+          path = Path('.github/scripts/agent_health_replication.py')
+          text = path.read_text()
+          old = '    text = replace_once(text, old_connected_tail, new_connected_tail, "initial health replication")'
+          new = '''    connected_start = text.index("        GameEvent::PlayerConnected")
+              connected_end = text.index("        GameEvent::PlayerDisconnected", connected_start)
+              connected = text[connected_start:connected_end]
+              connected = replace_once(
+                  connected,
+                  old_connected_tail,
+                  new_connected_tail,
+                  "initial health replication",
+              )
+              text = text[:connected_start] + connected + text[connected_end:]'''
+          if text.count(old) != 1:
+              raise SystemExit(f'health transform patch: expected one anchor, found {text.count(old)}')
+          path.write_text(text.replace(old, new, 1))
+          PY
           status=${PIPESTATUS[0]}
+
+          if [ "$status" -eq 0 ]; then
+            cp .github/scripts/agent_health_rs.txt crates/ferrum-play/src/health.rs
+            python3 .github/scripts/agent_health_replication.py 2>&1 | tee -a "$log"
+            status=${PIPESTATUS[0]}
+          fi
           if [ "$status" -eq 0 ]; then
             cargo fmt --all 2>&1 | tee -a "$log"
             status=${PIPESTATUS[0]}
