@@ -51,7 +51,6 @@ jobs:
                   raise SystemExit("official bundle has no inner game jar")
               with open("/tmp/game.jar", "wb") as output:
                   output.write(archive.read(names[0]))
-              print(names[0])
           PY
 
           python3 - /tmp/game.jar <<'PY' > /tmp/constant-matches.txt
@@ -60,13 +59,13 @@ jobs:
           import sys
           import zipfile
 
-          needles = (
+          needles = {
               "set_health",
               "damage_event",
               "hurt_animation",
               "player_combat_kill",
               "respawn",
-          )
+          }
 
           def u1(stream):
               return stream.read(1)[0]
@@ -112,8 +111,8 @@ jobs:
               for name in archive.namelist():
                   if not name.endswith(".class"):
                       continue
-                  values = utf8_constants(archive.read(name))
-                  matched = sorted({needle for needle in needles if any(needle in value for value in values)})
+                  values = set(utf8_constants(archive.read(name)))
+                  matched = sorted(needles & values)
                   if matched:
                       print(name[:-6].replace("/", ".") + "\t" + ",".join(matched))
           PY
@@ -121,15 +120,17 @@ jobs:
           {
             echo "constant_matches:"
             cat /tmp/constant-matches.txt
-            echo "javap_matches:"
+            echo "registration_contexts:"
             while IFS=$'\t' read -r class needles; do
               echo "===== $class [$needles] ====="
-              javap -classpath /tmp/game.jar -p -c -verbose "$class" | sed -n '1,1400p'
+              javap -classpath /tmp/game.jar -p -c "$class" > /tmp/javap.txt
+              sed -n '1,120p' /tmp/javap.txt
+              grep -nE -B 24 -A 60 'String (set_health|damage_event|hurt_animation|player_combat_kill|respawn)' /tmp/javap.txt || true
             done < /tmp/constant-matches.txt
           } > .github/version-mapping-diagnostic.txt
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .github/version-mapping-diagnostic.txt
-          git commit -m "Record official packet bytecode diagnostics"
+          git commit -m "Record focused packet bytecode diagnostics"
           git push origin HEAD:agent/complete-server-features
