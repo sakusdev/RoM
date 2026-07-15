@@ -1,4 +1,4 @@
-name: Inspect 26.1.2 packet bytecode
+name: Inspect 26.1.2 respawn protocol
 
 on:
   pull_request:
@@ -27,7 +27,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
-      - name: Inspect exact official packet classes
+      - name: Inspect official respawn and client-command codecs
         shell: bash
         run: |
           set -euo pipefail
@@ -52,24 +52,31 @@ jobs:
                   output.write(archive.read(names[0]))
           PY
 
+          mkdir -p /tmp/generated
+          java -DbundlerMainClass=net.minecraft.data.Main -jar "$outer" \
+            --reports --output /tmp/generated > /tmp/generator.log 2>&1
+          report=/tmp/generated/reports/packets.json
+
           classes=(
-            net.minecraft.network.protocol.game.ClientboundSetHealthPacket
-            net.minecraft.network.protocol.game.ClientboundDamageEventPacket
-            net.minecraft.network.protocol.game.ClientboundHurtAnimationPacket
-            net.minecraft.network.protocol.game.ClientboundPlayerCombatKillPacket
+            net.minecraft.network.protocol.game.ServerboundClientCommandPacket
+            'net.minecraft.network.protocol.game.ServerboundClientCommandPacket$Action'
             net.minecraft.network.protocol.game.ClientboundRespawnPacket
             net.minecraft.network.protocol.game.CommonPlayerSpawnInfo
+            net.minecraft.world.damagesource.DamageType
+            net.minecraft.world.level.dimension.DimensionType
           )
-          : > .github/version-mapping-diagnostic.txt
-          for class in "${classes[@]}"; do
-            {
+          {
+            echo 'packet_ids:'
+            jq '{client_command: .play.serverbound["minecraft:client_command"], respawn: .play.clientbound["minecraft:respawn"], damage_event: .play.clientbound["minecraft:damage_event"], hurt_animation: .play.clientbound["minecraft:hurt_animation"], player_combat_kill: .play.clientbound["minecraft:player_combat_kill"]}' "$report"
+            echo 'class_codecs:'
+            for class in "${classes[@]}"; do
               echo "===== $class ====="
-              javap -classpath /tmp/game.jar -p -c -s "$class"
-            } >> .github/version-mapping-diagnostic.txt
-          done
+              javap -classpath /tmp/game.jar -p -c -s -constants "$class"
+            done
+          } > .github/version-mapping-diagnostic.txt
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .github/version-mapping-diagnostic.txt
-          git commit -m "Record exact combat and respawn packet codecs"
+          git commit -m "Record respawn client-command protocol details"
           git push origin HEAD:agent/complete-server-features
