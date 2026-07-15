@@ -28,39 +28,34 @@ jobs:
       - name: Implement, validate, and commit
         shell: bash
         run: |
-          python3 - <<'PY'
+          log=/tmp/entity-replication-validation.log
+          : > "$log"
+          status=0
+          set +e
+
+          python3 - <<'PY' 2>&1 | tee -a "$log"
           from pathlib import Path
 
           path = Path('.github/scripts/agent_entity_replication.py')
           text = path.read_text()
-          old = '''old_dispatch = "dispatch_event(event, &mut connections, &mut exit);"
-          if text.count(old_dispatch) != 2:
-              raise SystemExit(f"expected two dispatch anchors, found {text.count(old_dispatch)}")
-          text = text.replace(
-              old_dispatch,
-              "dispatch_event(\n                    event,\n                    &runtime,\n                    &config.entity_protocol_ids,\n                    &mut connections,\n                    &mut exit,\n                )?;",
-          )
-          '''
-          new = '''replace_once(
+          start = text.index('old_dispatch = "dispatch_event(event, &mut connections, &mut exit);"')
+          end = text.index('\n\nreplace_once(', start)
+          replacement = '''replace_once(
               "dispatch_event(event, &mut connections, &mut exit);",
               "dispatch_event(event, &runtime, &config.entity_protocol_ids, &mut connections, &mut exit)?;",
           )
           replace_once(
               "Ok(event) => dispatch_event(event, &mut connections, &mut exit),",
               "Ok(event) => dispatch_event(event, &runtime, &config.entity_protocol_ids, &mut connections, &mut exit)?,",
-          )
-          '''
-          if text.count(old) != 1:
-              raise SystemExit(f'cannot patch dispatch transform: found {text.count(old)} anchors')
-          path.write_text(text.replace(old, new, 1))
+          )'''
+          path.write_text(text[:start] + replacement + text[end:])
           PY
-
-          log=/tmp/entity-replication-validation.log
-          : > "$log"
-          status=0
-          set +e
-          python3 .github/scripts/agent_entity_replication.py 2>&1 | tee -a "$log"
           status=${PIPESTATUS[0]}
+
+          if [ "$status" -eq 0 ]; then
+            python3 .github/scripts/agent_entity_replication.py 2>&1 | tee -a "$log"
+            status=${PIPESTATUS[0]}
+          fi
           if [ "$status" -eq 0 ]; then
             cargo fmt --all 2>&1 | tee -a "$log"
             status=${PIPESTATUS[0]}
