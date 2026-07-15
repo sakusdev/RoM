@@ -1,0 +1,173 @@
+name: Complete respawn and combat lifecycle
+
+on:
+  pull_request:
+    types: [reopened]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: agent-complete-respawn-combat
+  cancel-in-progress: false
+
+jobs:
+  implement-and-validate:
+    if: >-
+      github.event.pull_request.number == 61 &&
+      github.event.pull_request.head.ref == 'agent/complete-server-features'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/complete-server-features
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Implement, validate, and commit
+        shell: bash
+        run: |
+          log=/tmp/respawn-combat-validation.log
+          : > "$log"
+          status=0
+          set +e
+
+          python3 - <<'PY' 2>&1 | tee -a "$log"
+          from pathlib import Path
+
+          path = Path('.github/scripts/agent_respawn_combat.py')
+          text = path.read_text()
+          old = '''        """pub struct JoinGame {
+          """,
+                  """#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+          #[repr(u8)]
+          pub enum RespawnDataToKeep {
+              Nothing = 0,
+              Attributes = 1,
+              EntityData = 2,
+              All = 3,
+          }
+
+          #[derive(Debug, Clone, PartialEq)]
+          pub struct Respawn {
+              pub spawn_info: CommonPlayerSpawnInfo,
+              pub data_to_keep: RespawnDataToKeep,
+          }
+
+          pub struct JoinGame {
+          """,'''
+          new = '''        """#[derive(Debug, Clone, PartialEq)]
+          pub struct JoinGame {
+          """,
+                  """#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+          #[repr(u8)]
+          pub enum RespawnDataToKeep {
+              Nothing = 0,
+              Attributes = 1,
+              EntityData = 2,
+              All = 3,
+          }
+
+          #[derive(Debug, Clone, PartialEq)]
+          pub struct Respawn {
+              pub spawn_info: CommonPlayerSpawnInfo,
+              pub data_to_keep: RespawnDataToKeep,
+          }
+
+          #[derive(Debug, Clone, PartialEq)]
+          pub struct JoinGame {
+          """,'''
+          if text.count(old) != 1:
+              raise SystemExit(f'join-game derive patch: expected one anchor, found {text.count(old)}')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          status=${PIPESTATUS[0]}
+
+          if [ "$status" -eq 0 ]; then
+            python3 .github/scripts/agent_respawn_combat.py 2>&1 | tee -a "$log"
+            status=${PIPESTATUS[0]}
+          fi
+          if [ "$status" -eq 0 ]; then
+            python3 - <<'PY' 2>&1 | tee -a "$log"
+          from pathlib import Path
+
+          path = Path('crates/ferrum-server/src/game_replication.rs')
+          text = path.read_text()
+          start = text.index('    fn sends_hurt_death_respawn_teleport_and_health_in_order()')
+          end = text.index('\n    }', start) + len('\n    }')
+          block = text[start:end]
+          old_call = '''        recv_protocol(
+                      &writer,
+                      &mut workers,
+                      &mut inputs,
+                      PacketKind::SetHealth,
+                  );'''
+          replacement = '''        assert!(matches!(
+                      recv_raw_output(&writer, &mut workers, &mut inputs),
+                      PlayOutput::ProtocolPacket {
+                          kind: PacketKind::SetHealth,
+                          ..
+                      }
+                  ));'''
+          if block.count(old_call) != 3:
+              raise SystemExit(f'health receive conversion: expected 3 calls, found {block.count(old_call)}')
+          block = block.replace(old_call, replacement)
+          path.write_text(text[:start] + block + text[end:])
+          PY
+            status=${PIPESTATUS[0]}
+          fi
+          if [ "$status" -eq 0 ]; then
+            cargo fmt --all 2>&1 | tee -a "$log"
+            status=${PIPESTATUS[0]}
+          fi
+          if [ "$status" -eq 0 ]; then
+            cargo fmt --all --check 2>&1 | tee -a "$log"
+            status=${PIPESTATUS[0]}
+          fi
+          if [ "$status" -eq 0 ]; then
+            cargo check --workspace --all-targets --all-features 2>&1 | tee -a "$log"
+            status=${PIPESTATUS[0]}
+          fi
+          if [ "$status" -eq 0 ]; then
+            cargo clippy --workspace --all-targets --all-features -- -D warnings 2>&1 | tee -a "$log"
+            status=${PIPESTATUS[0]}
+          fi
+          if [ "$status" -eq 0 ]; then
+            cargo test --workspace --all-features 2>&1 | tee -a "$log"
+            status=${PIPESTATUS[0]}
+          fi
+          set -e
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ "$status" -ne 0 ]; then
+            git checkout -- \
+              crates/ferrum-protocol/src/lib.rs \
+              crates/ferrum-protocol/src/packet_catalog.rs \
+              crates/ferrum-version-26-1-2/src/lib.rs \
+              crates/ferrum-play/src/lib.rs \
+              crates/ferrum-game/src/state.rs \
+              crates/ferrum-server/src/game_runtime.rs \
+              crates/ferrum-server/src/play_runtime.rs \
+              crates/ferrum-server/src/game_replication.rs \
+              crates/ferrum-server/src/main.rs \
+              docs/SERVER_ROADMAP.md
+            cp "$log" .github/respawn-combat-diagnostic.txt
+            git add .github/respawn-combat-diagnostic.txt
+            if ! git diff --cached --quiet; then
+              git commit -m "Record respawn combat validation failure"
+              git push origin HEAD:agent/complete-server-features
+            fi
+            exit "$status"
+          fi
+
+          rm .github/scripts/agent_respawn_combat.py
+          rm .github/workflows/agent-respawn-combat.yml
+          rm -f .github/respawn-combat-diagnostic.txt
+          rm -f .github/workflows/agent-inspect-version-mappings.yml
+          rm -f .github/version-mapping-diagnostic.txt
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "Complete player death and respawn lifecycle"
+          git push origin HEAD:agent/complete-server-features
