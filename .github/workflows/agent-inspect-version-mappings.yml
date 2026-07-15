@@ -27,7 +27,7 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
-      - name: Scan official game class constants
+      - name: Inspect exact official packet classes
         shell: bash
         run: |
           set -euo pipefail
@@ -41,8 +41,7 @@ jobs:
           import sys
           import zipfile
 
-          outer = sys.argv[1]
-          with zipfile.ZipFile(outer) as archive:
+          with zipfile.ZipFile(sys.argv[1]) as archive:
               names = sorted(
                   name for name in archive.namelist()
                   if name.startswith("META-INF/versions/") and name.endswith(".jar")
@@ -53,84 +52,24 @@ jobs:
                   output.write(archive.read(names[0]))
           PY
 
-          python3 - /tmp/game.jar <<'PY' > /tmp/constant-matches.txt
-          import io
-          import struct
-          import sys
-          import zipfile
-
-          needles = {
-              "set_health",
-              "damage_event",
-              "hurt_animation",
-              "player_combat_kill",
-              "respawn",
-          }
-
-          def u1(stream):
-              return stream.read(1)[0]
-
-          def u2(stream):
-              return struct.unpack(">H", stream.read(2))[0]
-
-          def skip(stream, count):
-              data = stream.read(count)
-              if len(data) != count:
-                  raise EOFError
-
-          def utf8_constants(data):
-              stream = io.BytesIO(data)
-              if stream.read(4) != b"\xca\xfe\xba\xbe":
-                  return []
-              skip(stream, 4)
-              count = u2(stream)
-              values = []
-              index = 1
-              while index < count:
-                  tag = u1(stream)
-                  if tag == 1:
-                      length = u2(stream)
-                      values.append(stream.read(length).decode("utf-8", "replace"))
-                  elif tag in (3, 4):
-                      skip(stream, 4)
-                  elif tag in (5, 6):
-                      skip(stream, 8)
-                      index += 1
-                  elif tag in (7, 8, 16, 19, 20):
-                      skip(stream, 2)
-                  elif tag in (9, 10, 11, 12, 17, 18):
-                      skip(stream, 4)
-                  elif tag == 15:
-                      skip(stream, 3)
-                  else:
-                      raise ValueError(f"unknown constant tag {tag}")
-                  index += 1
-              return values
-
-          with zipfile.ZipFile(sys.argv[1]) as archive:
-              for name in archive.namelist():
-                  if not name.endswith(".class"):
-                      continue
-                  values = set(utf8_constants(archive.read(name)))
-                  matched = sorted(needles & values)
-                  if matched:
-                      print(name[:-6].replace("/", ".") + "\t" + ",".join(matched))
-          PY
-
-          {
-            echo "constant_matches:"
-            cat /tmp/constant-matches.txt
-            echo "registration_contexts:"
-            while IFS=$'\t' read -r class needles; do
-              echo "===== $class [$needles] ====="
-              javap -classpath /tmp/game.jar -p -c "$class" > /tmp/javap.txt
-              sed -n '1,120p' /tmp/javap.txt
-              grep -nE -B 24 -A 60 'String (set_health|damage_event|hurt_animation|player_combat_kill|respawn)' /tmp/javap.txt || true
-            done < /tmp/constant-matches.txt
-          } > .github/version-mapping-diagnostic.txt
+          classes=(
+            net.minecraft.network.protocol.game.ClientboundSetHealthPacket
+            net.minecraft.network.protocol.game.ClientboundDamageEventPacket
+            net.minecraft.network.protocol.game.ClientboundHurtAnimationPacket
+            net.minecraft.network.protocol.game.ClientboundPlayerCombatKillPacket
+            net.minecraft.network.protocol.game.ClientboundRespawnPacket
+            net.minecraft.network.protocol.game.CommonPlayerSpawnInfo
+          )
+          : > .github/version-mapping-diagnostic.txt
+          for class in "${classes[@]}"; do
+            {
+              echo "===== $class ====="
+              javap -classpath /tmp/game.jar -p -c -s "$class"
+            } >> .github/version-mapping-diagnostic.txt
+          done
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .github/version-mapping-diagnostic.txt
-          git commit -m "Record focused packet bytecode diagnostics"
+          git commit -m "Record exact combat and respawn packet codecs"
           git push origin HEAD:agent/complete-server-features
