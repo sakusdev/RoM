@@ -8,6 +8,7 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use ferrum_game::{GameEvent, PLAYER_INVENTORY_SLOTS, PlayerUuid};
+use ferrum_play::EntityProtocolRegistry;
 
 use crate::{
     authoritative_runtime::PlayOutput,
@@ -26,6 +27,7 @@ pub struct GameReplicationConfig {
     pub command_capacity: NonZeroUsize,
     pub pending_output_limit: NonZeroUsize,
     pub poll_interval: Duration,
+    pub entity_protocol_ids: EntityProtocolRegistry,
 }
 
 impl Default for GameReplicationConfig {
@@ -36,6 +38,7 @@ impl Default for GameReplicationConfig {
             pending_output_limit: NonZeroUsize::new(DEFAULT_PENDING_OUTPUT_LIMIT)
                 .expect("pending output limit is non-zero"),
             poll_interval: DEFAULT_POLL_INTERVAL,
+            entity_protocol_ids: EntityProtocolRegistry::default(),
         }
     }
 }

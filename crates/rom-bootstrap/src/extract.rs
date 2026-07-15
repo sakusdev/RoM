@@ -172,6 +172,7 @@ pub fn generate_version_pack(options: &GenerateOptions) -> Result<GenerateReport
     let protocol_registries =
         resolve_protocol_registries(&instance, options.registry_report.as_deref())?;
     let items = protocol_registries.items;
+    let entity_types = protocol_registries.entity_types;
     let data_components = protocol_registries.data_components;
     let packets = typed_packet_inventory(&packet_catalog)?;
     let world = builtin_world_metadata();
@@ -202,6 +203,7 @@ pub fn generate_version_pack(options: &GenerateOptions) -> Result<GenerateReport
         packet_catalog: packet_catalog.entries().to_vec(),
         world,
         items,
+        entity_types,
         data_components,
         registries,
         resources,

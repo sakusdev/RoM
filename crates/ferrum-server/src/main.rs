@@ -20,11 +20,12 @@ use ferrum_game::{CommandSource, GameState, PlayerUuid as GamePlayerUuid, Transf
 use ferrum_nbt::{Tag, encode_anonymous};
 use ferrum_play::{
     BlockPosition, CommonPlayerSpawnInfo, DataComponentProtocolRegistry, DefaultSpawnPosition,
-    GlobalPosition, ItemProtocolRegistry, JoinGame, PlayerPosition, PositionMoveRotation,
-    encode_chunk_batch_finished, encode_chunk_batch_start, encode_default_spawn_position,
-    encode_join_game, encode_level_chunk_with_light, encode_play_disconnect,
-    encode_player_position, encode_set_chunk_cache_center, encode_set_container_content,
-    encode_set_container_slot, encode_set_player_inventory_with_components, encode_system_chat,
+    EntityProtocolRegistry, GlobalPosition, ItemProtocolRegistry, JoinGame, PlayerPosition,
+    PositionMoveRotation, encode_chunk_batch_finished, encode_chunk_batch_start,
+    encode_default_spawn_position, encode_join_game, encode_level_chunk_with_light,
+    encode_play_disconnect, encode_player_position, encode_set_chunk_cache_center,
+    encode_set_container_content, encode_set_container_slot,
+    encode_set_player_inventory_with_components, encode_system_chat,
 };
 use ferrum_protocol::{HandshakeIntent, PacketKind, PacketTable, ProtocolProfile, ProtocolSession};
 use ferrum_rompack::{RomPack, RomPackPacket, RomPackRegistry, RomPackWorld, read_rompack};
@@ -262,6 +263,7 @@ impl ServerState {
             config.online_players,
             play_runtime::builtin_world_profile(),
             registry_payloads,
+            EntityProtocolRegistry::default(),
             config.play_policy.clone(),
             None,
             None,
@@ -274,6 +276,7 @@ impl ServerState {
         initial_online_players: i32,
         world: RomPackWorld,
         registry_payloads: Vec<Vec<u8>>,
+        entity_protocol_ids: EntityProtocolRegistry,
         play_policy: PlayPolicy,
         loaded_chunks: Option<ChunkStore>,
         game_state: Option<GameState>,
@@ -304,8 +307,13 @@ impl ServerState {
         });
         let world_service = spawn_world_service(Arc::clone(&shared_world), persistence.world)?;
         let shared_play_runtime = spawn_shared_play_runtime(shared_runtime_config)?;
-        let game_replication =
-            spawn_game_replication(&game_runtime, GameReplicationConfig::default())?;
+        let game_replication = spawn_game_replication(
+            &game_runtime,
+            GameReplicationConfig {
+                entity_protocol_ids,
+                ..GameReplicationConfig::default()
+            },
+        )?;
         Ok(Self {
             online_players: AtomicI32::new(initial_online_players),
             next_connection_id: AtomicU64::new(1),
@@ -332,6 +340,7 @@ impl ServerState {
             initial_online_players,
             world,
             registry_payloads,
+            EntityProtocolRegistry::default(),
             play_policy,
             Some(store),
             None,
@@ -550,6 +559,7 @@ fn run(cli: Cli) -> Result<()> {
         runtime_profile,
         world_profile,
         registry_payloads,
+        entity_protocol_ids,
         item_protocol_ids,
         data_component_protocol_ids,
     ) = if let Some(version_pack) = &cli.version_pack {
@@ -558,6 +568,7 @@ fn run(cli: Cli) -> Result<()> {
             loaded.profile,
             loaded.world,
             loaded.registry_payloads,
+            loaded.entity_protocol_ids,
             loaded.item_protocol_ids,
             loaded.data_component_protocol_ids,
         )
@@ -574,6 +585,7 @@ fn run(cli: Cli) -> Result<()> {
                 .context("cannot build configured protocol profile")?,
             play_runtime::builtin_world_profile(),
             registry_payloads,
+            EntityProtocolRegistry::default(),
             ItemProtocolRegistry::default(),
             DataComponentProtocolRegistry::default(),
         )
@@ -603,6 +615,7 @@ fn run(cli: Cli) -> Result<()> {
         config.online_players,
         world_profile,
         registry_payloads,
+        entity_protocol_ids,
         config.play_policy.clone(),
         loaded_chunks,
         Some(game_state),
@@ -773,6 +786,7 @@ struct LoadedVersionPack {
     profile: ProtocolProfile,
     world: RomPackWorld,
     registry_payloads: Vec<Vec<u8>>,
+    entity_protocol_ids: EntityProtocolRegistry,
     item_protocol_ids: ItemProtocolRegistry,
     data_component_protocol_ids: DataComponentProtocolRegistry,
 }
@@ -800,6 +814,18 @@ fn load_version_pack(path: &Path, config: &ServerConfig) -> Result<LoadedVersion
     let profile =
         protocol_profile_from_packets(&config.version_name, pack.metadata.protocol, &pack.packets)?;
     let registry_payloads = registry_payloads_from_pack(&pack.registries)?;
+    let entity_protocol_ids = EntityProtocolRegistry::new(
+        pack.entity_types
+            .iter()
+            .map(|entity_type| (entity_type.entity_type.clone(), entity_type.protocol_id)),
+    )
+    .context("cannot build entity protocol registry from version pack")?;
+    if entity_protocol_ids
+        .protocol_id("minecraft:player")
+        .is_none()
+    {
+        bail!("version pack entity protocol registry is missing minecraft:player");
+    }
     let item_protocol_ids = ItemProtocolRegistry::new(
         pack.items
             .iter()
@@ -828,6 +854,7 @@ fn load_version_pack(path: &Path, config: &ServerConfig) -> Result<LoadedVersion
         profile,
         world: pack.world,
         registry_payloads,
+        entity_protocol_ids,
         item_protocol_ids,
         data_component_protocol_ids,
     })
