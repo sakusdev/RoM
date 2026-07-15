@@ -89,18 +89,15 @@ jobs:
           replacement = '''    all_start = text.index("    pub const ALL:")
               all_end = text.index("    #[must_use]\\n    pub const fn phase", all_start)
               all_section = text[all_start:all_end]
-              all_section = replace_once(
-                  all_section,
-                  """        Self::KeepAliveResponse,
-              Self::ClientTickEnd,
-              Self::MovePlayerPosition,
-          """,
-                  """        Self::KeepAliveResponse,
-              Self::ClientTickEnd,
-              Self::ClientCommand,
-              Self::MovePlayerPosition,
-          """,
-                  "client command all",
+              needle = "        Self::ClientTickEnd,\\n"
+              if all_section.count(needle) != 1:
+                  raise SystemExit(
+                      f"client command all: expected one ClientTickEnd, found {all_section.count(needle)}"
+                  )
+              all_section = all_section.replace(
+                  needle,
+                  needle + "        Self::ClientCommand,\\n",
+                  1,
               )
               text = text[:all_start] + all_section + text[all_end:]
           '''
