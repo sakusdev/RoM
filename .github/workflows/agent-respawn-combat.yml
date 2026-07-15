@@ -188,8 +188,25 @@ jobs:
             python3 - <<'PY' 2>&1 | tee -a "$log"
           from pathlib import Path
 
+          state_path = Path('crates/ferrum-game/src/state.rs')
+          state = state_path.read_text()
+          kill_start = state.index('    pub fn kill_player(')
+          kill_end = state.index('    pub fn respawn_player(', kill_start)
+          kill = state[kill_start:kill_end]
+          needle = '        self.connected_entity_id(uuid)?;\n'
+          if kill.count(needle) != 1:
+              raise SystemExit(f'kill entity id: expected one anchor, found {kill.count(needle)}')
+          kill = kill.replace(
+              needle,
+              '        let entity_id = self.connected_entity_id(uuid)?;\n',
+              1,
+          )
+          state = state[:kill_start] + kill + state[kill_end:]
+          state = state.replace('crate::Velocity::ZERO', 'crate::Velocity::default()')
+          state_path.write_text(state)
+
           path = Path('crates/ferrum-server/src/game_replication.rs')
-          text = path.read_text()
+          text = path.read_text().replace('Velocity::ZERO', 'Velocity::default()')
           start = text.index('    fn sends_hurt_death_respawn_teleport_and_health_in_order()')
           end = text.index('\n    }', start) + len('\n    }')
           block = text[start:end]
