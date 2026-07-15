@@ -20,6 +20,34 @@ jobs:
       - run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Narrow ambiguous transformation anchor
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path("tools/apply_entity_registry.py")
+          text = path.read_text()
+          old = '''text = one(text, """        registry_payloads: Vec<Vec<u8>>,
+                  play_policy: PlayPolicy,
+          """, """        registry_payloads: Vec<Vec<u8>>,
+                  entity_protocol_ids: EntityProtocolRegistry,
+                  play_policy: PlayPolicy,
+          """, "runtime entity parameter")'''
+          new = '''text = one(text, """    fn with_runtime(
+                  initial_online_players: i32,
+                  world: RomPackWorld,
+                  registry_payloads: Vec<Vec<u8>>,
+                  play_policy: PlayPolicy,
+          """, """    fn with_runtime(
+                  initial_online_players: i32,
+                  world: RomPackWorld,
+                  registry_payloads: Vec<Vec<u8>>,
+                  entity_protocol_ids: EntityProtocolRegistry,
+                  play_policy: PlayPolicy,
+          """, "runtime entity parameter")'''
+          if text.count(old) != 1:
+              raise SystemExit(f"script anchor expected once, found {text.count(old)}")
+          path.write_text(text.replace(old, new, 1))
+          PY
       - name: Apply or record exact failure
         run: |
           set +e
