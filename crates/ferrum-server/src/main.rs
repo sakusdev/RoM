@@ -16,15 +16,16 @@ use ferrum_configuration::{
     decode_known_packs, encode_feature_flags, encode_known_packs, encode_registry_data,
     encode_tags,
 };
-use ferrum_game::{CommandSource, GameState, PlayerUuid as GamePlayerUuid, Transform};
+use ferrum_game::{CommandSource, EntityId, GameState, PlayerUuid as GamePlayerUuid, Transform};
 use ferrum_nbt::{Tag, encode_anonymous};
 use ferrum_play::{
     BlockPosition, CommonPlayerSpawnInfo, DataComponentProtocolRegistry, DefaultSpawnPosition,
-    GlobalPosition, ItemProtocolRegistry, JoinGame, PlayerPosition, PositionMoveRotation,
-    encode_chunk_batch_finished, encode_chunk_batch_start, encode_default_spawn_position,
-    encode_join_game, encode_level_chunk_with_light, encode_play_disconnect,
-    encode_player_position, encode_set_chunk_cache_center, encode_set_container_content,
-    encode_set_container_slot, encode_set_player_inventory_with_components, encode_system_chat,
+    EntityProtocolRegistry, GlobalPosition, ItemProtocolRegistry, JoinGame, PlayerPosition,
+    PositionMoveRotation, encode_chunk_batch_finished, encode_chunk_batch_start,
+    encode_default_spawn_position, encode_join_game, encode_level_chunk_with_light,
+    encode_play_disconnect, encode_player_position, encode_set_chunk_cache_center,
+    encode_set_container_content, encode_set_container_slot,
+    encode_set_player_inventory_with_components, encode_system_chat,
 };
 use ferrum_protocol::{HandshakeIntent, PacketKind, PacketTable, ProtocolProfile, ProtocolSession};
 use ferrum_rompack::{RomPack, RomPackPacket, RomPackRegistry, RomPackWorld, read_rompack};
@@ -235,6 +236,14 @@ struct PersistenceConfig {
     world: WorldServiceConfig,
 }
 
+#[derive(Debug, Clone, Default)]
+struct RuntimeRegistryData {
+    configuration_payloads: Vec<Vec<u8>>,
+    entity_protocol_ids: EntityProtocolRegistry,
+    item_protocol_ids: ItemProtocolRegistry,
+    data_component_protocol_ids: DataComponentProtocolRegistry,
+}
+
 #[derive(Debug)]
 struct ServerState {
     online_players: AtomicI32,
@@ -261,7 +270,12 @@ impl ServerState {
         Self::with_runtime(
             config.online_players,
             play_runtime::builtin_world_profile(),
-            registry_payloads,
+            RuntimeRegistryData {
+                configuration_payloads: registry_payloads,
+                entity_protocol_ids: EntityProtocolRegistry::default(),
+                item_protocol_ids: ItemProtocolRegistry::default(),
+                data_component_protocol_ids: DataComponentProtocolRegistry::default(),
+            },
             config.play_policy.clone(),
             None,
             None,
@@ -273,13 +287,20 @@ impl ServerState {
     fn with_runtime(
         initial_online_players: i32,
         world: RomPackWorld,
-        registry_payloads: Vec<Vec<u8>>,
+        registries: RuntimeRegistryData,
         play_policy: PlayPolicy,
         loaded_chunks: Option<ChunkStore>,
         game_state: Option<GameState>,
         persistence: PersistenceConfig,
     ) -> Result<Self> {
+        let RuntimeRegistryData {
+            configuration_payloads,
+            entity_protocol_ids,
+            item_protocol_ids,
+            data_component_protocol_ids,
+        } = registries;
         let center = play_runtime::spawn_chunk(&world);
+        let replication_world = world.clone();
         let game_state = match game_state {
             Some(state) => {
                 if state.dimension() != world.dimension {
@@ -304,13 +325,21 @@ impl ServerState {
         });
         let world_service = spawn_world_service(Arc::clone(&shared_world), persistence.world)?;
         let shared_play_runtime = spawn_shared_play_runtime(shared_runtime_config)?;
-        let game_replication =
-            spawn_game_replication(&game_runtime, GameReplicationConfig::default())?;
+        let game_replication = spawn_game_replication(
+            &game_runtime,
+            GameReplicationConfig {
+                entity_protocol_ids,
+                item_protocol_ids,
+                data_component_protocol_ids,
+                world: Some(replication_world),
+                ..GameReplicationConfig::default()
+            },
+        )?;
         Ok(Self {
             online_players: AtomicI32::new(initial_online_players),
             next_connection_id: AtomicU64::new(1),
             world: shared_world,
-            registry_payloads,
+            registry_payloads: configuration_payloads,
             shared_play_runtime,
             game_runtime,
             game_service,
@@ -331,7 +360,12 @@ impl ServerState {
         Self::with_runtime(
             initial_online_players,
             world,
-            registry_payloads,
+            RuntimeRegistryData {
+                configuration_payloads: registry_payloads,
+                entity_protocol_ids: EntityProtocolRegistry::default(),
+                item_protocol_ids: ItemProtocolRegistry::default(),
+                data_component_protocol_ids: DataComponentProtocolRegistry::default(),
+            },
             play_policy,
             Some(store),
             None,
@@ -374,11 +408,20 @@ impl ServerState {
             let _ = play_reader.try_disconnect();
             return Err(error.into());
         }
+        let entity_id = self
+            .game_runtime
+            .with_state(|state| {
+                state
+                    .player(player_uuid)
+                    .and_then(|player| player.entity_id)
+            })?
+            .with_context(|| format!("connected player {player_uuid:?} has no entity id"))?;
         self.online_players.fetch_add(1, Ordering::Relaxed);
         Ok(OnlinePlayerGuard {
             state: self,
             connection_id,
             player_uuid,
+            entity_id,
             play_reader,
             play_writer: Some(play_writer),
         })
@@ -456,6 +499,7 @@ struct OnlinePlayerGuard<'a> {
     state: &'a ServerState,
     connection_id: ConnectionId,
     player_uuid: GamePlayerUuid,
+    entity_id: EntityId,
     play_reader: PlayReaderEndpoint,
     play_writer: Option<PlayWriterEndpoint>,
 }
@@ -467,6 +511,10 @@ impl OnlinePlayerGuard<'_> {
 
     fn player_uuid(&self) -> GamePlayerUuid {
         self.player_uuid
+    }
+
+    fn entity_id(&self) -> EntityId {
+        self.entity_id
     }
 
     fn play_reader(&self) -> &PlayReaderEndpoint {
@@ -509,6 +557,7 @@ struct PlayWorldContext<'a> {
 struct InitialInventorySync {
     control: GameReplicationControl,
     uuid: GamePlayerUuid,
+    entity_id: EntityId,
 }
 
 fn main() -> Result<()> {
@@ -550,6 +599,7 @@ fn run(cli: Cli) -> Result<()> {
         runtime_profile,
         world_profile,
         registry_payloads,
+        entity_protocol_ids,
         item_protocol_ids,
         data_component_protocol_ids,
     ) = if let Some(version_pack) = &cli.version_pack {
@@ -558,6 +608,7 @@ fn run(cli: Cli) -> Result<()> {
             loaded.profile,
             loaded.world,
             loaded.registry_payloads,
+            loaded.entity_protocol_ids,
             loaded.item_protocol_ids,
             loaded.data_component_protocol_ids,
         )
@@ -574,13 +625,19 @@ fn run(cli: Cli) -> Result<()> {
                 .context("cannot build configured protocol profile")?,
             play_runtime::builtin_world_profile(),
             registry_payloads,
+            EntityProtocolRegistry::default(),
             ItemProtocolRegistry::default(),
             DataComponentProtocolRegistry::default(),
         )
     };
+    validate_replication_packet_support(
+        &runtime_profile,
+        &entity_protocol_ids,
+        &item_protocol_ids,
+    )?;
     config.runtime_profile = Some(runtime_profile);
-    config.item_protocol_ids = item_protocol_ids;
-    config.data_component_protocol_ids = data_component_protocol_ids;
+    config.item_protocol_ids = item_protocol_ids.clone();
+    config.data_component_protocol_ids = data_component_protocol_ids.clone();
     let game_state = load_game_state(&game_state_path, &world_profile.dimension)?;
     let loaded_chunks = match load_world_state(&world_state_path, &world_profile)? {
         Some(store) => Some(store),
@@ -602,7 +659,12 @@ fn run(cli: Cli) -> Result<()> {
     let state = Arc::new(ServerState::with_runtime(
         config.online_players,
         world_profile,
-        registry_payloads,
+        RuntimeRegistryData {
+            configuration_payloads: registry_payloads,
+            entity_protocol_ids,
+            item_protocol_ids,
+            data_component_protocol_ids,
+        },
         config.play_policy.clone(),
         loaded_chunks,
         Some(game_state),
@@ -773,6 +835,7 @@ struct LoadedVersionPack {
     profile: ProtocolProfile,
     world: RomPackWorld,
     registry_payloads: Vec<Vec<u8>>,
+    entity_protocol_ids: EntityProtocolRegistry,
     item_protocol_ids: ItemProtocolRegistry,
     data_component_protocol_ids: DataComponentProtocolRegistry,
 }
@@ -800,6 +863,19 @@ fn load_version_pack(path: &Path, config: &ServerConfig) -> Result<LoadedVersion
     let profile =
         protocol_profile_from_packets(&config.version_name, pack.metadata.protocol, &pack.packets)?;
     let registry_payloads = registry_payloads_from_pack(&pack.registries)?;
+    let entity_protocol_ids = EntityProtocolRegistry::new(
+        pack.entity_types
+            .iter()
+            .map(|entity_type| (entity_type.entity_type.clone(), entity_type.protocol_id)),
+    )
+    .context("cannot build entity protocol registry from version pack")?;
+    if !pack.entity_types.is_empty()
+        && entity_protocol_ids
+            .protocol_id("minecraft:player")
+            .is_none()
+    {
+        bail!("non-empty version pack entity protocol registry is missing minecraft:player");
+    }
     let item_protocol_ids = ItemProtocolRegistry::new(
         pack.items
             .iter()
@@ -828,9 +904,57 @@ fn load_version_pack(path: &Path, config: &ServerConfig) -> Result<LoadedVersion
         profile,
         world: pack.world,
         registry_payloads,
+        entity_protocol_ids,
         item_protocol_ids,
         data_component_protocol_ids,
     })
+}
+
+fn validate_replication_packet_support(
+    profile: &ProtocolProfile,
+    entity_protocol_ids: &EntityProtocolRegistry,
+    item_protocol_ids: &ItemProtocolRegistry,
+) -> Result<()> {
+    for kind in [
+        PacketKind::SetHealth,
+        PacketKind::HurtAnimation,
+        PacketKind::PlayerCombatKill,
+        PacketKind::Respawn,
+    ] {
+        profile
+            .packets()
+            .require(kind)
+            .with_context(|| format!("replication requires {kind:?}"))?;
+    }
+    if entity_protocol_ids
+        .protocol_id("minecraft:player")
+        .is_some()
+    {
+        for kind in [
+            PacketKind::PlayerInfoUpdate,
+            PacketKind::PlayerInfoRemove,
+            PacketKind::AddEntity,
+            PacketKind::RemoveEntities,
+            PacketKind::SetEntityData,
+            PacketKind::RotateHead,
+            PacketKind::MoveEntityPosition,
+            PacketKind::MoveEntityPositionRotation,
+            PacketKind::MoveEntityRotation,
+            PacketKind::TeleportEntity,
+        ] {
+            profile
+                .packets()
+                .require(kind)
+                .with_context(|| format!("player entity replication requires {kind:?}"))?;
+        }
+    }
+    if !item_protocol_ids.is_empty() {
+        profile
+            .packets()
+            .require(PacketKind::SetEquipment)
+            .context("item-backed player replication requires SetEquipment")?;
+    }
+    Ok(())
 }
 
 fn registry_payloads_from_pack(registries: &[RomPackRegistry]) -> Result<Vec<Vec<u8>>> {
@@ -2152,6 +2276,7 @@ fn handle_play_protocol<R: Read, W: Write>(
     let initial_inventory_sync = play_reader.is_some().then(|| InitialInventorySync {
         control: context.state.game_replication.control(),
         uuid: online_player.player_uuid(),
+        entity_id: online_player.entity_id(),
     });
     let gameplay = play_runtime::GameplaySync::new(
         &context.state.game_runtime,
@@ -2216,11 +2341,24 @@ fn spawn_live_play_writer(
     let set_container_slot = profile.packets().id(PacketKind::SetContainerSlot);
     let item_protocol_ids = item_protocol_ids.clone();
     let data_component_protocol_ids = data_component_protocol_ids.clone();
+    let protocol_profile = profile.clone();
     spawn_play_writer(
         endpoint,
         writer,
         Duration::from_millis(PLAY_WRITER_WAIT_MILLIS),
         move |writer, output| match output {
+            PlayOutput::ProtocolPacket { kind, payload } => {
+                let packet_id = protocol_profile.packets().require(kind)?;
+                write_packet(
+                    writer,
+                    &build_packet(packet_id, |body| {
+                        body.extend_from_slice(&payload);
+                        Ok(())
+                    })?,
+                )?;
+                writer.flush()?;
+                Ok(PlayWriterDirective::Continue)
+            }
             PlayOutput::SetPlayerInventory { slot, stack } => {
                 if let Some(packet_id) = set_player_inventory
                     && let Some(payload) = encode_set_player_inventory_with_components(
@@ -2353,7 +2491,8 @@ fn write_live_play_output<W: Write>(
             )?;
             PlayWriterDirective::Continue
         }
-        PlayOutput::SetPlayerInventory { .. }
+        PlayOutput::ProtocolPacket { .. }
+        | PlayOutput::SetPlayerInventory { .. }
         | PlayOutput::SetContainerContent { .. }
         | PlayOutput::SetContainerSlot { .. } => {
             bail!("inventory output requires the version-aware live Play writer")
@@ -2432,11 +2571,16 @@ fn run_static_play_session_with_bridge<R: Read, W: Write>(
     let center = play_runtime::spawn_chunk(world_profile);
     let chunk = world.shared_world.chunk_snapshot(center)?;
 
+    let player_entity_id = initial_inventory_sync
+        .as_ref()
+        .map(|sync| i32::try_from(sync.entity_id.get()).context("player entity ID exceeds i32"))
+        .transpose()?
+        .unwrap_or(STATIC_PLAYER_ID);
     write_or_route_play_payload(
         writer,
         profile,
         PacketKind::PlayLogin,
-        &encode_join_game(&static_join_game(config, world_profile))?,
+        &encode_join_game(&static_join_game(config, world_profile, player_entity_id))?,
         play_reader,
     )?;
     write_or_route_play_payload(
@@ -2492,6 +2636,9 @@ fn run_static_play_session_with_bridge<R: Read, W: Write>(
     )?;
     if let Some(sync) = initial_inventory_sync {
         sync.control
+            .activate(sync.uuid)
+            .context("cannot activate gameplay replication after Play bootstrap")?;
+        sync.control
             .sync_inventory(sync.uuid)
             .context("cannot queue initial player inventory after Play bootstrap")?;
     }
@@ -2540,9 +2687,9 @@ fn write_or_route_play_payload<W: Write>(
     write_play_payload(writer, profile, kind, payload)
 }
 
-fn static_join_game(config: &ServerConfig, world: &RomPackWorld) -> JoinGame {
+fn static_join_game(config: &ServerConfig, world: &RomPackWorld, player_id: i32) -> JoinGame {
     JoinGame {
-        player_id: STATIC_PLAYER_ID,
+        player_id,
         hardcore: false,
         levels: vec![world.dimension.clone()],
         max_players: config.max_players,
@@ -2996,7 +3143,7 @@ mod tests {
         world.floor_y = 79;
         world.spawn_x = 32;
         world.spawn_z = -17;
-        let join = static_join_game(&config, &world);
+        let join = static_join_game(&config, &world, STATIC_PLAYER_ID);
         assert_eq!(join.levels, ["minecraft:test_world"]);
         assert_eq!(join.spawn_info.dimension_type_id, 3);
         assert_eq!(join.spawn_info.dimension, "minecraft:test_world");
@@ -3024,7 +3171,7 @@ mod tests {
         config.play_policy.chunk_radius = 4;
         config.play_policy.simulation_distance = 6;
         let world = play_runtime::builtin_world_profile();
-        let join = static_join_game(&config, &world);
+        let join = static_join_game(&config, &world, STATIC_PLAYER_ID);
         assert_eq!(join.chunk_radius, 4);
         assert_eq!(join.simulation_distance, 6);
     }
@@ -4079,7 +4226,7 @@ mod tests {
         assert_eq!(join_game_reader.read_varint().unwrap(), 0x31);
         assert_eq!(
             join_game_reader.take_remaining(),
-            encode_join_game(&static_join_game(&config, &world_profile)).unwrap()
+            encode_join_game(&static_join_game(&config, &world_profile, STATIC_PLAYER_ID)).unwrap()
         );
 
         let default_spawn = read_packet(&mut cursor).unwrap();
@@ -4498,5 +4645,24 @@ mod tests {
 
     fn temp_region_dir(name: &str) -> PathBuf {
         temp_region_file(name)
+    }
+
+    #[test]
+    fn play_login_uses_the_authoritative_player_entity_id() {
+        let config = ServerConfig::for_profile(Some(version_26_1_2::PROFILE_NAME)).unwrap();
+        let world = play_runtime::builtin_world_profile();
+        assert_eq!(static_join_game(&config, &world, 42).player_id, 42);
+    }
+
+    #[test]
+    fn replication_packet_validation_rejects_incomplete_profiles() {
+        let profile = ProtocolProfile::new("test", 1, PacketTable::new()).unwrap();
+        let error = validate_replication_packet_support(
+            &profile,
+            &EntityProtocolRegistry::default(),
+            &ItemProtocolRegistry::default(),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("SetHealth"));
     }
 }

@@ -1,7 +1,7 @@
 use std::{collections::BTreeSet, fs, path::Path};
 
 use anyhow::{Context, Result, bail};
-use ferrum_rompack::{RomPackDataComponent, RomPackItem};
+use ferrum_rompack::{RomPackDataComponent, RomPackEntityType, RomPackItem};
 use serde_json::Value;
 
 const MAX_REGISTRY_REPORT_BYTES: u64 = 64 * 1024 * 1024;
@@ -9,6 +9,7 @@ const MAX_REGISTRY_REPORT_BYTES: u64 = 64 * 1024 * 1024;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RegistryProtocolReport {
     pub items: Vec<RomPackItem>,
+    pub entity_types: Vec<RomPackEntityType>,
     pub data_components: Vec<RomPackDataComponent>,
 }
 
@@ -48,6 +49,13 @@ pub fn parse_registry_protocol_report(bytes: &[u8]) -> Result<RegistryProtocolRe
         .into_iter()
         .map(|(item, protocol_id)| RomPackItem { item, protocol_id })
         .collect();
+    let entity_types = parse_registry(&root, "minecraft:entity_type")?
+        .into_iter()
+        .map(|(entity_type, protocol_id)| RomPackEntityType {
+            entity_type,
+            protocol_id,
+        })
+        .collect();
     let data_components = parse_registry(&root, "minecraft:data_component_type")?
         .into_iter()
         .map(|(component, protocol_id)| RomPackDataComponent {
@@ -57,6 +65,7 @@ pub fn parse_registry_protocol_report(bytes: &[u8]) -> Result<RegistryProtocolRe
         .collect();
     Ok(RegistryProtocolReport {
         items,
+        entity_types,
         data_components,
     })
 }
@@ -110,6 +119,12 @@ mod tests {
                 "minecraft:air": { "protocol_id": 0 }
             }
         },
+        "minecraft:entity_type": {
+            "entries": {
+                "minecraft:item": { "protocol_id": 2 },
+                "minecraft:player": { "protocol_id": 147 }
+            }
+        },
         "minecraft:data_component_type": {
             "entries": {
                 "minecraft:custom_name": { "protocol_id": 7 },
@@ -123,6 +138,8 @@ mod tests {
         let report = parse_registry_protocol_report(REPORT).unwrap();
         assert_eq!(report.items[0].item, "minecraft:air");
         assert_eq!(report.items[1].protocol_id, 1);
+        assert_eq!(report.entity_types[0].entity_type, "minecraft:item");
+        assert_eq!(report.entity_types[1].protocol_id, 147);
         assert_eq!(report.data_components[0].component, "minecraft:custom_name");
         assert_eq!(report.data_components[1].protocol_id, 3);
     }

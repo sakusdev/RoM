@@ -4,7 +4,7 @@ use super::{
 };
 use crate::codec::{PacketReader, build_packet, read_packet};
 use anyhow::{Context, Result, bail};
-use ferrum_game::{CommandSource, PlayerUuid as GamePlayerUuid, Transform};
+use ferrum_game::{CommandSource, GameEvent, PlayerUuid as GamePlayerUuid, Transform};
 use ferrum_play::{
     BlockPosition, ItemProtocolRegistry, PlayerMovement, PlayerState, decode_close_container,
     decode_container_click, decode_creative_slot_update, decode_player_action,
@@ -49,6 +49,10 @@ const MAX_BLOCK_INTERACTION_REACH: f64 = 6.0;
 const MAX_BLOCK_INTERACTION_REACH_SQUARED: f64 =
     MAX_BLOCK_INTERACTION_REACH * MAX_BLOCK_INTERACTION_REACH;
 const MAX_CHAT_COMMAND_BYTES: usize = 32_767;
+const MAX_CHAT_MESSAGE_CHARS: usize = 256;
+const MAX_CHAT_MESSAGE_ENCODED_BYTES: usize = MAX_CHAT_MESSAGE_CHARS * 3;
+const MESSAGE_SIGNATURE_BYTES: usize = 256;
+const LAST_SEEN_ACKNOWLEDGED_BYTES: usize = 3;
 
 type LocalWorldRuntime = DeterministicRuntime<ChunkStore, WorldEvent>;
 
@@ -111,6 +115,34 @@ impl<'a> GameplaySync<'a> {
             })?
             .context("authoritative player is missing while executing a command")?;
         Ok(self.runtime.execute_command(&source, command)?.feedback)
+    }
+
+    fn broadcast_chat(self, message: &str) -> Result<()> {
+        let name = self
+            .runtime
+            .with_state(|state| {
+                state
+                    .player(self.player_uuid)
+                    .map(|player| player.name.clone())
+            })?
+            .context("authoritative player is missing while broadcasting chat")?;
+        self.runtime.publish(&[GameEvent::Broadcast {
+            message: format!("<{name}> {message}"),
+        }])?;
+        Ok(())
+    }
+
+    fn respawn(self, transform: Transform) -> Result<bool> {
+        let dead = self.runtime.with_state(|state| {
+            state
+                .player(self.player_uuid)
+                .is_some_and(|player| player.vitals.is_dead())
+        })?;
+        if !dead {
+            return Ok(false);
+        }
+        self.runtime.respawn_player(self.player_uuid, transform)?;
+        Ok(true)
     }
 
     fn select_hotbar(self, selected_hotbar: u8) -> Result<()> {
@@ -628,6 +660,34 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
                         bail!("teleport acknowledgement contains trailing bytes");
                     }
                 }
+                Some(PacketKind::ClientCommand) => {
+                    match decode_client_command(&mut packet_reader)? {
+                        ClientCommandAction::PerformRespawn => {
+                            if let Some(gameplay) = gameplay {
+                                let position = player_spawn_position(world_profile);
+                                let transform = Transform::new(position, 0.0, 0.0, false)?;
+                                if gameplay.respawn(transform)? {
+                                    player = PlayerState::new(position, 0.0, 0.0, false, false)?;
+                                    let respawn_chunk = player.chunk_pos();
+                                    if respawn_chunk != view.center() {
+                                        let delta = view.recenter(respawn_chunk)?;
+                                        shared_world.ensure_chunks_loaded(&delta.newly_visible)?;
+                                        send_chunk_view_delta(
+                                            writer,
+                                            profile,
+                                            shared_world,
+                                            respawn_chunk,
+                                            &delta,
+                                            play_reader,
+                                        )?;
+                                    }
+                                }
+                            }
+                        }
+                        ClientCommandAction::RequestStats
+                        | ClientCommandAction::RequestGameruleValues => {}
+                    }
+                }
                 Some(PacketKind::ChatCommand) => {
                     let command = decode_chat_command(&mut packet_reader)?;
                     if let Some(gameplay) = gameplay {
@@ -636,6 +696,12 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
                             Err(error) => format!("Command failed: {error}"),
                         };
                         send_system_chat(writer, profile, &feedback, play_reader)?;
+                    }
+                }
+                Some(PacketKind::ChatMessage) => {
+                    let message = decode_chat_message(&mut packet_reader)?;
+                    if let Some(gameplay) = gameplay {
+                        gameplay.broadcast_chat(&message)?;
                     }
                 }
                 Some(PacketKind::SetCarriedItem) => {
@@ -718,6 +784,26 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClientCommandAction {
+    PerformRespawn,
+    RequestStats,
+    RequestGameruleValues,
+}
+
+fn decode_client_command(reader: &mut PacketReader<'_>) -> Result<ClientCommandAction> {
+    let action = match reader.read_varint()? {
+        0 => ClientCommandAction::PerformRespawn,
+        1 => ClientCommandAction::RequestStats,
+        2 => ClientCommandAction::RequestGameruleValues,
+        value => bail!("unknown client command action {value}"),
+    };
+    if !reader.take_remaining().is_empty() {
+        bail!("client command packet contains trailing bytes");
+    }
+    Ok(action)
+}
+
 fn decode_chat_command(reader: &mut PacketReader<'_>) -> Result<String> {
     let command = reader.read_string()?;
     if command.is_empty()
@@ -732,6 +818,39 @@ fn decode_chat_command(reader: &mut PacketReader<'_>) -> Result<String> {
         bail!("chat command packet contains trailing bytes");
     }
     Ok(command)
+}
+
+fn decode_chat_message(reader: &mut PacketReader<'_>) -> Result<String> {
+    let message = reader.read_string()?;
+    if message.is_empty()
+        || message.encode_utf16().count() > MAX_CHAT_MESSAGE_CHARS
+        || message.len() > MAX_CHAT_MESSAGE_ENCODED_BYTES
+        || message.chars().any(char::is_control)
+    {
+        bail!(
+            "chat message must contain 1..={MAX_CHAT_MESSAGE_CHARS} UTF-16 code units, fit the protocol UTF-8 bound, and contain no control characters"
+        );
+    }
+
+    // ServerboundChatPacket 26.1.2: message, Instant(epoch millis), salt,
+    // nullable 256-byte signature, then LastSeenMessages.Update(offset,
+    // fixed 20-bit acknowledgement set, checksum).
+    let _timestamp_millis = reader.read_i64()?;
+    let _salt = reader.read_i64()?;
+    let signature_present = reader.read_u8()? != 0;
+    if signature_present {
+        reader.read_bytes(MESSAGE_SIGNATURE_BYTES)?;
+    }
+    let last_seen_offset = reader.read_varint()?;
+    if last_seen_offset < 0 {
+        bail!("last-seen message offset cannot be negative");
+    }
+    reader.read_bytes(LAST_SEEN_ACKNOWLEDGED_BYTES)?;
+    let _checksum = reader.read_u8()?;
+    if !reader.take_remaining().is_empty() {
+        bail!("chat message packet contains trailing bytes");
+    }
+    Ok(message)
 }
 
 fn decode_hotbar_selection(reader: &mut PacketReader<'_>) -> Result<u8> {
@@ -1188,7 +1307,7 @@ mod tests {
     }
 
     #[test]
-    fn decodes_chat_commands_and_hotbar_selection_exactly() {
+    fn decodes_chat_messages_commands_and_hotbar_selection() {
         let mut command = Vec::new();
         write_string(&mut command, "list").unwrap();
         assert_eq!(
@@ -1196,6 +1315,29 @@ mod tests {
             "list"
         );
         assert!(decode_chat_command(&mut PacketReader::new(&[0])).is_err());
+
+        let mut message = Vec::new();
+        write_string(&mut message, "hello world").unwrap();
+        message.extend_from_slice(&123_i64.to_be_bytes());
+        message.extend_from_slice(&456_i64.to_be_bytes());
+        message.push(0); // no signature
+        message.push(0); // last-seen offset VarInt
+        message.extend_from_slice(&[0; LAST_SEEN_ACKNOWLEDGED_BYTES]);
+        message.push(0); // ignored checksum in offline mode
+        assert_eq!(
+            decode_chat_message(&mut PacketReader::new(&message)).unwrap(),
+            "hello world"
+        );
+        let mut trailing = message.clone();
+        trailing.push(0);
+        assert!(decode_chat_message(&mut PacketReader::new(&trailing)).is_err());
+        assert!(
+            decode_chat_message(&mut PacketReader::new(&message[..message.len() - 1])).is_err()
+        );
+        assert!(decode_chat_message(&mut PacketReader::new(&[0])).is_err());
+        let mut control = Vec::new();
+        write_string(&mut control, "bad\nmessage").unwrap();
+        assert!(decode_chat_message(&mut PacketReader::new(&control)).is_err());
 
         assert_eq!(
             decode_hotbar_selection(&mut PacketReader::new(&5_i16.to_be_bytes())).unwrap(),
@@ -2359,5 +2501,21 @@ mod tests {
             let z = i64::from(self.z) & 0x3ff_ffff;
             (x << 38) | (z << 12) | y
         }
+    }
+
+    #[test]
+    fn decodes_client_command_actions_and_rejects_invalid_payloads() {
+        for (payload, expected) in [
+            (&[0_u8][..], ClientCommandAction::PerformRespawn),
+            (&[1_u8][..], ClientCommandAction::RequestStats),
+            (&[2_u8][..], ClientCommandAction::RequestGameruleValues),
+        ] {
+            let mut reader = PacketReader::new(payload);
+            assert_eq!(decode_client_command(&mut reader).unwrap(), expected);
+        }
+        let mut unknown = PacketReader::new(&[3]);
+        assert!(decode_client_command(&mut unknown).is_err());
+        let mut trailing = PacketReader::new(&[0, 0]);
+        assert!(decode_client_command(&mut trailing).is_err());
     }
 }

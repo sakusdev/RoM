@@ -49,7 +49,7 @@ The current server milestone provides:
 - Live online-player count in server-list status responses
 - Version-neutral in-memory world coordinates, sections, block states, biome IDs, and chunk views
 
-The socket runtime now uses `ProtocolProfile` and `ProtocolSession` from Handshake through Play. The 26.1.2 profile validates the handshake protocol, negotiates the vanilla core known pack, sends the full synchronized registry set, completes Configuration, sends the flat-overworld Play bootstrap, validates teleport and chunk-batch acknowledgements, and enters a movement-aware Play loop. The server tracks each player's authoritative position and rotation, updates the chunk-cache center only after crossing a chunk boundary, sends newly visible chunks, unloads chunks that leave the configured bounded view, keeps the server-list online-player count synchronized with Play connections, and continues Keep Alive validation while processing movement at the configured cadence. The standalone `ferrum-runtime` crate now provides deterministic scheduling and bounded input-ordering primitives, and the Play loop can route decoded block mutation events through shared in-memory world state. If the active profile exposes a clientbound Block Update packet ID, accepted mutations are written back to the acting client and queued for peers; the synchronous Play loop drains those peer queues after inbound packets and transient read timeouts. Entities, dedicated network-worker queues, broader multi-client entity tracking, and persistence are not implemented yet.
+The socket runtime now uses `ProtocolProfile` and `ProtocolSession` from Handshake through Play. The 26.1.2 profile validates the handshake protocol, negotiates the vanilla core known pack, sends the full synchronized registry set, completes Configuration, sends the flat-overworld Play bootstrap, validates teleport and chunk-batch acknowledgements, and enters a movement-aware Play loop. The server tracks each player's authoritative position and rotation, updates the chunk-cache center only after crossing a chunk boundary, sends newly visible chunks, unloads chunks that leave the configured bounded view, keeps the server-list online-player count synchronized with Play connections, and continues Keep Alive validation while processing movement at the configured cadence. The standalone `ferrum-runtime` crate now provides deterministic scheduling and bounded input-ordering primitives, and the Play loop can route decoded block mutation events through shared in-memory world state. If the active profile exposes a clientbound Block Update packet ID, accepted mutations are written back to the acting client and queued for peers; the synchronous Play loop drains those peer queues after inbound packets and transient read timeouts. Dedicated Play reader/writer queues, a shared 20 TPS runtime, authoritative gameplay persistence, inventory replication, join/leave messages, offline-mode chat and commands, multi-client player spawning, relative/absolute movement, tab-list lifecycle, metadata placeholders, head rotation, equipment synchronization, authoritative damage/healing state, Hurt Animation, combat death, client-command respawn, and subject-only Set Health replication are implemented. Damage Event source typing, attribute resynchronization, non-player entity gameplay, visibility/range-based entity tracking, and complete Vanilla systems remain incomplete.
 
 ## M9 — Binary NBT foundation
 
@@ -92,7 +92,7 @@ Completed:
 - Encode Registry Data entries with optional anonymous NBT values.
 - Encode Feature Flags and registry-grouped Tags.
 - Consume Login Acknowledged in the live socket runtime.
-- Send configured Feature Flags and an empty Tags payload.
+- Send configured Feature Flags and the client-synchronized subset of the generated official Tags payload.
 - Send Finish Configuration and wait for the client acknowledgement.
 - Transition the authoritative connection session to Play.
 - Keep the manual flow opt-in until a complete target-version registry set exists.
@@ -160,7 +160,7 @@ Completed:
 Remaining movement work:
 
 - Add full collision, full movement-speed, and fall-state validation.
-- Broadcast player state to other connected clients.
+- Add visibility/range-based tracking instead of globally broadcasting every connected player.
 
 ## Cross-cutting Play runtime policy
 
@@ -205,7 +205,7 @@ Remaining integration work:
 
 ## M15 — Persistent world foundation
 
-Status: started with deterministic in-memory primitives.
+Status: implemented through deterministic in-memory chunks, Anvil reading, and validated native snapshot persistence; Anvil writing and procedural generation remain incomplete.
 
 Completed foundation:
 

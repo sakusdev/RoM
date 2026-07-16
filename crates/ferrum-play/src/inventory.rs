@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use ferrum_game::{
-    ContainerClick, ContainerClickKind, ItemStack, MAX_CONTAINER_SLOTS, PLAYER_INVENTORY_SLOTS,
+    ContainerClick, ContainerClickKind, EntityId, EquipmentSlot, ItemStack, MAX_CONTAINER_SLOTS,
+    PLAYER_INVENTORY_SLOTS,
 };
 use serde_json::Value;
 use thiserror::Error;
@@ -93,6 +94,60 @@ impl DataComponentProtocolRegistry {
     #[must_use]
     pub fn len(&self) -> usize {
         self.ids.len()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct EquipmentEntry {
+    pub slot: EquipmentSlot,
+    pub stack: Option<ItemStack>,
+}
+
+impl EquipmentEntry {
+    #[must_use]
+    pub const fn new(slot: EquipmentSlot, stack: Option<ItemStack>) -> Self {
+        Self { slot, stack }
+    }
+}
+
+pub fn encode_set_equipment(
+    entity_id: EntityId,
+    entries: &[EquipmentEntry],
+    items: &ItemProtocolRegistry,
+    components: &DataComponentProtocolRegistry,
+) -> Result<Option<Vec<u8>>, InventoryEncodeError> {
+    if entries.is_empty() {
+        return Err(InventoryEncodeError::EmptyEquipmentEntries);
+    }
+    let entity_id =
+        i32::try_from(entity_id.get()).map_err(|_| InventoryEncodeError::EntityIdOutOfRange {
+            entity_id: entity_id.get(),
+        })?;
+    let mut output = Vec::new();
+    write_varint(&mut output, entity_id);
+    let mut seen = BTreeSet::new();
+    for (index, entry) in entries.iter().enumerate() {
+        let protocol_slot = equipment_protocol_slot(entry.slot);
+        if !seen.insert(protocol_slot) {
+            return Err(InventoryEncodeError::DuplicateEquipmentSlot { slot: entry.slot });
+        }
+        let continuation = if index + 1 < entries.len() { 0x80 } else { 0 };
+        output.push(protocol_slot | continuation);
+        if !encode_item_stack_into(&mut output, entry.stack.as_ref(), items, components)? {
+            return Ok(None);
+        }
+    }
+    Ok(Some(output))
+}
+
+const fn equipment_protocol_slot(slot: EquipmentSlot) -> u8 {
+    match slot {
+        EquipmentSlot::MainHand => 0,
+        EquipmentSlot::OffHand => 1,
+        EquipmentSlot::Feet => 2,
+        EquipmentSlot::Legs => 3,
+        EquipmentSlot::Chest => 4,
+        EquipmentSlot::Head => 5,
     }
 }
 
@@ -544,6 +599,12 @@ pub enum InventoryEncodeError {
     DuplicateComponentProtocolId { protocol_id: i32 },
     #[error("player inventory slot {slot} is outside 0..{PLAYER_INVENTORY_SLOTS}")]
     SlotOutOfRange { slot: usize },
+    #[error("equipment update must contain at least one entry")]
+    EmptyEquipmentEntries,
+    #[error("duplicate equipment slot {slot:?}")]
+    DuplicateEquipmentSlot { slot: EquipmentSlot },
+    #[error("entity ID {entity_id} exceeds the protocol VarInt range")]
+    EntityIdOutOfRange { entity_id: u32 },
     #[error("item stack count {count} exceeds the protocol VarInt range")]
     StackCountOutOfRange { count: u32 },
     #[error("container ID {container_id} is invalid")]
@@ -653,5 +714,51 @@ mod tests {
             error,
             InventoryDecodeError::UnsupportedInboundComponents { .. }
         ));
+    }
+
+    #[test]
+    fn encodes_equipment_continuation_slots_and_rejects_duplicates() {
+        let entity_id = EntityId::new(9).unwrap();
+        let stone = ItemStack::new("minecraft:stone", 1).unwrap();
+        let entries = [
+            EquipmentEntry::new(EquipmentSlot::MainHand, Some(stone.clone())),
+            EquipmentEntry::new(EquipmentSlot::Head, None),
+        ];
+        assert_eq!(
+            encode_set_equipment(
+                entity_id,
+                &entries,
+                &items(),
+                &DataComponentProtocolRegistry::default(),
+            )
+            .unwrap(),
+            Some(vec![9, 0x80, 1, 1, 0, 0, 5, 0])
+        );
+        assert_eq!(
+            encode_set_equipment(
+                entity_id,
+                &[
+                    EquipmentEntry::new(EquipmentSlot::MainHand, Some(stone.clone())),
+                    EquipmentEntry::new(EquipmentSlot::MainHand, Some(stone)),
+                ],
+                &items(),
+                &DataComponentProtocolRegistry::default(),
+            )
+            .unwrap_err(),
+            InventoryEncodeError::DuplicateEquipmentSlot {
+                slot: EquipmentSlot::MainHand
+            }
+        );
+        let unknown = ItemStack::new("minecraft:unknown", 1).unwrap();
+        assert_eq!(
+            encode_set_equipment(
+                entity_id,
+                &[EquipmentEntry::new(EquipmentSlot::MainHand, Some(unknown))],
+                &items(),
+                &DataComponentProtocolRegistry::default(),
+            )
+            .unwrap(),
+            None
+        );
     }
 }

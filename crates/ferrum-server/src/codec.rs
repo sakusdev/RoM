@@ -175,11 +175,11 @@ impl<'a> PacketReader<'a> {
         ])
     }
 
-    fn read_u8(&mut self) -> Result<u8> {
+    pub(crate) fn read_u8(&mut self) -> Result<u8> {
         Ok(*self.read_bytes(1)?.first().expect("one byte was just read"))
     }
 
-    fn read_bytes(&mut self, length: usize) -> Result<&'a [u8]> {
+    pub(crate) fn read_bytes(&mut self, length: usize) -> Result<&'a [u8]> {
         let end = self
             .cursor
             .checked_add(length)

@@ -9,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub const ROMPACK_SCHEMA_VERSION: u32 = 7;
+pub const ROMPACK_SCHEMA_VERSION: u32 = 8;
 const ROMPACK_MAGIC: &[u8; 8] = b"ROMPACK\0";
 const HEADER_BYTES: usize = ROMPACK_MAGIC.len() + 4 + 8;
 const TRAILER_BYTES: usize = 32;
@@ -20,6 +20,7 @@ pub struct RomPackLimits {
     pub max_json_bytes: u64,
     pub max_packets: usize,
     pub max_items: usize,
+    pub max_entity_types: usize,
     pub max_data_components: usize,
     pub max_sections: usize,
     pub max_registries: usize,
@@ -37,6 +38,7 @@ impl Default for RomPackLimits {
             max_json_bytes: 32 * 1024 * 1024,
             max_packets: 4_096,
             max_items: 100_000,
+            max_entity_types: 100_000,
             max_data_components: 100_000,
             max_sections: 1_024,
             max_registries: 1_024,
@@ -59,6 +61,8 @@ pub struct RomPack {
     pub world: RomPackWorld,
     /// Static item registry IDs used by Play-state ItemStack codecs.
     pub items: Vec<RomPackItem>,
+    /// Static entity-type IDs used by Play-state entity replication codecs.
+    pub entity_types: Vec<RomPackEntityType>,
     /// Static data-component-type IDs used by version-aware ItemStack codecs.
     pub data_components: Vec<RomPackDataComponent>,
     pub registries: Vec<RomPackRegistry>,
@@ -121,6 +125,12 @@ pub struct RomPackPacket {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RomPackItem {
     pub item: String,
+    pub protocol_id: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RomPackEntityType {
+    pub entity_type: String,
     pub protocol_id: i32,
 }
 
@@ -438,6 +448,44 @@ pub fn validate_rompack(pack: &RomPack, limits: RomPackLimits) -> Result<()> {
         }
     }
 
+    if pack.entity_types.len() > limits.max_entity_types {
+        bail!("version pack contains too many entity-type registry records");
+    }
+    let mut previous_entity_type: Option<&str> = None;
+    let mut entity_protocol_ids = BTreeSet::new();
+    for entity_type in &pack.entity_types {
+        validate_resource_location(
+            "entity type ID",
+            &entity_type.entity_type,
+            limits.max_identifier_bytes,
+        )?;
+        if previous_entity_type.is_some_and(|previous| previous >= entity_type.entity_type.as_str())
+        {
+            bail!("version-pack entity types must be strictly sorted and unique");
+        }
+        previous_entity_type = Some(&entity_type.entity_type);
+        if entity_type.protocol_id < 0 {
+            bail!(
+                "entity type {} protocol ID cannot be negative",
+                entity_type.entity_type
+            );
+        }
+        if !entity_protocol_ids.insert(entity_type.protocol_id) {
+            bail!(
+                "duplicate entity type protocol ID {}",
+                entity_type.protocol_id
+            );
+        }
+    }
+    if !pack.entity_types.is_empty()
+        && !pack
+            .entity_types
+            .iter()
+            .any(|entity_type| entity_type.entity_type == "minecraft:player")
+    {
+        bail!("non-empty version-pack entity-type registry is missing minecraft:player");
+    }
+
     if pack.data_components.len() > limits.max_data_components {
         bail!("version pack contains too many data-component registry records");
     }
@@ -672,6 +720,16 @@ mod tests {
                     protocol_id: 1,
                 },
             ],
+            entity_types: vec![
+                RomPackEntityType {
+                    entity_type: "minecraft:item".to_owned(),
+                    protocol_id: 0,
+                },
+                RomPackEntityType {
+                    entity_type: "minecraft:player".to_owned(),
+                    protocol_id: 1,
+                },
+            ],
             data_components: Vec::new(),
             packet_catalog: vec![
                 PacketDescriptor::new(
@@ -803,6 +861,14 @@ mod tests {
 
         let mut pack = sample_pack();
         pack.items[1].protocol_id = pack.items[0].protocol_id;
+        assert!(validate_rompack(&pack, RomPackLimits::default()).is_err());
+
+        let mut pack = sample_pack();
+        pack.entity_types.reverse();
+        assert!(validate_rompack(&pack, RomPackLimits::default()).is_err());
+
+        let mut pack = sample_pack();
+        pack.entity_types[1].protocol_id = pack.entity_types[0].protocol_id;
         assert!(validate_rompack(&pack, RomPackLimits::default()).is_err());
 
         let mut pack = sample_pack();

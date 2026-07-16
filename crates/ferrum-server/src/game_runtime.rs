@@ -120,6 +120,42 @@ impl SharedGameRuntime {
         Ok(events)
     }
 
+    pub fn damage_player(
+        &self,
+        uuid: PlayerUuid,
+        amount: f32,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self.write()?.damage_player(uuid, amount)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn heal_player(
+        &self,
+        uuid: PlayerUuid,
+        amount: f32,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self.write()?.heal_player(uuid, amount)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn kill_player(&self, uuid: PlayerUuid) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self.write()?.kill_player(uuid)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn respawn_player(
+        &self,
+        uuid: PlayerUuid,
+        transform: Transform,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self.write()?.respawn_player(uuid, transform)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
     pub fn click_container(
         &self,
         uuid: PlayerUuid,
@@ -356,5 +392,30 @@ mod tests {
             }])
             .unwrap();
         assert_eq!(report.disconnected, 1);
+    }
+
+    #[test]
+    fn publishes_damage_vitals_and_death_events() {
+        let runtime = SharedGameRuntime::vanilla_overworld();
+        let subscription = runtime.subscribe(NonZeroUsize::new(8).unwrap()).unwrap();
+        let uuid = PlayerUuid::new(40);
+        runtime.connect_player(uuid, "Steve", spawn()).unwrap();
+        assert!(matches!(
+            subscription.try_recv().unwrap(),
+            GameEvent::PlayerConnected { .. }
+        ));
+        runtime.damage_player(uuid, 20.0).unwrap();
+        assert!(matches!(
+            subscription.try_recv().unwrap(),
+            GameEvent::PlayerDamaged { .. }
+        ));
+        assert!(matches!(
+            subscription.try_recv().unwrap(),
+            GameEvent::PlayerVitalsChanged { vitals, .. } if vitals.health == 0.0
+        ));
+        assert!(matches!(
+            subscription.try_recv().unwrap(),
+            GameEvent::PlayerKilled { .. }
+        ));
     }
 }

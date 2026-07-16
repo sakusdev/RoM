@@ -75,6 +75,7 @@ pub enum PacketKind {
     KeepAliveRequest,
     KeepAliveResponse,
     ClientTickEnd,
+    ClientCommand,
     MovePlayerPosition,
     MovePlayerPositionRotation,
     MovePlayerRotation,
@@ -103,6 +104,10 @@ pub enum PacketKind {
     RotateHead,
     SetEntityData,
     SetEquipment,
+    SetHealth,
+    HurtAnimation,
+    PlayerCombatKill,
+    Respawn,
     PlayerInfoUpdate,
     PlayerInfoRemove,
 }
@@ -141,6 +146,7 @@ impl PacketKind {
         Self::KeepAliveRequest,
         Self::KeepAliveResponse,
         Self::ClientTickEnd,
+        Self::ClientCommand,
         Self::MovePlayerPosition,
         Self::MovePlayerPositionRotation,
         Self::MovePlayerRotation,
@@ -169,6 +175,10 @@ impl PacketKind {
         Self::RotateHead,
         Self::SetEntityData,
         Self::SetEquipment,
+        Self::SetHealth,
+        Self::HurtAnimation,
+        Self::PlayerCombatKill,
+        Self::Respawn,
         Self::PlayerInfoUpdate,
         Self::PlayerInfoRemove,
     ];
@@ -254,6 +264,7 @@ impl PacketKind {
             | Self::KeepAliveRequest
             | Self::KeepAliveResponse
             | Self::ClientTickEnd
+            | Self::ClientCommand
             | Self::MovePlayerPosition
             | Self::MovePlayerPositionRotation
             | Self::MovePlayerRotation
@@ -282,6 +293,10 @@ impl PacketKind {
             | Self::RotateHead
             | Self::SetEntityData
             | Self::SetEquipment
+            | Self::SetHealth
+            | Self::HurtAnimation
+            | Self::PlayerCombatKill
+            | Self::Respawn
             | Self::PlayerInfoUpdate
             | Self::PlayerInfoRemove => ProtocolPhase::Play,
         }
@@ -302,6 +317,7 @@ impl PacketKind {
             | Self::AcceptTeleportation
             | Self::KeepAliveResponse
             | Self::ClientTickEnd
+            | Self::ClientCommand
             | Self::MovePlayerPosition
             | Self::MovePlayerPositionRotation
             | Self::MovePlayerRotation
