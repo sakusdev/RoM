@@ -212,7 +212,6 @@ text = replace_once(
     config.item_protocol_ids = item_protocol_ids.clone();''',
     "startup packet validation call",
 )
-# Insert startup validation before registry payload conversion helpers.
 text = replace_once(
     text,
     '''fn registry_payloads_from_pack(registries: &[RomPackRegistry]) -> Result<Vec<Vec<u8>>> {''',
@@ -263,17 +262,14 @@ text = replace_once(
 fn registry_payloads_from_pack(registries: &[RomPackRegistry]) -> Result<Vec<Vec<u8>>> {''',
     "startup packet validation function",
 )
-# Update direct test calls to static_join_game with the old two-argument form.
-text = text.replace("static_join_game(&config, &world)", "static_join_game(&config, &world, STATIC_PLAYER_ID)")
-text = text.replace("static_join_game(config, world)", "static_join_game(config, world, STATIC_PLAYER_ID)")
-# Add regression tests near the final test-module close.
-text = replace_once(
+text = re.sub(
+    r"static_join_game\(([^,\n]+), ([^,\n\)]+)\)",
+    r"static_join_game(\1, \2, STATIC_PLAYER_ID)",
     text,
-    '''        assert_eq!(read_varint_io(&mut cursor).unwrap(), expected);
-    }
-}''',
-    '''        assert_eq!(read_varint_io(&mut cursor).unwrap(), expected);
-    }
+)
+if not text.endswith("}\n"):
+    raise SystemExit("main regression tests: main.rs does not end with a module close")
+text = text[:-2] + r'''
 
     #[test]
     fn play_login_uses_the_authoritative_player_entity_id() {
@@ -293,7 +289,6 @@ text = replace_once(
         .unwrap_err();
         assert!(error.to_string().contains("SetHealth"));
     }
-}''',
-    "main regression tests",
-)
+}
+'''
 save(path, text)
