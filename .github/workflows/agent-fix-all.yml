@@ -22,6 +22,7 @@ jobs:
       - name: Implement, validate, and commit
         shell: bash
         run: |
+          exec > >(tee /tmp/fix-all.log) 2>&1
           set -euo pipefail
           python3 .github/scripts/agent-fix-1.py
           python3 .github/scripts/agent-fix-2a1.py
@@ -48,3 +49,9 @@ jobs:
           git diff --cached --check
           git commit -m "Fix audited multiplayer replication bugs"
           git push origin HEAD:agent/complete-server-features
+      - name: Upload diagnostic log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fix-all-log
+          path: /tmp/fix-all.log
