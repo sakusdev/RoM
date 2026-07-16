@@ -22,11 +22,13 @@ jobs:
           manifest=json.load(urllib.request.urlopen('https://piston-meta.mojang.com/mc/game/version_manifest_v2.json'))
           version=next(v for v in manifest['versions'] if v['id']=='26.1.2')
           detail=json.load(urllib.request.urlopen(version['url']))
-          url=detail['downloads']['server']['url']
-          print(url)
-          urllib.request.urlretrieve(url, '/tmp/server.jar')
+          urllib.request.urlretrieve(detail['downloads']['server']['url'], '/tmp/server.jar')
           PY
+          nested="$(unzip -Z1 /tmp/server.jar | grep -E '(^|/)server[^/]*\.jar$' | head -n1)"
+          test -n "$nested"
+          unzip -p /tmp/server.jar "$nested" > /tmp/inner-server.jar
           {
+            echo "nested=$nested"
             for class in \
               'net.minecraft.network.protocol.game.ServerboundChatPacket' \
               'net.minecraft.network.chat.LastSeenMessages$Update' \
@@ -36,7 +38,7 @@ jobs:
               'net.minecraft.network.protocol.game.ClientboundRespawnPacket' \
               'net.minecraft.network.protocol.game.CommonPlayerSpawnInfo'; do
               echo "===== $class ====="
-              javap -classpath /tmp/server.jar -p -c -s "$class" || true
+              javap -classpath /tmp/inner-server.jar -p -c -s "$class" || true
             done
           } > /tmp/protocol-codecs.txt
       - uses: actions/upload-artifact@v4
