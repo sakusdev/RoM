@@ -175,4 +175,10 @@ fn queue_player_remove(
 }''',
     "entity-only remove helper",
 )
+text = sub_once(
+    text,
+    r"\nfn online_player_snapshots\(runtime: &SharedGameRuntime\) -> Result<Vec<PlayerEntitySnapshot>> \{.*?\n\}\n\nfn player_snapshot_from_state",
+    "\nfn player_snapshot_from_state",
+    "remove obsolete online snapshot helper",
+)
 save(path, text)
