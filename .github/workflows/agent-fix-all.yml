@@ -1,0 +1,50 @@
+name: Fix audited multiplayer bugs
+
+on:
+  pull_request:
+    types: [reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  implement-and-validate:
+    if: github.head_ref == 'agent/complete-server-features'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/complete-server-features
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Implement, validate, and commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/agent-fix-1.py
+          python3 .github/scripts/agent-fix-2a1.py
+          python3 .github/scripts/agent-fix-2a2.py
+          python3 .github/scripts/agent-fix-2a3.py
+          python3 .github/scripts/agent-fix-2b.py
+          python3 .github/scripts/agent-fix-3.py
+          cargo fmt --all
+          cargo fmt --all -- --check
+          cargo check --workspace --all-targets --all-features
+          cargo clippy --workspace --all-targets --all-features -- -D warnings
+          cargo test --workspace --all-targets --all-features
+          rm -f .github/workflows/agent-protocol-inspect.yml
+          rm -f .github/workflows/agent-fix-all.yml
+          rm -f .github/scripts/agent-fix-1.py
+          rm -f .github/scripts/agent-fix-2a1.py
+          rm -f .github/scripts/agent-fix-2a2.py
+          rm -f .github/scripts/agent-fix-2a3.py
+          rm -f .github/scripts/agent-fix-2b.py
+          rm -f .github/scripts/agent-fix-3.py
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --check
+          git commit -m "Fix audited multiplayer replication bugs"
+          git push origin HEAD:agent/complete-server-features
