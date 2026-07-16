@@ -49,7 +49,10 @@ const MAX_BLOCK_INTERACTION_REACH: f64 = 6.0;
 const MAX_BLOCK_INTERACTION_REACH_SQUARED: f64 =
     MAX_BLOCK_INTERACTION_REACH * MAX_BLOCK_INTERACTION_REACH;
 const MAX_CHAT_COMMAND_BYTES: usize = 32_767;
-const MAX_CHAT_MESSAGE_BYTES: usize = 256;
+const MAX_CHAT_MESSAGE_CHARS: usize = 256;
+const MAX_CHAT_MESSAGE_ENCODED_BYTES: usize = MAX_CHAT_MESSAGE_CHARS * 3;
+const MESSAGE_SIGNATURE_BYTES: usize = 256;
+const LAST_SEEN_ACKNOWLEDGED_BYTES: usize = 3;
 
 type LocalWorldRuntime = DeterministicRuntime<ChunkStore, WorldEvent>;
 
@@ -820,20 +823,33 @@ fn decode_chat_command(reader: &mut PacketReader<'_>) -> Result<String> {
 fn decode_chat_message(reader: &mut PacketReader<'_>) -> Result<String> {
     let message = reader.read_string()?;
     if message.is_empty()
-        || message.len() > MAX_CHAT_MESSAGE_BYTES
+        || message.encode_utf16().count() > MAX_CHAT_MESSAGE_CHARS
+        || message.len() > MAX_CHAT_MESSAGE_ENCODED_BYTES
         || message.chars().any(char::is_control)
     {
         bail!(
-            "chat message must contain 1..={MAX_CHAT_MESSAGE_BYTES} bytes and no control characters"
+            "chat message must contain 1..={MAX_CHAT_MESSAGE_CHARS} UTF-16 code units, fit the protocol UTF-8 bound, and contain no control characters"
         );
     }
 
-    // Modern offline-mode chat packets carry timestamp/signature/last-seen
-    // metadata after the message. RoM does not claim secure-chat verification
-    // yet, but it accepts and bounds the complete outer packet before reaching
-    // this decoder instead of incorrectly treating those fields as trailing
-    // garbage.
-    let _metadata = reader.take_remaining();
+    // ServerboundChatPacket 26.1.2: message, Instant(epoch millis), salt,
+    // nullable 256-byte signature, then LastSeenMessages.Update(offset,
+    // fixed 20-bit acknowledgement set, checksum).
+    let _timestamp_millis = reader.read_i64()?;
+    let _salt = reader.read_i64()?;
+    let signature_present = reader.read_u8()? != 0;
+    if signature_present {
+        reader.read_bytes(MESSAGE_SIGNATURE_BYTES)?;
+    }
+    let last_seen_offset = reader.read_varint()?;
+    if last_seen_offset < 0 {
+        bail!("last-seen message offset cannot be negative");
+    }
+    reader.read_bytes(LAST_SEEN_ACKNOWLEDGED_BYTES)?;
+    let _checksum = reader.read_u8()?;
+    if !reader.take_remaining().is_empty() {
+        bail!("chat message packet contains trailing bytes");
+    }
     Ok(message)
 }
 
@@ -1303,9 +1319,20 @@ mod tests {
         let mut message = Vec::new();
         write_string(&mut message, "hello world").unwrap();
         message.extend_from_slice(&123_i64.to_be_bytes());
+        message.extend_from_slice(&456_i64.to_be_bytes());
+        message.push(0); // no signature
+        message.push(0); // last-seen offset VarInt
+        message.extend_from_slice(&[0; LAST_SEEN_ACKNOWLEDGED_BYTES]);
+        message.push(0); // ignored checksum in offline mode
         assert_eq!(
             decode_chat_message(&mut PacketReader::new(&message)).unwrap(),
             "hello world"
+        );
+        let mut trailing = message.clone();
+        trailing.push(0);
+        assert!(decode_chat_message(&mut PacketReader::new(&trailing)).is_err());
+        assert!(
+            decode_chat_message(&mut PacketReader::new(&message[..message.len() - 1])).is_err()
         );
         assert!(decode_chat_message(&mut PacketReader::new(&[0])).is_err());
         let mut control = Vec::new();

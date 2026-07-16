@@ -110,7 +110,7 @@ pub enum GameEvent {
         entity_id: EntityId,
         transform: Transform,
         game_mode: GameMode,
-        previous_game_mode: GameMode,
+        previous_game_mode: Option<GameMode>,
     },
     TimeChanged {
         day_time: i64,
@@ -593,7 +593,7 @@ impl GameState {
             if !player.vitals.is_dead() {
                 return Err(GameStateError::PlayerAlive { uuid });
             }
-            let previous_game_mode = player.game_mode;
+            let previous_game_mode = player.previous_game_mode;
             player.vitals = Vitals::default();
             (player.game_mode, previous_game_mode, player.vitals)
         };
@@ -994,6 +994,7 @@ mod tests {
         let uuid = PlayerUuid::new(32);
         let mut state = GameState::default();
         state.connect_player(uuid, "Steve", spawn()).unwrap();
+        state.set_game_mode(uuid, GameMode::Creative).unwrap();
         let entity_id = state.player(uuid).unwrap().entity_id.unwrap();
         state.entities_mut().get_mut(entity_id).unwrap().velocity =
             crate::Velocity([1.0, 2.0, 3.0]);
@@ -1017,6 +1018,13 @@ mod tests {
         assert_eq!(entity.transform, respawn);
         assert_eq!(entity.velocity, crate::Velocity::default());
         assert_eq!(state.player(uuid).unwrap().vitals, Vitals::default());
+        assert!(matches!(
+            events[0],
+            GameEvent::PlayerRespawned {
+                previous_game_mode: Some(GameMode::Survival),
+                ..
+            }
+        ));
         assert!(matches!(
             state.respawn_player(uuid, respawn),
             Err(GameStateError::PlayerAlive { .. })

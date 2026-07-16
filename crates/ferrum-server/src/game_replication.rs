@@ -94,6 +94,9 @@ struct ReplicationConnection {
     pending_limit: usize,
     next_teleport_id: i32,
     entities: BTreeMap<PlayerUuid, PlayerEntitySnapshot>,
+    active: bool,
+    healthy: bool,
+    self_initialized: bool,
 }
 
 impl ReplicationConnection {
@@ -104,23 +107,45 @@ impl ReplicationConnection {
             pending_limit,
             next_teleport_id: 2,
             entities: BTreeMap::new(),
+            active: false,
+            healthy: true,
+            self_initialized: false,
         }
     }
 
-    fn queue(&mut self, output: PlayOutput, exit: &mut GameReplicationExit) {
-        if self.pending.len() == self.pending_limit {
-            self.pending.pop_front();
+    fn activate(&mut self) -> Result<()> {
+        if self.active {
+            bail!("replication connection is already active");
+        }
+        if !self.healthy {
+            bail!("replication connection is not healthy");
+        }
+        self.active = true;
+        Ok(())
+    }
+
+    fn queue(&mut self, output: PlayOutput, exit: &mut GameReplicationExit) -> bool {
+        if !self.active || !self.healthy {
+            return false;
+        }
+        if self.pending.len() >= self.pending_limit {
+            self.pending.clear();
+            self.entities.clear();
+            self.healthy = false;
             exit.dropped_outputs = exit.dropped_outputs.saturating_add(1);
+            let _ = self.endpoint.try_disconnect();
+            return false;
         }
         self.pending.push_back(output);
         exit.produced_outputs = exit.produced_outputs.saturating_add(1);
+        true
     }
 
     fn queue_teleport(
         &mut self,
         transform: ferrum_game::Transform,
         exit: &mut GameReplicationExit,
-    ) {
+    ) -> bool {
         let teleport_id = self.next_teleport_id;
         self.next_teleport_id = self.next_teleport_id.saturating_add(1);
         self.queue(
@@ -129,10 +154,13 @@ impl ReplicationConnection {
                 transform,
             },
             exit,
-        );
+        )
     }
 
     fn flush(&mut self, exit: &mut GameReplicationExit) -> bool {
+        if !self.healthy {
+            return false;
+        }
         while let Some(output) = self.pending.pop_front() {
             match self.endpoint.try_submit_output(output) {
                 Ok(()) => exit.sent_outputs = exit.sent_outputs.saturating_add(1),
@@ -152,6 +180,10 @@ enum ReplicationCommand {
     Register {
         uuid: PlayerUuid,
         endpoint: PlayReaderEndpoint,
+        reply: SyncSender<Result<(), String>>,
+    },
+    Activate {
+        uuid: PlayerUuid,
         reply: SyncSender<Result<(), String>>,
     },
     SyncInventory {
@@ -183,6 +215,17 @@ impl GameReplicationControl {
         response
             .recv()
             .context("game replication service dropped registration response")?
+            .map_err(anyhow::Error::msg)
+    }
+
+    pub fn activate(&self, uuid: PlayerUuid) -> Result<()> {
+        let (reply, response) = sync_channel(1);
+        self.commands
+            .send(ReplicationCommand::Activate { uuid, reply })
+            .context("game replication service is disconnected")?;
+        response
+            .recv()
+            .context("game replication service dropped activation response")?
             .map_err(anyhow::Error::msg)
     }
 
@@ -334,66 +377,125 @@ fn process_commands(
                 endpoint,
                 reply,
             } => {
-                if connections.contains_key(&uuid) {
-                    let _ = reply.send(Err(format!(
-                        "player {uuid:?} is already registered for replication"
-                    )));
-                    continue;
-                }
-
-                let mut connection =
-                    ReplicationConnection::new(endpoint, config.pending_output_limit.get());
-                if entity_replication_enabled(&config.entity_protocol_ids) {
-                    let initialization = online_player_snapshots(runtime).and_then(|snapshots| {
-                        for snapshot in snapshots {
-                            if snapshot.uuid != uuid {
-                                queue_player_spawn(&mut connection, snapshot, config, exit)?;
-                            }
-                        }
+                let result = match connections.entry(uuid) {
+                    std::collections::btree_map::Entry::Vacant(entry) => {
+                        entry.insert(ReplicationConnection::new(
+                            endpoint,
+                            config.pending_output_limit.get(),
+                        ));
                         Ok(())
-                    });
-                    if let Err(error) = initialization {
-                        let _ = reply.send(Err(error.to_string()));
-                        return Err(error);
                     }
+                    std::collections::btree_map::Entry::Occupied(_) => Err(format!(
+                        "player {uuid:?} is already registered for replication"
+                    )),
+                };
+                let _ = reply.send(result);
+            }
+            ReplicationCommand::Activate { uuid, reply } => {
+                let result = (|| -> Result<()> {
+                    let (self_state, snapshots) = runtime
+                        .with_state(|state| -> Result<_> {
+                            let self_state = match state.player(uuid) {
+                                Some(player) if player.connected => Some((
+                                    player.vitals,
+                                    player_snapshot_from_state(state, uuid)?.with_context(|| {
+                                        format!(
+                                            "active player {uuid:?} has no authoritative entity snapshot"
+                                        )
+                                    })?,
+                                )),
+                                _ => None,
+                            };
+                            let mut snapshots = Vec::new();
+                            for player in state
+                                .players()
+                                .values()
+                                .filter(|player| player.connected && player.uuid != uuid)
+                            {
+                                snapshots.push(
+                                    player_snapshot_from_state(state, player.uuid)?.with_context(
+                                        || {
+                                            format!(
+                                                "online player {:?} has no entity snapshot",
+                                                player.uuid
+                                            )
+                                        },
+                                    )?,
+                                );
+                            }
+                            Ok((self_state, snapshots))
+                        })
+                        .context("cannot read activation snapshot")??;
+                    let connection = connections.get_mut(&uuid).with_context(|| {
+                        format!("player {uuid:?} is not registered for replication")
+                    })?;
+                    connection.activate()?;
+                    if let Some((vitals, snapshot)) = self_state {
+                        queue_set_health(connection, vitals, exit)?;
+                        queue_player_info_update(connection, &snapshot, exit)?;
+                        connection.self_initialized = true;
+                    }
+                    if entity_replication_enabled(&config.entity_protocol_ids) {
+                        for snapshot in snapshots {
+                            queue_player_spawn(connection, snapshot, config, exit)?;
+                        }
+                    }
+                    if !connection.healthy {
+                        bail!("initial replication snapshot exceeded the bounded output queue");
+                    }
+                    Ok(())
+                })()
+                .map_err(|error| error.to_string());
+                if result.is_err() {
+                    connections.remove(&uuid);
                 }
-                connections.insert(uuid, connection);
-                let _ = reply.send(Ok(()));
+                let _ = reply.send(result);
             }
             ReplicationCommand::SyncInventory { uuid, reply } => {
                 let result = if let Some(connection) = connections.get_mut(&uuid) {
-                    runtime
-                        .with_state(|state| {
-                            state
-                                .player(uuid)
-                                .map(|player| player.inventory.slots().to_vec())
-                        })
-                        .map_err(|error| error.to_string())
-                        .and_then(|slots| {
-                            slots.ok_or_else(|| {
-                                format!("player {uuid:?} is missing from authoritative state")
+                    if !connection.active {
+                        Err(format!("player {uuid:?} replication is not active"))
+                    } else {
+                        runtime
+                            .with_state(|state| {
+                                state
+                                    .player(uuid)
+                                    .map(|player| player.inventory.slots().to_vec())
                             })
-                        })
-                        .and_then(|slots| {
-                            if slots.len() != PLAYER_INVENTORY_SLOTS {
-                                return Err(format!(
-                                    "player inventory has {} slots; expected {PLAYER_INVENTORY_SLOTS}",
-                                    slots.len()
-                                ));
-                            }
-                            connection.queue(
-                                PlayOutput::SetContainerContent {
-                                    container_id: ferrum_game::PLAYER_CONTAINER_ID,
-                                    state_id: 0,
-                                    slots,
-                                    carried: None,
-                                },
-                                exit,
-                            );
-                            exit.inventory_snapshots =
-                                exit.inventory_snapshots.saturating_add(1);
-                            Ok(())
-                        })
+                            .map_err(|error| error.to_string())
+                            .and_then(|slots| {
+                                slots.ok_or_else(|| {
+                                    format!(
+                                        "player {uuid:?} is missing from authoritative state"
+                                    )
+                                })
+                            })
+                            .and_then(|slots| {
+                                if slots.len() != PLAYER_INVENTORY_SLOTS {
+                                    return Err(format!(
+                                        "player inventory has {} slots; expected {PLAYER_INVENTORY_SLOTS}",
+                                        slots.len()
+                                    ));
+                                }
+                                if !connection.queue(
+                                    PlayOutput::SetContainerContent {
+                                        container_id: ferrum_game::PLAYER_CONTAINER_ID,
+                                        state_id: 0,
+                                        slots,
+                                        carried: None,
+                                    },
+                                    exit,
+                                ) {
+                                    return Err(
+                                        "cannot queue inventory snapshot on an unhealthy replication connection"
+                                            .to_owned(),
+                                    );
+                                }
+                                exit.inventory_snapshots =
+                                    exit.inventory_snapshots.saturating_add(1);
+                                Ok(())
+                            })
+                    }
                 } else {
                     Err(format!("player {uuid:?} is not registered for replication"))
                 };
@@ -419,21 +521,29 @@ fn dispatch_event(
     exit.events = exit.events.saturating_add(1);
     match event {
         GameEvent::PlayerConnected { uuid, name, .. } => {
-            if let Some(vitals) = runtime
+            let snapshot = if entity_replication_enabled(&config.entity_protocol_ids) {
+                Some(player_snapshot(runtime, uuid)?.with_context(|| {
+                    format!("connected player {uuid:?} is missing from authoritative state")
+                })?)
+            } else {
+                None
+            };
+            let vitals = runtime
                 .with_state(|state| state.player(uuid).map(|player| player.vitals))
-                .context("cannot read connected player vitals")?
+                .context("cannot read connected player vitals")?;
+            if let Some(connection) = connections.get_mut(&uuid)
+                && connection.active
+                && !connection.self_initialized
             {
-                if let Some(connection) = connections.get_mut(&uuid) {
+                if let Some(vitals) = vitals {
                     queue_set_health(connection, vitals, exit)?;
                 }
-            }
-            if entity_replication_enabled(&config.entity_protocol_ids) {
-                let snapshot = player_snapshot(runtime, uuid)?.with_context(|| {
-                    format!("connected player {uuid:?} is missing from authoritative state")
-                })?;
-                if let Some(connection) = connections.get_mut(&uuid) {
-                    queue_player_info_update(connection, &snapshot, exit)?;
+                if let Some(snapshot) = snapshot.as_ref() {
+                    queue_player_info_update(connection, snapshot, exit)?;
                 }
+                connection.self_initialized = true;
+            }
+            if let Some(snapshot) = snapshot {
                 for (target, connection) in connections.iter_mut() {
                     if *target != uuid {
                         queue_player_spawn(connection, snapshot.clone(), config, exit)?;
@@ -687,10 +797,17 @@ fn dispatch_event(
                     exit,
                 );
             }
+            if entity_replication_enabled(&config.entity_protocol_ids) {
+                for (target, connection) in connections.iter_mut() {
+                    if *target != uuid {
+                        queue_player_entity_remove(connection, uuid, Some(entity_id), exit)?;
+                    }
+                }
+            }
         }
         GameEvent::PlayerRespawned {
             uuid,
-            entity_id,
+            entity_id: _,
             transform,
             game_mode,
             previous_game_mode,
@@ -705,7 +822,7 @@ fn dispatch_event(
                     dimension: world.dimension.clone(),
                     seed: 0,
                     game_mode: protocol_game_mode(game_mode),
-                    previous_game_mode: protocol_game_mode(previous_game_mode),
+                    previous_game_mode: protocol_previous_game_mode(previous_game_mode),
                     is_debug: false,
                     is_flat: true,
                     last_death_location: None,
@@ -725,20 +842,12 @@ fn dispatch_event(
                 );
                 connection.queue_teleport(transform, exit);
             }
-            if entity_replication_enabled(&config.entity_protocol_ids) {
+            if entity_replication_enabled(&config.entity_protocol_ids)
+                && let Some(snapshot) = player_snapshot(runtime, uuid)?
+            {
                 for (target, connection) in connections.iter_mut() {
-                    if *target == uuid {
-                        continue;
-                    }
-                    if let Some(mut tracked) = connection.entities.get(&uuid).cloned() {
-                        tracked.entity_id = entity_id;
-                        tracked.velocity = Velocity::default();
-                        queue_player_absolute_teleport(connection, &tracked, transform, exit)?;
-                        if let Some(snapshot) = connection.entities.get_mut(&uuid) {
-                            snapshot.entity_id = entity_id;
-                            snapshot.transform = transform;
-                            snapshot.velocity = Velocity::default();
-                        }
+                    if *target != uuid {
+                        queue_player_spawn(connection, snapshot.clone(), config, exit)?;
                     }
                 }
             }
@@ -779,6 +888,13 @@ const fn protocol_game_mode(game_mode: GameMode) -> i8 {
     }
 }
 
+const fn protocol_previous_game_mode(game_mode: Option<GameMode>) -> i8 {
+    match game_mode {
+        Some(game_mode) => protocol_game_mode(game_mode),
+        None => -1,
+    }
+}
+
 fn entity_replication_enabled(registry: &EntityProtocolRegistry) -> bool {
     registry.protocol_id("minecraft:player").is_some()
 }
@@ -790,22 +906,6 @@ fn player_snapshot(
     runtime
         .with_state(|state| player_snapshot_from_state(state, uuid))
         .context("cannot read authoritative player snapshot")?
-}
-
-fn online_player_snapshots(runtime: &SharedGameRuntime) -> Result<Vec<PlayerEntitySnapshot>> {
-    runtime
-        .with_state(|state| {
-            let mut snapshots = Vec::new();
-            for player in state.players().values().filter(|player| player.connected) {
-                let snapshot =
-                    player_snapshot_from_state(state, player.uuid)?.with_context(|| {
-                        format!("online player {:?} has no entity snapshot", player.uuid)
-                    })?;
-                snapshots.push(snapshot);
-            }
-            Ok(snapshots)
-        })
-        .context("cannot read authoritative online-player snapshots")?
 }
 
 fn player_snapshot_from_state(
@@ -864,9 +964,19 @@ fn queue_player_spawn(
     config: &GameReplicationConfig,
     exit: &mut GameReplicationExit,
 ) -> Result<()> {
-    if !entity_replication_enabled(&config.entity_protocol_ids) {
+    if !entity_replication_enabled(&config.entity_protocol_ids)
+        || !connection.active
+        || !connection.healthy
+    {
         return Ok(());
     }
+    if let Some(tracked) = connection.entities.get(&snapshot.uuid) {
+        if tracked.entity_id == snapshot.entity_id {
+            connection.entities.insert(snapshot.uuid, snapshot);
+            return Ok(());
+        }
+    }
+    queue_player_entity_remove(connection, snapshot.uuid, None, exit)?;
     queue_player_info_update(connection, &snapshot, exit)?;
     let payload = encode_add_entity(
         snapshot.entity_id,
@@ -910,7 +1020,9 @@ fn queue_player_spawn(
         },
         exit,
     );
-    connection.entities.insert(snapshot.uuid, snapshot);
+    if connection.healthy {
+        connection.entities.insert(snapshot.uuid, snapshot);
+    }
     Ok(())
 }
 
@@ -987,7 +1099,7 @@ fn queue_equipment_except(
     Ok(())
 }
 
-fn queue_player_remove(
+fn queue_player_entity_remove(
     connection: &mut ReplicationConnection,
     uuid: PlayerUuid,
     fallback_entity_id: Option<EntityId>,
@@ -1008,6 +1120,16 @@ fn queue_player_remove(
             exit,
         );
     }
+    Ok(())
+}
+
+fn queue_player_remove(
+    connection: &mut ReplicationConnection,
+    uuid: PlayerUuid,
+    fallback_entity_id: Option<EntityId>,
+    exit: &mut GameReplicationExit,
+) -> Result<()> {
+    queue_player_entity_remove(connection, uuid, fallback_entity_id, exit)?;
     connection.queue(
         PlayOutput::ProtocolPacket {
             kind: PacketKind::PlayerInfoRemove,
@@ -1309,8 +1431,10 @@ mod tests {
         let mut inputs = BoundedInputQueue::try_new(64).unwrap();
         ingest(&mut workers, &mut inputs);
         service.control().register(steve, steve_reader).unwrap();
+        service.control().activate(steve).unwrap();
         game.connect_player(steve, "Steve", spawn()).unwrap();
         service.control().register(alex, alex_reader).unwrap();
+        service.control().activate(alex).unwrap();
         game.connect_player(alex, "Alex", spawn()).unwrap();
         assert!(matches!(
             recv_output(&steve_writer, &mut workers, &mut inputs),
@@ -1363,6 +1487,7 @@ mod tests {
         let mut inputs = BoundedInputQueue::try_new(128).unwrap();
         ingest(&mut workers, &mut inputs);
         service.control().register(steve, reader).unwrap();
+        service.control().activate(steve).unwrap();
         game.connect_player(steve, "Steve", spawn()).unwrap();
         service.control().sync_inventory(steve).unwrap();
         assert!(matches!(
@@ -1414,8 +1539,10 @@ mod tests {
         let mut inputs = BoundedInputQueue::try_new(32).unwrap();
         ingest(&mut workers, &mut inputs);
         service.control().register(steve, steve_reader).unwrap();
+        service.control().activate(steve).unwrap();
         game.connect_player(steve, "Steve", spawn()).unwrap();
         service.control().register(alex, alex_reader).unwrap();
+        service.control().activate(alex).unwrap();
         game.connect_player(alex, "Alex", spawn()).unwrap();
         assert!(matches!(
             recv_output(&steve_writer, &mut workers, &mut inputs),
@@ -1454,6 +1581,8 @@ mod tests {
         ingest(&mut workers, &mut inputs);
 
         service.control().register(steve, steve_reader).unwrap();
+
+        service.control().activate(steve).unwrap();
         game.connect_player(steve, "Steve", spawn()).unwrap();
         recv_protocol(
             &steve_writer,
@@ -1467,6 +1596,8 @@ mod tests {
             .unwrap();
 
         service.control().register(alex, alex_reader).unwrap();
+
+        service.control().activate(alex).unwrap();
         recv_protocol(
             &alex_writer,
             &mut workers,
@@ -1584,6 +1715,8 @@ mod tests {
         ingest(&mut workers, &mut inputs);
 
         service.control().register(steve, steve_reader).unwrap();
+
+        service.control().activate(steve).unwrap();
         game.connect_player(steve, "Steve", spawn()).unwrap();
         recv_protocol(
             &steve_writer,
@@ -1596,6 +1729,7 @@ mod tests {
             .unwrap()
             .unwrap();
         service.control().register(alex, alex_reader).unwrap();
+        service.control().activate(alex).unwrap();
         for kind in [
             PacketKind::PlayerInfoUpdate,
             PacketKind::AddEntity,
@@ -1696,6 +1830,8 @@ mod tests {
         ingest(&mut workers, &mut inputs);
 
         service.control().register(steve, steve_reader).unwrap();
+
+        service.control().activate(steve).unwrap();
         game.connect_player(steve, "Steve", spawn()).unwrap();
         recv_protocol(
             &steve_writer,
@@ -1720,6 +1856,8 @@ mod tests {
         .unwrap();
 
         service.control().register(alex, alex_reader).unwrap();
+
+        service.control().activate(alex).unwrap();
         for kind in [
             PacketKind::PlayerInfoUpdate,
             PacketKind::AddEntity,
@@ -1827,6 +1965,8 @@ mod tests {
         ingest(&mut workers, &mut inputs);
 
         service.control().register(steve, steve_reader).unwrap();
+
+        service.control().activate(steve).unwrap();
         game.connect_player(steve, "Steve", spawn()).unwrap();
         assert_eq!(
             recv_raw_output(&steve_writer, &mut workers, &mut inputs),
@@ -1837,6 +1977,8 @@ mod tests {
         );
 
         service.control().register(alex, alex_reader).unwrap();
+
+        service.control().activate(alex).unwrap();
         game.connect_player(alex, "Alex", spawn()).unwrap();
         assert!(matches!(
             recv_raw_output(&alex_writer, &mut workers, &mut inputs),
@@ -1915,6 +2057,7 @@ mod tests {
         let mut inputs = BoundedInputQueue::try_new(128).unwrap();
         ingest(&mut workers, &mut inputs);
         service.control().register(steve, reader).unwrap();
+        service.control().activate(steve).unwrap();
         game.connect_player(steve, "Steve", spawn()).unwrap();
         assert!(matches!(
             recv_raw_output(&writer, &mut workers, &mut inputs),
@@ -1973,5 +2116,100 @@ mod tests {
             }
         ));
         service.shutdown().unwrap();
+    }
+
+    #[test]
+    fn registration_is_silent_until_explicit_activation() {
+        let game = SharedGameRuntime::vanilla_overworld();
+        let service = spawn_game_replication(&game, GameReplicationConfig::default()).unwrap();
+        let steve = PlayerUuid::new(601);
+        let (connector, mut workers) = worker_channel(NonZeroUsize::new(32).unwrap());
+        let (reader, writer) = register_play_connection(
+            &connector,
+            ConnectionId::new(601),
+            NonZeroUsize::new(16).unwrap(),
+        )
+        .unwrap();
+        let mut inputs = BoundedInputQueue::try_new(32).unwrap();
+        ingest(&mut workers, &mut inputs);
+        service.control().register(steve, reader).unwrap();
+        game.connect_player(steve, "Steve", spawn()).unwrap();
+        thread::sleep(Duration::from_millis(10));
+        ingest(&mut workers, &mut inputs);
+        assert!(writer.try_recv_output().is_err());
+        service.control().activate(steve).unwrap();
+        assert!(matches!(
+            recv_raw_output(&writer, &mut workers, &mut inputs),
+            PlayOutput::ProtocolPacket {
+                kind: PacketKind::SetHealth,
+                ..
+            }
+        ));
+        service.shutdown().unwrap();
+    }
+
+    #[test]
+    fn repeated_spawn_snapshot_is_idempotent() {
+        let game = SharedGameRuntime::vanilla_overworld();
+        let steve = PlayerUuid::new(602);
+        game.connect_player(steve, "Steve", spawn()).unwrap();
+        let snapshot = player_snapshot(&game, steve).unwrap().unwrap();
+        let (connector, mut workers) = worker_channel(NonZeroUsize::new(32).unwrap());
+        let (reader, _writer) = register_play_connection(
+            &connector,
+            ConnectionId::new(602),
+            NonZeroUsize::new(16).unwrap(),
+        )
+        .unwrap();
+        let mut inputs = BoundedInputQueue::try_new(32).unwrap();
+        ingest(&mut workers, &mut inputs);
+        let mut connection = ReplicationConnection::new(reader, 16);
+        connection.activate().unwrap();
+        let mut exit = GameReplicationExit::default();
+        queue_player_spawn(
+            &mut connection,
+            snapshot.clone(),
+            &entity_config(),
+            &mut exit,
+        )
+        .unwrap();
+        let pending = connection.pending.len();
+        queue_player_spawn(&mut connection, snapshot, &entity_config(), &mut exit).unwrap();
+        assert_eq!(connection.pending.len(), pending);
+        assert_eq!(connection.entities.len(), 1);
+    }
+
+    #[test]
+    fn output_overflow_disconnects_instead_of_corrupting_tracking_state() {
+        let (connector, mut workers) = worker_channel(NonZeroUsize::new(8).unwrap());
+        let (reader, _writer) = register_play_connection(
+            &connector,
+            ConnectionId::new(603),
+            NonZeroUsize::new(1).unwrap(),
+        )
+        .unwrap();
+        let mut inputs = BoundedInputQueue::try_new(8).unwrap();
+        ingest(&mut workers, &mut inputs);
+        let mut connection = ReplicationConnection::new(reader, 1);
+        connection.activate().unwrap();
+        let mut exit = GameReplicationExit::default();
+        assert!(connection.queue(
+            PlayOutput::SystemChat {
+                message: "first".to_owned(),
+                overlay: false,
+            },
+            &mut exit
+        ));
+        assert!(!connection.queue(
+            PlayOutput::SystemChat {
+                message: "second".to_owned(),
+                overlay: false,
+            },
+            &mut exit
+        ));
+        assert!(!connection.healthy);
+        assert!(connection.pending.is_empty());
+        assert!(connection.entities.is_empty());
+        assert_eq!(exit.dropped_outputs, 1);
     }
 }
