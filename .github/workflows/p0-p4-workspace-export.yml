@@ -87,8 +87,8 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
-          path = Path('crates/ferrum-game/src/menu.rs')
-          source = path.read_text()
+          menu_path = Path('crates/ferrum-game/src/menu.rs')
+          menu = menu_path.read_text()
           replacements = [
               (
                   '        let slot = self\n',
@@ -108,10 +108,18 @@ jobs:
               ),
           ]
           for original, replacement in replacements:
-              if source.count(original) != 1:
+              if menu.count(original) != 1:
                   raise SystemExit(f'expected menu pattern not found exactly once: {original!r}')
-              source = source.replace(original, replacement)
-          path.write_text(source)
+              menu = menu.replace(original, replacement)
+          menu_path.write_text(menu)
+
+          entity_path = Path('crates/ferrum-game/src/entity.rs')
+          entity = entity_path.read_text()
+          original = '                age_ticks: 20,\n                data: BTreeMap::new(),\n'
+          replacement = '                age_ticks: 20,\n                payload: EntityPayload::Generic,\n                data: BTreeMap::new(),\n'
+          if entity.count(original) != 1:
+              raise SystemExit('expected restored entity fixture was not found exactly once')
+          entity_path.write_text(entity.replace(original, replacement))
           PY
 
       - name: Format
