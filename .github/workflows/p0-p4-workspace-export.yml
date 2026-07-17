@@ -56,6 +56,14 @@ jobs:
           Path('/tmp/p0-p4.patch.gz.b64').write_text(encoded)
           PY
 
+      - name: Export received patch chunk 3
+        uses: actions/upload-artifact@v4
+        with:
+          name: received-p0-p4-chunk3
+          path: /tmp/p0-p4.chunk3
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Verify patch chunk 1
         run: echo '30de7682a19f6ebf19fd8f409e492ff8cb8126bd099c90d966d51097b171f080  /tmp/p0-p4.chunk1' | sha256sum --check --strict
 
