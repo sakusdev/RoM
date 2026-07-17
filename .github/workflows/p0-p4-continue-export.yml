@@ -17,97 +17,73 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
 
-      - name: Download verified official server and mappings
-        id: inspect
-        continue-on-error: true
+      - name: Download verified official server
         run: |
-          set -o pipefail
+          set -euo pipefail
           mkdir -p /tmp/inspect /tmp/libs
-          python3 - <<'PY' > /tmp/inspect/stdout.txt 2> /tmp/inspect/stderr.txt
-          import hashlib, json, pathlib, traceback, urllib.request, zipfile
+          python3 - <<'PY'
+          import hashlib, json, pathlib, urllib.request, zipfile
 
           version = '26.1.2'
-          manifest_url = 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json'
 
           def download(url):
               request = urllib.request.Request(url, headers={'User-Agent': 'RoM/official-wire-inspector'})
               with urllib.request.urlopen(request, timeout=60) as response:
                   return response.read()
 
-          try:
-              manifest = json.loads(download(manifest_url))
-              entry = next(item for item in manifest['versions'] if item['id'] == version)
-              pathlib.Path('/tmp/inspect/version-index.json').write_text(json.dumps(entry, indent=2, sort_keys=True))
-              version_bytes = download(entry['url'])
-              if hashlib.sha1(version_bytes).hexdigest() != entry['sha1']:
-                  raise RuntimeError('version metadata SHA-1 mismatch')
-              metadata = json.loads(version_bytes)
-              pathlib.Path('/tmp/inspect/download-keys.txt').write_text('\n'.join(sorted(metadata.get('downloads', {}))) + '\n')
+          manifest = json.loads(download('https://piston-meta.mojang.com/mc/game/version_manifest_v2.json'))
+          entry = next(item for item in manifest['versions'] if item['id'] == version)
+          metadata_bytes = download(entry['url'])
+          if hashlib.sha1(metadata_bytes).hexdigest() != entry['sha1']:
+              raise SystemExit('version metadata SHA-1 mismatch')
+          metadata = json.loads(metadata_bytes)
+          server = metadata['downloads']['server']
+          server_bytes = download(server['url'])
+          if len(server_bytes) != server['size'] or hashlib.sha1(server_bytes).hexdigest() != server['sha1']:
+              raise SystemExit('server integrity mismatch')
+          pathlib.Path('/tmp/server.jar').write_bytes(server_bytes)
+          pathlib.Path('/tmp/inspect/source.json').write_text(json.dumps({
+              'version': version,
+              'metadata_sha1': entry['sha1'],
+              'server_sha1': server['sha1'],
+              'server_size': server['size'],
+          }, indent=2, sort_keys=True))
 
-              for key, output in [('server', '/tmp/server.jar'), ('server_mappings', '/tmp/server_mappings.txt')]:
-                  artifact = metadata['downloads'][key]
-                  data = download(artifact['url'])
-                  if len(data) != artifact['size'] or hashlib.sha1(data).hexdigest() != artifact['sha1']:
-                      raise RuntimeError(f'{key} integrity mismatch')
-                  pathlib.Path(output).write_bytes(data)
-
-              with zipfile.ZipFile('/tmp/server.jar') as outer:
-                  lines = outer.read('META-INF/versions.list').decode().splitlines()
-                  pathlib.Path('/tmp/inspect/versions.list').write_text('\n'.join(lines) + '\n')
-                  candidates = [fields[2] for line in lines if len((fields := line.strip().split('\t'))) == 3]
-                  if len(candidates) != 1:
-                      raise RuntimeError(f'expected one embedded game jar, found {candidates}')
-                  pathlib.Path('/tmp/game.jar').write_bytes(outer.read(candidates[0]))
-                  for name in outer.namelist():
-                      if name.startswith('META-INF/libraries/') and name.endswith('.jar'):
-                          (pathlib.Path('/tmp/libs') / pathlib.Path(name).name).write_bytes(outer.read(name))
-
-              mappings = pathlib.Path('/tmp/server_mappings.txt').read_text()
-              targets = [
-                  'net.minecraft.world.entity.item.ItemEntity',
-                  'net.minecraft.network.syncher.EntityDataAccessor',
-                  'net.minecraft.network.syncher.EntityDataSerializers',
-                  'net.minecraft.network.syncher.SynchedEntityData',
-                  'net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket',
-                  'net.minecraft.network.protocol.game.ClientboundAddEntityPacket',
-              ]
-              excerpts, class_map, current = [], {}, None
-              for line in mappings.splitlines():
-                  if line and not line.startswith(' ') and line.endswith(':') and ' -> ' in line:
-                      original, obfuscated = line[:-1].split(' -> ', 1)
-                      current = original
-                      if original in targets:
-                          class_map[original] = obfuscated
-                          excerpts.append(line)
-                      continue
-                  if current in targets and line.startswith('    '):
-                      excerpts.append(line)
-              pathlib.Path('/tmp/inspect/mapping-excerpts.txt').write_text('\n'.join(excerpts) + '\n')
-              pathlib.Path('/tmp/inspect/classes.json').write_text(json.dumps(class_map, indent=2, sort_keys=True))
-              print('download and mapping extraction succeeded')
-          except Exception:
-              traceback.print_exc()
-              raise
+          with zipfile.ZipFile('/tmp/server.jar') as outer:
+              lines = outer.read('META-INF/versions.list').decode().splitlines()
+              pathlib.Path('/tmp/inspect/versions.list').write_text('\n'.join(lines) + '\n')
+              candidates = [fields[2] for line in lines if len((fields := line.strip().split('\t'))) == 3]
+              if len(candidates) != 1:
+                  raise SystemExit(f'expected one embedded game jar, found {candidates}')
+              pathlib.Path('/tmp/game.jar').write_bytes(outer.read(candidates[0]))
+              for name in outer.namelist():
+                  if name.startswith('META-INF/libraries/') and name.endswith('.jar'):
+                      (pathlib.Path('/tmp/libs') / pathlib.Path(name).name).write_bytes(outer.read(name))
           PY
-          status=$?
-          cat /tmp/inspect/stdout.txt
-          cat /tmp/inspect/stderr.txt >&2
-          exit $status
 
-      - name: Disassemble mapped classes
-        if: steps.inspect.outcome == 'success'
+      - name: Locate and disassemble item entity classes
         run: |
           set -euo pipefail
-          python3 - <<'PY' > /tmp/classes.list
-          import json
-          for value in json.load(open('/tmp/inspect/classes.json')).values():
-              print(value)
+          jar tf /tmp/game.jar > /tmp/inspect/game-classes.txt
+          grep -Ei '(^|/)(ItemEntity|EntityDataAccessor|EntityDataSerializers|SynchedEntityData|ClientboundSetEntityDataPacket|ClientboundAddEntityPacket)(\$[^/]*)?\.class$' \
+            /tmp/inspect/game-classes.txt > /tmp/inspect/matching-classes.txt || true
+          cat /tmp/inspect/matching-classes.txt
+          python3 - <<'PY' > /tmp/inspect/candidates.txt
+          from pathlib import Path
+          for line in Path('/tmp/inspect/matching-classes.txt').read_text().splitlines():
+              if '$' in line or not line.endswith('.class'):
+                  continue
+              print(line[:-6].replace('/', '.'))
           PY
+          if [[ ! -s /tmp/inspect/candidates.txt ]]; then
+            echo 'No named candidate classes found' >&2
+            exit 1
+          fi
           while IFS= read -r class; do
             safe=$(printf '%s' "$class" | tr './$' '___')
-            javap -p -c -s -classpath "/tmp/game.jar:/tmp/libs/*" "$class" > "/tmp/inspect/${safe}.javap.txt"
-          done < /tmp/classes.list
-          sha1sum /tmp/server.jar /tmp/server_mappings.txt > /tmp/inspect/source-sha1.txt
+            javap -p -c -s -constants -classpath "/tmp/game.jar:/tmp/libs/*" "$class" \
+              > "/tmp/inspect/${safe}.javap.txt"
+          done < /tmp/inspect/candidates.txt
 
       - name: Upload inspection
         if: always()
@@ -117,7 +93,3 @@ jobs:
           path: /tmp/inspect
           if-no-files-found: error
           retention-days: 1
-
-      - name: Enforce inspection
-        if: steps.inspect.outcome == 'failure'
-        run: exit 1
