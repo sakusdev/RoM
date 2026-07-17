@@ -148,6 +148,19 @@ impl ItemStack {
             components: self.components.clone(),
         })
     }
+
+    /// Consume up to the complete stack without exposing internal count mutation.
+    /// Returns `true` when the stack became empty and the owning slot should be cleared.
+    pub fn consume(&mut self, amount: u32) -> Result<bool, InventoryError> {
+        if amount == 0 || amount > self.count {
+            return Err(InventoryError::InsufficientStackCount {
+                requested: amount,
+                available: self.count,
+            });
+        }
+        self.count -= amount;
+        Ok(self.count == 0)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -347,6 +360,8 @@ pub enum InventoryError {
     InvalidStackCount { count: u32, max_count: u32 },
     #[error("split amount {amount} must be between 1 and available count {available}")]
     InvalidSplitAmount { amount: u32, available: u32 },
+    #[error("cannot consume {requested} items from a stack containing {available}")]
+    InsufficientStackCount { requested: u32, available: u32 },
     #[error("inventory has {actual} slots; expected {expected}")]
     InvalidSlotCount { actual: usize, expected: usize },
     #[error("inventory slot {index} is outside 0..{PLAYER_INVENTORY_SLOTS}")]

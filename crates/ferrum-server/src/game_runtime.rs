@@ -10,8 +10,9 @@ use std::{
 };
 
 use ferrum_game::{
-    CommandError, CommandOutcome, CommandSource, ContainerClick, GameEvent, GameSnapshot,
-    GameState, GameStateError, ItemStack, PersistenceError, PlayerUuid, Transform, execute_command,
+    CommandError, CommandOutcome, CommandSource, ContainerClick, DamageSource, GameEvent,
+    GameSnapshot, GameState, GameStateError, ItemStack, PersistenceError, PlayerUuid,
+    StatusEffectInstance, Transform, Velocity, execute_command,
 };
 use thiserror::Error;
 
@@ -156,6 +157,89 @@ impl SharedGameRuntime {
         Ok(events)
     }
 
+    pub fn spawn_item_entity(
+        &self,
+        transform: Transform,
+        stack: ItemStack,
+        velocity: Velocity,
+        owner: Option<PlayerUuid>,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self
+            .write()?
+            .spawn_item_entity(transform, stack, velocity, owner)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn pickup_nearby_items(
+        &self,
+        uuid: PlayerUuid,
+        radius: f64,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self.write()?.pickup_nearby_items(uuid, radius)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn damage_player_with_source(
+        &self,
+        uuid: PlayerUuid,
+        amount: f32,
+        source: DamageSource,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self
+            .write()?
+            .damage_player_with_source(uuid, amount, source)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn apply_knockback(
+        &self,
+        uuid: PlayerUuid,
+        direction_xz: [f64; 2],
+        strength: f64,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self
+            .write()?
+            .apply_knockback(uuid, direction_xz, strength)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn set_player_attribute_base(
+        &self,
+        uuid: PlayerUuid,
+        attribute: &str,
+        value: f64,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self
+            .write()?
+            .set_player_attribute_base(uuid, attribute, value)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn add_status_effect(
+        &self,
+        uuid: PlayerUuid,
+        effect: StatusEffectInstance,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self.write()?.add_status_effect(uuid, effect)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn remove_status_effect(
+        &self,
+        uuid: PlayerUuid,
+        effect: &str,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self.write()?.remove_status_effect(uuid, effect)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
     pub fn click_container(
         &self,
         uuid: PlayerUuid,
@@ -199,7 +283,8 @@ impl SharedGameRuntime {
     }
 
     pub fn tick(&self) -> Result<(), GameRuntimeError> {
-        self.write()?.tick();
+        let events = self.write()?.tick();
+        self.publish(&events)?;
         Ok(())
     }
 

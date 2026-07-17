@@ -4,9 +4,12 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::{
-    ContainerClick, ContainerError, ContainerMutation, ContainerSnapshot, Difficulty, EntityError,
-    EntityId, EntityStore, EntityType, EntityUuid, GameMode, InventoryError, ItemStack,
-    PlayerError, PlayerState, PlayerUuid, Transform, Vitals,
+    AttributeError, CombatError, ContainerClick, ContainerError, ContainerMutation,
+    ContainerSnapshot, DamageContext, DamageKind, DamageSource, Difficulty, Entity, EntityError,
+    EntityId, EntityPayload, EntityStore, EntityType, EntityUuid, GameMode, InventoryError,
+    ItemEntityData, ItemStack, PlayerError, PlayerState, PlayerUuid, StatusEffectError,
+    StatusEffectInstance, Transform, Velocity, Vitals, calculate_damage, fall_damage,
+    knockback_velocity,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -84,6 +87,33 @@ pub enum GameEvent {
         uuid: PlayerUuid,
         stacks: Vec<ItemStack>,
     },
+    EntitySpawned {
+        entity: Entity,
+    },
+    EntityRemoved {
+        entity_id: EntityId,
+    },
+    ItemPickedUp {
+        uuid: PlayerUuid,
+        entity_id: EntityId,
+        item: String,
+        inserted: u32,
+    },
+    PlayerVelocityChanged {
+        uuid: PlayerUuid,
+        entity_id: EntityId,
+        velocity: Velocity,
+    },
+    PlayerAttributeChanged {
+        uuid: PlayerUuid,
+        attribute: String,
+        value: f64,
+    },
+    PlayerStatusEffectChanged {
+        uuid: PlayerUuid,
+        effect: String,
+        active: bool,
+    },
     SelectedHotbarChanged {
         uuid: PlayerUuid,
         previous: u8,
@@ -93,6 +123,7 @@ pub enum GameEvent {
         uuid: PlayerUuid,
         entity_id: EntityId,
         amount: f32,
+        source: DamageSource,
         previous: Vitals,
         current: Vitals,
     },
@@ -275,12 +306,63 @@ impl GameState {
         transform: Transform,
     ) -> Result<Vec<GameEvent>, GameStateError> {
         let entity_id = self.connected_entity_id(uuid)?;
+        let previous_transform = self
+            .entities
+            .get(entity_id)
+            .ok_or(GameStateError::PlayerMissingEntity { uuid })?
+            .transform;
+        let (landed_distance, safe_fall_distance, jump_boost_level) = {
+            let player = self
+                .players
+                .get_mut(&uuid)
+                .ok_or(GameStateError::UnknownPlayer { uuid })?;
+            let fall_enabled = !player.abilities.flying
+                && matches!(player.game_mode, GameMode::Survival | GameMode::Adventure);
+            if !fall_enabled {
+                player.fall_distance = 0.0;
+                (0.0, 0.0, 0)
+            } else if transform.on_ground {
+                let landed = if previous_transform.on_ground {
+                    0.0
+                } else {
+                    let final_descent =
+                        (previous_transform.position[1] - transform.position[1]).max(0.0);
+                    (f64::from(player.fall_distance) + final_descent).min(f64::from(f32::MAX))
+                        as f32
+                };
+                player.fall_distance = 0.0;
+                (
+                    landed,
+                    player
+                        .attribute_value("minecraft:safe_fall_distance")
+                        .unwrap_or(3.0),
+                    player.status_effects.jump_boost_level(),
+                )
+            } else {
+                let downward = (previous_transform.position[1] - transform.position[1]).max(0.0);
+                player.fall_distance =
+                    (f64::from(player.fall_distance) + downward).min(f64::from(f32::MAX)) as f32;
+                (0.0, 0.0, 0)
+            }
+        };
         self.entities.set_transform(entity_id, transform)?;
-        Ok(vec![GameEvent::PlayerMoved {
+        let mut events = vec![GameEvent::PlayerMoved {
             uuid,
             entity_id,
             transform,
-        }])
+        }];
+        if landed_distance > 0.0 {
+            let amount = fall_damage(landed_distance, safe_fall_distance, jump_boost_level)?;
+            if amount > 0.0 {
+                events.extend(self.damage_player_with_source(
+                    uuid,
+                    amount,
+                    DamageSource::generic(DamageKind::Fall),
+                )?);
+            }
+        }
+        events.extend(self.pickup_nearby_items(uuid, 1.5)?);
+        Ok(events)
     }
 
     pub fn teleport_player(
@@ -350,31 +432,270 @@ impl GameState {
         Ok((remainder, events))
     }
 
-    pub fn click_container(
+    pub fn spawn_item_entity(
+        &mut self,
+        transform: Transform,
+        stack: ItemStack,
+        velocity: Velocity,
+        owner: Option<PlayerUuid>,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
+        let mut item = ItemEntityData::new(stack);
+        item.owner = owner;
+        let entity_id = self.entities.spawn_generated(
+            EntityType::new("minecraft:item")?,
+            transform,
+            EntityPayload::Item(item),
+        )?;
+        self.entities.set_velocity(entity_id, velocity)?;
+        let entity = self
+            .entities
+            .get(entity_id)
+            .expect("newly spawned item entity exists")
+            .clone();
+        Ok(vec![GameEvent::EntitySpawned { entity }])
+    }
+
+    pub fn pickup_nearby_items(
         &mut self,
         uuid: PlayerUuid,
-        click: ContainerClick,
+        radius: f64,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
+        if !radius.is_finite() || !(0.0..=16.0).contains(&radius) {
+            return Err(GameStateError::InvalidPickupRadius { radius });
+        }
+        let entity_id = self.connected_entity_id(uuid)?;
+        let position = self
+            .entities
+            .get(entity_id)
+            .ok_or(GameStateError::PlayerMissingEntity { uuid })?
+            .transform
+            .position;
+        if self
+            .players
+            .get(&uuid)
+            .is_some_and(|player| player.vitals.is_dead())
+        {
+            return Ok(Vec::new());
+        }
+        let radius_squared = radius * radius;
+        let candidates = self
+            .entities
+            .iter()
+            .filter_map(|(&candidate_id, entity)| {
+                let item = entity.item()?;
+                if !item.can_pick_up() {
+                    return None;
+                }
+                let distance_squared = entity
+                    .transform
+                    .position
+                    .into_iter()
+                    .zip(position)
+                    .map(|(value, origin)| (value - origin).powi(2))
+                    .sum::<f64>();
+                (distance_squared <= radius_squared).then(|| (candidate_id, item.stack.clone()))
+            })
+            .collect::<Vec<_>>();
+        let mut events = Vec::new();
+        let mut inventory_changed = false;
+        for (candidate_id, stack) in candidates {
+            let requested = stack.count();
+            let item_name = stack.item().to_owned();
+            let (remainder, changed_slots) = {
+                let player = self
+                    .players
+                    .get_mut(&uuid)
+                    .ok_or(GameStateError::UnknownPlayer { uuid })?;
+                player.inventory.insert_with_changed_slots(stack)
+            };
+            let inserted = requested - remainder.as_ref().map_or(0, ItemStack::count);
+            if inserted == 0 {
+                continue;
+            }
+            inventory_changed = true;
+            if let Some(remainder) = remainder {
+                let entity = self.entities.get_mut(candidate_id).ok_or(
+                    GameStateError::MissingItemEntity {
+                        entity_id: candidate_id,
+                    },
+                )?;
+                entity
+                    .item_mut()
+                    .ok_or(GameStateError::NotItemEntity {
+                        entity_id: candidate_id,
+                    })?
+                    .stack = remainder;
+            } else {
+                self.entities.despawn(candidate_id);
+                events.push(GameEvent::EntityRemoved {
+                    entity_id: candidate_id,
+                });
+            }
+            events.push(GameEvent::InventoryChanged {
+                uuid,
+                inserted,
+                item: item_name.clone(),
+            });
+            let player = self
+                .players
+                .get(&uuid)
+                .ok_or(GameStateError::UnknownPlayer { uuid })?;
+            events.extend(
+                changed_slots
+                    .into_iter()
+                    .map(|slot| GameEvent::InventorySlotChanged {
+                        uuid,
+                        slot,
+                        stack: player.inventory.slots()[slot].clone(),
+                    }),
+            );
+            events.push(GameEvent::ItemPickedUp {
+                uuid,
+                entity_id: candidate_id,
+                item: item_name,
+                inserted,
+            });
+        }
+        if inventory_changed {
+            let player = self
+                .players
+                .get(&uuid)
+                .ok_or(GameStateError::UnknownPlayer { uuid })?;
+            events.push(GameEvent::ContainerContentChanged {
+                uuid,
+                snapshot: player.inventory_session.snapshot(&player.inventory),
+            });
+        }
+        Ok(events)
+    }
+
+    pub fn apply_knockback(
+        &mut self,
+        uuid: PlayerUuid,
+        direction_xz: [f64; 2],
+        strength: f64,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
+        let entity_id = self.connected_entity_id(uuid)?;
+        let resistance = self
+            .players
+            .get(&uuid)
+            .ok_or(GameStateError::UnknownPlayer { uuid })?
+            .attribute_value("minecraft:knockback_resistance")
+            .unwrap_or(0.0);
+        let current = self
+            .entities
+            .get(entity_id)
+            .ok_or(GameStateError::PlayerMissingEntity { uuid })?
+            .velocity;
+        let velocity = knockback_velocity(current, direction_xz, strength, resistance)?;
+        self.entities.set_velocity(entity_id, velocity)?;
+        Ok(vec![GameEvent::PlayerVelocityChanged {
+            uuid,
+            entity_id,
+            velocity,
+        }])
+    }
+
+    pub fn set_player_attribute_base(
+        &mut self,
+        uuid: PlayerUuid,
+        attribute: &str,
+        value: f64,
     ) -> Result<Vec<GameEvent>, GameStateError> {
         let player = self
             .players
             .get_mut(&uuid)
             .ok_or(GameStateError::UnknownPlayer { uuid })?;
-        let creative = player.game_mode == GameMode::Creative;
-        let mutation = player
-            .inventory_session
-            .click(&mut player.inventory, click, creative)?;
-        Ok(container_events(uuid, &player.inventory, mutation))
+        let instance = player.attributes.get_mut(attribute).ok_or_else(|| {
+            GameStateError::UnknownAttribute {
+                attribute: attribute.to_owned(),
+            }
+        })?;
+        instance.set_base(value)?;
+        let current = instance.value();
+        if attribute == "minecraft:max_health" {
+            player.vitals.health = player.vitals.health.min(current as f32);
+        }
+        Ok(vec![GameEvent::PlayerAttributeChanged {
+            uuid,
+            attribute: attribute.to_owned(),
+            value: current,
+        }])
     }
 
-    pub fn close_container(&mut self, uuid: PlayerUuid) -> Result<Vec<GameEvent>, GameStateError> {
+    pub fn add_status_effect(
+        &mut self,
+        uuid: PlayerUuid,
+        effect: StatusEffectInstance,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
+        let effect_id = effect.effect.as_str().to_owned();
         let player = self
             .players
             .get_mut(&uuid)
             .ok_or(GameStateError::UnknownPlayer { uuid })?;
-        let mutation = player
-            .inventory_session
-            .close_container(&mut player.inventory);
-        Ok(container_events(uuid, &player.inventory, mutation))
+        player.status_effects.insert(effect)?;
+        Ok(vec![GameEvent::PlayerStatusEffectChanged {
+            uuid,
+            effect: effect_id,
+            active: true,
+        }])
+    }
+
+    pub fn remove_status_effect(
+        &mut self,
+        uuid: PlayerUuid,
+        effect: &str,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
+        let player = self
+            .players
+            .get_mut(&uuid)
+            .ok_or(GameStateError::UnknownPlayer { uuid })?;
+        if player.status_effects.remove(effect).is_none() {
+            return Ok(Vec::new());
+        }
+        Ok(vec![GameEvent::PlayerStatusEffectChanged {
+            uuid,
+            effect: effect.to_owned(),
+            active: false,
+        }])
+    }
+
+    pub fn click_container(
+        &mut self,
+        uuid: PlayerUuid,
+        click: ContainerClick,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
+        let (mut events, dropped) = {
+            let player = self
+                .players
+                .get_mut(&uuid)
+                .ok_or(GameStateError::UnknownPlayer { uuid })?;
+            let creative = player.game_mode == GameMode::Creative;
+            let mutation =
+                player
+                    .inventory_session
+                    .click(&mut player.inventory, click, creative)?;
+            let dropped = mutation.dropped.clone();
+            (container_events(uuid, &player.inventory, mutation), dropped)
+        };
+        events.extend(self.spawn_dropped_item_entities(uuid, dropped)?);
+        Ok(events)
+    }
+
+    pub fn close_container(&mut self, uuid: PlayerUuid) -> Result<Vec<GameEvent>, GameStateError> {
+        let (mut events, dropped) = {
+            let player = self
+                .players
+                .get_mut(&uuid)
+                .ok_or(GameStateError::UnknownPlayer { uuid })?;
+            let mutation = player
+                .inventory_session
+                .close_container(&mut player.inventory);
+            let dropped = mutation.dropped.clone();
+            (container_events(uuid, &player.inventory, mutation), dropped)
+        };
+        events.extend(self.spawn_dropped_item_entities(uuid, dropped)?);
+        Ok(events)
     }
 
     pub fn open_container(
@@ -400,17 +721,22 @@ impl GameState {
         slot: i16,
         stack: Option<ItemStack>,
     ) -> Result<Vec<GameEvent>, GameStateError> {
-        let player = self
-            .players
-            .get_mut(&uuid)
-            .ok_or(GameStateError::UnknownPlayer { uuid })?;
-        let mutation = player.inventory_session.set_creative_slot(
-            &mut player.inventory,
-            slot,
-            stack,
-            player.game_mode == GameMode::Creative,
-        )?;
-        Ok(container_events(uuid, &player.inventory, mutation))
+        let (mut events, dropped) = {
+            let player = self
+                .players
+                .get_mut(&uuid)
+                .ok_or(GameStateError::UnknownPlayer { uuid })?;
+            let mutation = player.inventory_session.set_creative_slot(
+                &mut player.inventory,
+                slot,
+                stack,
+                player.game_mode == GameMode::Creative,
+            )?;
+            let dropped = mutation.dropped.clone();
+            (container_events(uuid, &player.inventory, mutation), dropped)
+        };
+        events.extend(self.spawn_dropped_item_entities(uuid, dropped)?);
+        Ok(events)
     }
 
     pub fn clear_inventory(&mut self, uuid: PlayerUuid) -> Result<Vec<GameEvent>, GameStateError> {
@@ -496,27 +822,49 @@ impl GameState {
         uuid: PlayerUuid,
         amount: f32,
     ) -> Result<Vec<GameEvent>, GameStateError> {
+        self.damage_player_with_source(uuid, amount, DamageSource::generic(DamageKind::Generic))
+    }
+
+    pub fn damage_player_with_source(
+        &mut self,
+        uuid: PlayerUuid,
+        amount: f32,
+        source: DamageSource,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
         let entity_id = self.connected_entity_id(uuid)?;
-        let (previous, current) = {
+        let (previous, current, final_damage) = {
             let player = self
                 .players
                 .get_mut(&uuid)
                 .ok_or(GameStateError::UnknownPlayer { uuid })?;
-            if player.abilities.invulnerable || player.vitals.is_dead() {
+            if (player.abilities.invulnerable && !source.bypasses_invulnerability)
+                || player.vitals.is_dead()
+            {
+                return Ok(Vec::new());
+            }
+            let result = calculate_damage(DamageContext {
+                raw_damage: amount,
+                armor: player.attribute_value("minecraft:armor").unwrap_or(0.0),
+                armor_toughness: player
+                    .attribute_value("minecraft:armor_toughness")
+                    .unwrap_or(0.0),
+                resistance_level: player.status_effects.damage_resistance_level(),
+                difficulty: self.difficulty,
+                source,
+            })?;
+            if result.final_damage <= 0.0 {
                 return Ok(Vec::new());
             }
             let previous = player.vitals;
-            player.vitals.damage(amount)?;
-            (previous, player.vitals)
+            player.vitals.damage(result.final_damage)?;
+            (previous, player.vitals, result.final_damage)
         };
-        if previous == current {
-            return Ok(Vec::new());
-        }
         let mut events = vec![
             GameEvent::PlayerDamaged {
                 uuid,
                 entity_id,
-                amount,
+                amount: final_damage,
+                source,
                 previous,
                 current,
             },
@@ -546,7 +894,8 @@ impl GameState {
                 return Err(GameStateError::PlayerDead { uuid });
             }
             let previous = player.vitals;
-            player.vitals.heal(amount)?;
+            let max_health = player.max_health();
+            player.vitals.heal_to_max(amount, max_health)?;
             (previous, player.vitals)
         };
         if previous == current {
@@ -595,6 +944,8 @@ impl GameState {
             }
             let previous_game_mode = player.previous_game_mode;
             player.vitals = Vitals::default();
+            player.vitals.health = player.max_health();
+            player.fall_distance = 0.0;
             (player.game_mode, previous_game_mode, player.vitals)
         };
         let entity = self
@@ -624,26 +975,75 @@ impl GameState {
             self.game_rules.get("keepInventory"),
             Some(GameRuleValue::Boolean(true))
         );
-        let player = self
-            .players
-            .get_mut(&uuid)
-            .ok_or(GameStateError::UnknownPlayer { uuid })?;
+        let (name, transform, stacks, inventory_events) = {
+            let transform = self
+                .entities
+                .get(entity_id)
+                .ok_or(GameStateError::PlayerMissingEntity { uuid })?
+                .transform;
+            let player = self
+                .players
+                .get_mut(&uuid)
+                .ok_or(GameStateError::UnknownPlayer { uuid })?;
+            player.fall_distance = 0.0;
+            if keep_inventory {
+                (player.name.clone(), transform, Vec::new(), Vec::new())
+            } else {
+                let before = player.inventory.slots().to_vec();
+                let stacks = player.inventory.drain();
+                let mut inventory_events =
+                    slot_diff_events(uuid, &before, player.inventory.slots());
+                inventory_events.push(GameEvent::ContainerContentChanged {
+                    uuid,
+                    snapshot: player.inventory_session.snapshot(&player.inventory),
+                });
+                (player.name.clone(), transform, stacks, inventory_events)
+            }
+        };
         let mut events = vec![GameEvent::PlayerKilled {
             uuid,
             entity_id,
-            name: player.name.clone(),
+            name,
         }];
-        if !keep_inventory {
-            let before = player.inventory.slots().to_vec();
-            let stacks = player.inventory.drain();
-            events.extend(slot_diff_events(uuid, &before, player.inventory.slots()));
-            if !stacks.is_empty() {
-                events.push(GameEvent::ItemsDropped { uuid, stacks });
-            }
-            events.push(GameEvent::ContainerContentChanged {
+        events.extend(inventory_events);
+        if !stacks.is_empty() {
+            events.push(GameEvent::ItemsDropped {
                 uuid,
-                snapshot: player.inventory_session.snapshot(&player.inventory),
+                stacks: stacks.clone(),
             });
+            events.extend(self.spawn_dropped_item_entities_at(uuid, transform, stacks)?);
+        }
+        Ok(events)
+    }
+
+    fn spawn_dropped_item_entities(
+        &mut self,
+        uuid: PlayerUuid,
+        stacks: Vec<ItemStack>,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
+        if stacks.is_empty() {
+            return Ok(Vec::new());
+        }
+        let entity_id = self.connected_entity_id(uuid)?;
+        let transform = self
+            .entities
+            .get(entity_id)
+            .ok_or(GameStateError::PlayerMissingEntity { uuid })?
+            .transform;
+        self.spawn_dropped_item_entities_at(uuid, transform, stacks)
+    }
+
+    fn spawn_dropped_item_entities_at(
+        &mut self,
+        uuid: PlayerUuid,
+        transform: Transform,
+        stacks: Vec<ItemStack>,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
+        let mut events = Vec::with_capacity(stacks.len());
+        for (index, stack) in stacks.into_iter().enumerate() {
+            let phase = (index % 8) as f64 * std::f64::consts::TAU / 8.0;
+            let velocity = Velocity::new([phase.cos() * 0.1, 0.2, phase.sin() * 0.1])?;
+            events.extend(self.spawn_item_entity(transform, stack, velocity, Some(uuid))?);
         }
         Ok(events)
     }
@@ -686,12 +1086,28 @@ impl GameState {
         entity_ids.len()
     }
 
-    pub fn tick(&mut self) {
+    pub fn tick(&mut self) -> Vec<GameEvent> {
         self.time.game_time = self.time.game_time.saturating_add(1);
         if self.time.daylight_cycle {
             self.time.day_time = self.time.day_time.saturating_add(1);
         }
-        self.entities.tick();
+        let mut events = Vec::new();
+        for (&uuid, player) in &mut self.players {
+            for effect in player.tick_status_effects() {
+                events.push(GameEvent::PlayerStatusEffectChanged {
+                    uuid,
+                    effect: effect.effect.as_str().to_owned(),
+                    active: false,
+                });
+            }
+        }
+        events.extend(
+            self.entities
+                .tick()
+                .into_iter()
+                .map(|entity_id| GameEvent::EntityRemoved { entity_id }),
+        );
+        events
     }
 
     #[must_use]
@@ -801,6 +1217,12 @@ pub enum GameStateError {
     Inventory(#[from] InventoryError),
     #[error(transparent)]
     Container(#[from] ContainerError),
+    #[error(transparent)]
+    Attribute(#[from] AttributeError),
+    #[error(transparent)]
+    StatusEffect(#[from] StatusEffectError),
+    #[error(transparent)]
+    Combat(#[from] CombatError),
     #[error("invalid game dimension {dimension}")]
     InvalidDimension { dimension: String },
     #[error("player name {name} is already used by another UUID")]
@@ -817,6 +1239,14 @@ pub enum GameStateError {
     PlayerDead { uuid: PlayerUuid },
     #[error("player {uuid:?} is alive and cannot respawn")]
     PlayerAlive { uuid: PlayerUuid },
+    #[error("pickup radius {radius} must be finite and between 0 and 16")]
+    InvalidPickupRadius { radius: f64 },
+    #[error("item entity {entity_id:?} disappeared during pickup")]
+    MissingItemEntity { entity_id: EntityId },
+    #[error("entity {entity_id:?} is not an item entity")]
+    NotItemEntity { entity_id: EntityId },
+    #[error("unknown player attribute {attribute}")]
+    UnknownAttribute { attribute: String },
 }
 
 #[cfg(test)]
@@ -1028,6 +1458,128 @@ mod tests {
         assert!(matches!(
             state.respawn_player(uuid, respawn),
             Err(GameStateError::PlayerAlive { .. })
+        ));
+    }
+
+    #[test]
+    fn item_entities_age_and_are_picked_up_authoritatively() {
+        let uuid = PlayerUuid::new(40);
+        let mut state = GameState::default();
+        state.connect_player(uuid, "Steve", spawn()).unwrap();
+        let events = state
+            .spawn_item_entity(
+                spawn(),
+                ItemStack::new("minecraft:cobblestone", 12).unwrap(),
+                Velocity::default(),
+                None,
+            )
+            .unwrap();
+        let item_id = match &events[0] {
+            GameEvent::EntitySpawned { entity } => entity.id,
+            event => panic!("unexpected event: {event:?}"),
+        };
+        state
+            .entities_mut()
+            .get_mut(item_id)
+            .unwrap()
+            .item_mut()
+            .unwrap()
+            .pickup_delay_ticks = 0;
+        let picked_up = state.pickup_nearby_items(uuid, 2.0).unwrap();
+        assert!(picked_up.iter().any(|event| matches!(
+            event,
+            GameEvent::ItemPickedUp {
+                entity_id,
+                inserted: 12,
+                ..
+            } if *entity_id == item_id
+        )));
+        assert!(state.entities().get(item_id).is_none());
+        assert_eq!(
+            state
+                .player(uuid)
+                .unwrap()
+                .inventory
+                .slot(9)
+                .unwrap()
+                .unwrap()
+                .count(),
+            12
+        );
+    }
+
+    #[test]
+    fn movement_tracks_fall_distance_and_applies_landing_damage() {
+        let uuid = PlayerUuid::new(41);
+        let mut state = GameState::default();
+        state.connect_player(uuid, "Alex", spawn()).unwrap();
+        state
+            .move_player(
+                uuid,
+                Transform::new([0.5, 75.0, 0.5], 0.0, 0.0, false).unwrap(),
+            )
+            .unwrap();
+        state
+            .move_player(
+                uuid,
+                Transform::new([0.5, 70.0, 0.5], 0.0, 0.0, false).unwrap(),
+            )
+            .unwrap();
+        let landing = state
+            .move_player(
+                uuid,
+                Transform::new([0.5, 65.0, 0.5], 0.0, 0.0, true).unwrap(),
+            )
+            .unwrap();
+        assert!(landing.iter().any(|event| matches!(
+            event,
+            GameEvent::PlayerDamaged {
+                source: DamageSource {
+                    kind: DamageKind::Fall,
+                    ..
+                },
+                amount,
+                ..
+            } if *amount == 7.0
+        )));
+        assert_eq!(state.player(uuid).unwrap().vitals.health, 13.0);
+        assert_eq!(state.player(uuid).unwrap().fall_distance, 0.0);
+    }
+
+    #[test]
+    fn attributes_effects_and_knockback_are_authoritative() {
+        let uuid = PlayerUuid::new(42);
+        let mut state = GameState::default();
+        state.connect_player(uuid, "Steve", spawn()).unwrap();
+        state
+            .set_player_attribute_base(uuid, "minecraft:armor", 20.0)
+            .unwrap();
+        let damaged = state
+            .damage_player_with_source(uuid, 10.0, DamageSource::generic(DamageKind::PlayerAttack))
+            .unwrap();
+        assert!(matches!(
+            damaged[0],
+            GameEvent::PlayerDamaged { amount, .. } if amount < 10.0
+        ));
+        let effect = StatusEffectInstance::new(
+            crate::StatusEffectId::new("minecraft:resistance").unwrap(),
+            0,
+            1,
+        )
+        .unwrap();
+        state.add_status_effect(uuid, effect).unwrap();
+        assert!(state.tick().iter().any(|event| matches!(
+            event,
+            GameEvent::PlayerStatusEffectChanged {
+                active: false,
+                effect,
+                ..
+            } if effect == "minecraft:resistance"
+        )));
+        let knockback = state.apply_knockback(uuid, [1.0, 0.0], 0.4).unwrap();
+        assert!(matches!(
+            knockback[0],
+            GameEvent::PlayerVelocityChanged { velocity, .. } if velocity.0[0] > 0.0
         ));
     }
 }

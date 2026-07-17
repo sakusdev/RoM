@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{EntityId, Inventory, InventorySession, validate_resource_location};
+use crate::{
+    AttributeSet, EntityId, Inventory, InventorySession, StatusEffectSet,
+    validate_resource_location,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -141,10 +144,17 @@ impl Vitals {
     }
 
     pub fn heal(&mut self, amount: f32) -> Result<f32, PlayerError> {
+        self.heal_to_max(amount, 20.0)
+    }
+
+    pub fn heal_to_max(&mut self, amount: f32, max_health: f32) -> Result<f32, PlayerError> {
         if !amount.is_finite() || amount < 0.0 {
             return Err(PlayerError::InvalidHealing { amount });
         }
-        self.health = (self.health + amount).min(20.0);
+        if !max_health.is_finite() || max_health <= 0.0 {
+            return Err(PlayerError::InvalidMaximumHealth { max_health });
+        }
+        self.health = (self.health + amount).min(max_health);
         Ok(self.health)
     }
 
@@ -185,6 +195,12 @@ pub struct PlayerState {
     pub abilities: Abilities,
     pub vitals: Vitals,
     pub experience: Experience,
+    #[serde(default)]
+    pub attributes: AttributeSet,
+    #[serde(default)]
+    pub status_effects: StatusEffectSet,
+    #[serde(default)]
+    pub fall_distance: f32,
     pub permission_level: u8,
     pub connected: bool,
 }
@@ -214,6 +230,9 @@ impl PlayerState {
             abilities: Abilities::for_game_mode(GameMode::Survival),
             vitals: Vitals::default(),
             experience: Experience::default(),
+            attributes: AttributeSet::player_defaults(),
+            status_effects: StatusEffectSet::default(),
+            fall_distance: 0.0,
             permission_level: 0,
             connected: true,
         })
@@ -225,8 +244,27 @@ impl PlayerState {
             self.previous_game_mode = Some(previous);
             self.game_mode = game_mode;
             self.abilities = Abilities::for_game_mode(game_mode);
+            if matches!(game_mode, GameMode::Creative | GameMode::Spectator) {
+                self.fall_distance = 0.0;
+            }
         }
         previous
+    }
+
+    #[must_use]
+    pub fn attribute_value(&self, id: &str) -> Option<f64> {
+        self.attributes.value(id)
+    }
+
+    #[must_use]
+    pub fn max_health(&self) -> f32 {
+        self.attribute_value("minecraft:max_health")
+            .unwrap_or(20.0)
+            .clamp(1.0, f64::from(f32::MAX)) as f32
+    }
+
+    pub fn tick_status_effects(&mut self) -> Vec<crate::StatusEffectInstance> {
+        self.status_effects.tick()
     }
 
     pub fn set_permission_level(&mut self, level: u8) -> Result<(), PlayerError> {
@@ -277,6 +315,8 @@ pub enum PlayerError {
     InvalidDamage { amount: f32 },
     #[error("healing amount {amount} must be finite and non-negative")]
     InvalidHealing { amount: f32 },
+    #[error("maximum health {max_health} must be finite and positive")]
+    InvalidMaximumHealth { max_health: f32 },
 }
 
 #[cfg(test)]

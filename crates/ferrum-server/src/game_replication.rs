@@ -873,8 +873,37 @@ fn dispatch_event(
                 }
             }
         }
-        GameEvent::TimeChanged { .. } | GameEvent::SaveRequested | GameEvent::ShutdownRequested => {
+        GameEvent::EntityRemoved { entity_id } => {
+            let payload = encode_remove_entities(&[entity_id])
+                .context("cannot encode non-player entity removal")?;
+            broadcast(
+                connections,
+                PlayOutput::ProtocolPacket {
+                    kind: PacketKind::RemoveEntities,
+                    payload,
+                },
+                exit,
+            );
         }
+        GameEvent::ItemPickedUp {
+            uuid,
+            inserted,
+            item,
+            ..
+        } => target_chat(
+            connections,
+            uuid,
+            format!("Picked up {inserted} {item}"),
+            true,
+            exit,
+        ),
+        GameEvent::EntitySpawned { .. }
+        | GameEvent::PlayerVelocityChanged { .. }
+        | GameEvent::PlayerAttributeChanged { .. }
+        | GameEvent::PlayerStatusEffectChanged { .. }
+        | GameEvent::TimeChanged { .. }
+        | GameEvent::SaveRequested
+        | GameEvent::ShutdownRequested => {}
     }
     Ok(())
 }

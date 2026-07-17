@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use thiserror::Error;
 
-use crate::validate_resource_location;
+use crate::{AttributeSet, ItemStack, PlayerUuid, StatusEffectSet, validate_resource_location};
 
 pub const MAX_ENTITY_COORDINATE: f64 = 30_000_000.0;
 pub const MAX_ENTITY_VELOCITY: f64 = 100.0;
@@ -140,6 +140,76 @@ impl Default for Velocity {
     }
 }
 
+pub const DEFAULT_ITEM_PICKUP_DELAY_TICKS: u32 = 10;
+pub const DEFAULT_ITEM_DESPAWN_TICKS: u64 = 20 * 60 * 5;
+pub const MAX_EXPERIENCE_ORB_VALUE: u32 = 32_767;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ItemEntityData {
+    pub stack: ItemStack,
+    pub pickup_delay_ticks: u32,
+    pub despawn_after_ticks: u64,
+    pub owner: Option<PlayerUuid>,
+}
+
+impl ItemEntityData {
+    #[must_use]
+    pub fn new(stack: ItemStack) -> Self {
+        Self {
+            stack,
+            pickup_delay_ticks: DEFAULT_ITEM_PICKUP_DELAY_TICKS,
+            despawn_after_ticks: DEFAULT_ITEM_DESPAWN_TICKS,
+            owner: None,
+        }
+    }
+
+    #[must_use]
+    pub const fn can_pick_up(&self) -> bool {
+        self.pickup_delay_ticks == 0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LivingEntityData {
+    pub health: f32,
+    pub max_health: f32,
+    #[serde(default)]
+    pub attributes: AttributeSet,
+    #[serde(default)]
+    pub status_effects: StatusEffectSet,
+}
+
+impl LivingEntityData {
+    pub fn new(max_health: f32) -> Result<Self, EntityError> {
+        if !max_health.is_finite() || max_health <= 0.0 {
+            return Err(EntityError::InvalidLivingHealth { health: max_health });
+        }
+        Ok(Self {
+            health: max_health,
+            max_health,
+            attributes: AttributeSet::default(),
+            status_effects: StatusEffectSet::default(),
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
+pub enum EntityPayload {
+    #[default]
+    Generic,
+    Item(ItemEntityData),
+    Living(LivingEntityData),
+    ExperienceOrb {
+        value: u32,
+    },
+    Projectile {
+        owner: Option<EntityUuid>,
+        gravity: f64,
+    },
+    Vehicle,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Entity {
     pub id: EntityId,
@@ -148,6 +218,8 @@ pub struct Entity {
     pub transform: Transform,
     pub velocity: Velocity,
     pub age_ticks: u64,
+    #[serde(default)]
+    pub payload: EntityPayload,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub data: BTreeMap<String, Value>,
 }
@@ -156,6 +228,26 @@ impl Entity {
     #[must_use]
     pub fn is_player(&self) -> bool {
         self.entity_type.as_str() == "minecraft:player"
+    }
+
+    #[must_use]
+    pub fn item(&self) -> Option<&ItemEntityData> {
+        match &self.payload {
+            EntityPayload::Item(item) => Some(item),
+            _ => None,
+        }
+    }
+
+    pub fn item_mut(&mut self) -> Option<&mut ItemEntityData> {
+        match &mut self.payload {
+            EntityPayload::Item(item) => Some(item),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn is_living(&self) -> bool {
+        self.is_player() || matches!(self.payload, EntityPayload::Living(_))
     }
 }
 
@@ -188,6 +280,36 @@ impl EntityStore {
         entity_type: EntityType,
         transform: Transform,
     ) -> Result<EntityId, EntityError> {
+        self.spawn_with_payload(uuid, entity_type, transform, EntityPayload::Generic)
+    }
+
+    pub fn spawn_generated(
+        &mut self,
+        entity_type: EntityType,
+        transform: Transform,
+        payload: EntityPayload,
+    ) -> Result<EntityId, EntityError> {
+        const GENERATED_UUID_PREFIX: u128 = 0xf3_72_6f_6d_00_00_00_00_00_00_00_00_00_00_00_00;
+        let mut sequence = u128::from(self.next_id);
+        loop {
+            let uuid = EntityUuid::new(GENERATED_UUID_PREFIX | sequence);
+            if !self.uuids.contains_key(&uuid) {
+                return self.spawn_with_payload(uuid, entity_type, transform, payload);
+            }
+            sequence = sequence
+                .checked_add(1)
+                .ok_or(EntityError::EntityUuidExhausted)?;
+        }
+    }
+
+    pub fn spawn_with_payload(
+        &mut self,
+        uuid: EntityUuid,
+        entity_type: EntityType,
+        transform: Transform,
+        payload: EntityPayload,
+    ) -> Result<EntityId, EntityError> {
+        validate_payload(&payload)?;
         if self.uuids.contains_key(&uuid) {
             return Err(EntityError::DuplicateEntityUuid { uuid });
         }
@@ -203,6 +325,7 @@ impl EntityStore {
             transform,
             velocity: Velocity::default(),
             age_ticks: 0,
+            payload,
             data: BTreeMap::new(),
         };
         self.entities.insert(id, entity);
@@ -213,6 +336,7 @@ impl EntityStore {
     pub fn insert_restored(&mut self, entity: Entity) -> Result<(), EntityError> {
         validate_position(entity.transform.position)?;
         Velocity::new(entity.velocity.0)?;
+        validate_payload(&entity.payload)?;
         if self.entities.contains_key(&entity.id) {
             return Err(EntityError::DuplicateEntityId { id: entity.id });
         }
@@ -289,11 +413,84 @@ impl EntityStore {
         Ok(std::mem::replace(&mut entity.velocity, velocity))
     }
 
-    pub fn tick(&mut self) {
+    pub fn tick(&mut self) -> Vec<EntityId> {
+        let mut expired = Vec::new();
         for entity in self.entities.values_mut() {
             entity.age_ticks = entity.age_ticks.saturating_add(1);
+            match &mut entity.payload {
+                EntityPayload::Item(item) => {
+                    item.pickup_delay_ticks = item.pickup_delay_ticks.saturating_sub(1);
+                    if entity.age_ticks >= item.despawn_after_ticks {
+                        expired.push(entity.id);
+                        continue;
+                    }
+                    if !entity.transform.on_ground {
+                        entity.velocity.0[1] = (entity.velocity.0[1] - 0.04).max(-3.9);
+                    }
+                    for axis in 0..3 {
+                        entity.transform.position[axis] += entity.velocity.0[axis];
+                    }
+                    entity.velocity.0[0] *= 0.98;
+                    entity.velocity.0[1] *= 0.98;
+                    entity.velocity.0[2] *= 0.98;
+                    if entity.transform.on_ground {
+                        entity.velocity.0[0] *= 0.7;
+                        entity.velocity.0[2] *= 0.7;
+                    }
+                }
+                EntityPayload::Living(living) => {
+                    let _ = living.status_effects.tick();
+                }
+                EntityPayload::Projectile { gravity, .. } => {
+                    entity.velocity.0[1] = (entity.velocity.0[1] - *gravity).max(-3.9);
+                    for axis in 0..3 {
+                        entity.transform.position[axis] += entity.velocity.0[axis];
+                    }
+                }
+                EntityPayload::Generic
+                | EntityPayload::ExperienceOrb { .. }
+                | EntityPayload::Vehicle => {}
+            }
         }
+        for id in &expired {
+            self.despawn(*id);
+        }
+        expired
     }
+}
+
+fn validate_payload(payload: &EntityPayload) -> Result<(), EntityError> {
+    match payload {
+        EntityPayload::Item(item) => {
+            if item.despawn_after_ticks == 0 {
+                return Err(EntityError::InvalidItemDespawnTicks {
+                    ticks: item.despawn_after_ticks,
+                });
+            }
+        }
+        EntityPayload::Living(living) => {
+            if !living.health.is_finite()
+                || !living.max_health.is_finite()
+                || living.max_health <= 0.0
+                || living.health < 0.0
+                || living.health > living.max_health
+            {
+                return Err(EntityError::InvalidLivingHealth {
+                    health: living.health,
+                });
+            }
+        }
+        EntityPayload::ExperienceOrb { value } if *value > MAX_EXPERIENCE_ORB_VALUE => {
+            return Err(EntityError::ExperienceOrbValueOutOfRange { value: *value });
+        }
+        EntityPayload::Projectile { gravity, .. }
+            if !gravity.is_finite() || !(0.0..=1.0).contains(gravity) =>
+        {
+            return Err(EntityError::InvalidProjectileGravity { gravity: *gravity });
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 fn validate_position(position: [f64; 3]) -> Result<(), EntityError> {
@@ -314,6 +511,8 @@ pub enum EntityError {
     ZeroEntityId,
     #[error("entity id space is exhausted")]
     EntityIdExhausted,
+    #[error("generated entity UUID space is exhausted")]
+    EntityUuidExhausted,
     #[error("invalid entity resource location {value}")]
     InvalidEntityType { value: String },
     #[error("entity UUID {uuid:?} already exists")]
@@ -332,6 +531,14 @@ pub enum EntityError {
     NonFiniteVelocity { axis: &'static str },
     #[error("entity {axis} velocity {value} exceeds {MAX_ENTITY_VELOCITY}")]
     VelocityOutOfRange { axis: &'static str, value: f64 },
+    #[error("item entity despawn ticks {ticks} must be greater than zero")]
+    InvalidItemDespawnTicks { ticks: u64 },
+    #[error("living entity health value {health} is invalid")]
+    InvalidLivingHealth { health: f32 },
+    #[error("experience orb value {value} exceeds {MAX_EXPERIENCE_ORB_VALUE}")]
+    ExperienceOrbValueOutOfRange { value: u32 },
+    #[error("projectile gravity {gravity} must be finite and between 0 and 1")]
+    InvalidProjectileGravity { gravity: f64 },
 }
 
 #[cfg(test)]
@@ -402,6 +609,7 @@ mod tests {
                 transform: Transform::default(),
                 velocity: Velocity::default(),
                 age_ticks: 20,
+                payload: EntityPayload::Generic,
                 data: BTreeMap::new(),
             })
             .unwrap();
