@@ -25,40 +25,30 @@ jobs:
       - name: Download verified official server
         run: |
           set -euo pipefail
-          mkdir -p /tmp/inspect /tmp/libs /tmp/reports
+          mkdir -p /tmp/inspect /tmp/libs
           python3 - <<'PY'
           import hashlib, json, pathlib, urllib.request, zipfile
-
-          version = '26.1.2'
           def download(url):
               request = urllib.request.Request(url, headers={'User-Agent': 'RoM/official-wire-inspector'})
               with urllib.request.urlopen(request, timeout=60) as response:
                   return response.read()
-
           manifest = json.loads(download('https://piston-meta.mojang.com/mc/game/version_manifest_v2.json'))
-          entry = next(item for item in manifest['versions'] if item['id'] == version)
+          entry = next(item for item in manifest['versions'] if item['id'] == '26.1.2')
           metadata_bytes = download(entry['url'])
           if hashlib.sha1(metadata_bytes).hexdigest() != entry['sha1']:
               raise SystemExit('version metadata SHA-1 mismatch')
-          metadata = json.loads(metadata_bytes)
-          server = metadata['downloads']['server']
+          server = json.loads(metadata_bytes)['downloads']['server']
           server_bytes = download(server['url'])
           if len(server_bytes) != server['size'] or hashlib.sha1(server_bytes).hexdigest() != server['sha1']:
               raise SystemExit('server integrity mismatch')
           pathlib.Path('/tmp/server.jar').write_bytes(server_bytes)
           pathlib.Path('/tmp/inspect/source.json').write_text(json.dumps({
-              'version': version,
-              'metadata_sha1': entry['sha1'],
-              'server_sha1': server['sha1'],
-              'server_size': server['size'],
+              'version': '26.1.2', 'metadata_sha1': entry['sha1'], 'server_sha1': server['sha1']
           }, indent=2, sort_keys=True))
-
           with zipfile.ZipFile('/tmp/server.jar') as outer:
               names = outer.namelist()
               lines = outer.read('META-INF/versions.list').decode().splitlines()
               candidates = [fields[2] for line in lines if len((fields := line.strip().split('\t'))) == 3]
-              if len(candidates) != 1:
-                  raise SystemExit(f'expected one embedded game jar, found {candidates}')
               game_entry = f'META-INF/versions/{candidates[0]}'
               pathlib.Path('/tmp/game.jar').write_bytes(outer.read(game_entry))
               for name in names:
@@ -66,74 +56,58 @@ jobs:
                       (pathlib.Path('/tmp/libs') / pathlib.Path(name).name).write_bytes(outer.read(name))
           PY
 
-      - name: Generate official reports
-        working-directory: /tmp/reports
-        run: |
-          set -euo pipefail
-          java -DbundlerMainClass=net.minecraft.data.Main -jar /tmp/server.jar --server --reports
-          cp generated/reports/packets.json /tmp/inspect/packets.json
-          cp generated/reports/registries.json /tmp/inspect/registries.json
-          python3 - <<'PY'
-          import json
-          from pathlib import Path
-          packets = json.loads(Path('/tmp/inspect/packets.json').read_text())
-          play = packets['play']['clientbound']
-          wanted = {
-              name: value
-              for name, value in play.items()
-              if any(token in name for token in ('add_entity', 'set_entity_data', 'remove_entities', 'take_item_entity'))
-          }
-          Path('/tmp/inspect/relevant-packets.json').write_text(json.dumps(wanted, indent=2, sort_keys=True))
-          registries = json.loads(Path('/tmp/inspect/registries.json').read_text())
-          wanted_registries = {}
-          for key in ('minecraft:entity_type', 'minecraft:item', 'minecraft:data_component_type'):
-              value = registries.get(key)
-              if value is not None:
-                  wanted_registries[key] = value
-          Path('/tmp/inspect/relevant-registries.json').write_text(json.dumps(wanted_registries, indent=2, sort_keys=True))
-          PY
-
       - name: Reflect exact metadata constants
+        id: reflect
+        continue-on-error: true
         run: |
-          set -euo pipefail
+          set -o pipefail
           cat > /tmp/InspectItemMetadata.java <<'JAVA'
           import java.lang.reflect.Field;
           import java.lang.reflect.Method;
+          import java.lang.reflect.Modifier;
           public final class InspectItemMetadata {
               public static void main(String[] args) throws Exception {
+                  Class<?> bootstrap = Class.forName("net.minecraft.server.Bootstrap");
+                  for (Method method : bootstrap.getDeclaredMethods()) {
+                      if (Modifier.isStatic(method.getModifiers()) && method.getParameterCount() == 0
+                              && method.getName().toLowerCase().contains("bootstrap")) {
+                          method.setAccessible(true);
+                          method.invoke(null);
+                          break;
+                      }
+                  }
                   Class<?> itemEntity = Class.forName("net.minecraft.world.entity.item.ItemEntity");
                   Field dataItemField = itemEntity.getDeclaredField("DATA_ITEM");
                   dataItemField.setAccessible(true);
                   Object accessor = dataItemField.get(null);
-                  Method idMethod = accessor.getClass().getMethod("id");
-                  int metadataIndex = (Integer) idMethod.invoke(accessor);
-
+                  int metadataIndex = (Integer) accessor.getClass().getMethod("id").invoke(accessor);
                   Class<?> serializers = Class.forName("net.minecraft.network.syncher.EntityDataSerializers");
-                  Field itemStackField = serializers.getField("ITEM_STACK");
-                  Object itemStackSerializer = itemStackField.get(null);
+                  Object itemStackSerializer = serializers.getField("ITEM_STACK").get(null);
                   Method getSerializedId = serializers.getMethod(
-                      "getSerializedId",
-                      Class.forName("net.minecraft.network.syncher.EntityDataSerializer")
-                  );
+                      "getSerializedId", Class.forName("net.minecraft.network.syncher.EntityDataSerializer"));
                   int serializerId = (Integer) getSerializedId.invoke(null, itemStackSerializer);
-                  System.out.printf("{\"item_metadata_index\":%d,\"item_stack_serializer_id\":%d}%n", metadataIndex, serializerId);
+                  System.out.printf("{\"item_metadata_index\":%d,\"item_stack_serializer_id\":%d}%n",
+                      metadataIndex, serializerId);
               }
           }
           JAVA
           javac -cp "/tmp/game.jar:/tmp/libs/*" /tmp/InspectItemMetadata.java
-          java -cp "/tmp:/tmp/game.jar:/tmp/libs/*" InspectItemMetadata > /tmp/inspect/item-metadata-constants.json
+          java -cp "/tmp:/tmp/game.jar:/tmp/libs/*" InspectItemMetadata \
+            > /tmp/inspect/item-metadata-constants.json 2> /tmp/inspect/reflection-stderr.txt
 
-      - name: Disassemble exact packet value writers
+      - name: Disassemble metadata allocation and packet writers
         run: |
           set -euo pipefail
           for class in \
+            'net.minecraft.world.entity.Entity' \
+            'net.minecraft.world.entity.item.ItemEntity' \
+            'net.minecraft.network.syncher.SynchedEntityData' \
             'net.minecraft.network.syncher.SynchedEntityData$DataValue' \
-            'net.minecraft.network.protocol.game.ClientboundTakeItemEntityPacket' \
-            'net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket' \
-            'net.minecraft.network.protocol.game.ClientboundAddEntityPacket' \
-            'net.minecraft.world.entity.item.ItemEntity'; do
+            'net.minecraft.network.syncher.EntityDataSerializers' \
+            'net.minecraft.network.protocol.game.ClientboundTakeItemEntityPacket'; do
             safe=$(printf '%s' "$class" | tr './$' '___')
-            javap -p -c -s -constants -classpath "/tmp/game.jar:/tmp/libs/*" "$class" > "/tmp/inspect/${safe}.javap.txt"
+            javap -p -c -s -constants -classpath "/tmp/game.jar:/tmp/libs/*" "$class" \
+              > "/tmp/inspect/${safe}.javap.txt"
           done
 
       - name: Upload inspection
@@ -144,3 +118,7 @@ jobs:
           path: /tmp/inspect
           if-no-files-found: error
           retention-days: 1
+
+      - name: Enforce reflection
+        if: steps.reflect.outcome == 'failure'
+        run: exit 1
