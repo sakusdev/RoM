@@ -8,16 +8,18 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use ferrum_game::{
-    EntityId, EquipmentSlot, GameEvent, GameMode, GameState, PLAYER_INVENTORY_SLOTS, PlayerState,
-    PlayerUuid, Transform, Velocity, Vitals,
+    Entity, EntityId, EntityPayload, EntityUuid, EquipmentSlot, GameEvent, GameMode, GameState,
+    ItemStack, PLAYER_INVENTORY_SLOTS, PlayerState, PlayerUuid, Transform, Velocity, Vitals,
 };
 use ferrum_play::{
     CommonPlayerSpawnInfo, DataComponentProtocolRegistry, EncodedEntityMovement,
-    EntityMovementKind, EntityProtocolRegistry, EquipmentEntry, ItemProtocolRegistry,
-    PlayerInfoEntry, Respawn, RespawnDataToKeep, encode_add_entity, encode_empty_entity_data,
-    encode_entity_movement, encode_hurt_animation, encode_player_combat_kill,
+    EntityMovementKind, EntityProtocolRegistry, EquipmentEntry, ItemEntityMetadataProtocol,
+    ItemProtocolRegistry, PlayerInfoEntry, Respawn, RespawnDataToKeep, encode_add_entity,
+    encode_add_entity_with_uuid, encode_empty_entity_data, encode_entity_movement,
+    encode_hurt_animation, encode_item_entity_data, encode_player_combat_kill,
     encode_player_info_remove, encode_player_info_update, encode_remove_entities, encode_respawn,
-    encode_rotate_head, encode_set_equipment, encode_set_health, encode_teleport_entity,
+    encode_rotate_head, encode_set_equipment, encode_set_health, encode_take_item_entity,
+    encode_teleport_entity,
 };
 use ferrum_protocol::PacketKind;
 use ferrum_rompack::RomPackWorld;
@@ -42,6 +44,7 @@ pub struct GameReplicationConfig {
     pub entity_protocol_ids: EntityProtocolRegistry,
     pub item_protocol_ids: ItemProtocolRegistry,
     pub data_component_protocol_ids: DataComponentProtocolRegistry,
+    pub item_entity_metadata: Option<ItemEntityMetadataProtocol>,
     pub world: Option<RomPackWorld>,
 }
 
@@ -56,6 +59,7 @@ impl Default for GameReplicationConfig {
             entity_protocol_ids: EntityProtocolRegistry::default(),
             item_protocol_ids: ItemProtocolRegistry::default(),
             data_component_protocol_ids: DataComponentProtocolRegistry::default(),
+            item_entity_metadata: None,
             world: None,
         }
     }
@@ -87,6 +91,15 @@ struct PlayerEntitySnapshot {
     selected_hotbar: u8,
 }
 
+#[derive(Debug, Clone)]
+struct ItemEntitySnapshot {
+    entity_id: EntityId,
+    uuid: EntityUuid,
+    transform: Transform,
+    velocity: Velocity,
+    stack: ItemStack,
+}
+
 #[derive(Debug)]
 struct ReplicationConnection {
     endpoint: PlayReaderEndpoint,
@@ -94,6 +107,7 @@ struct ReplicationConnection {
     pending_limit: usize,
     next_teleport_id: i32,
     entities: BTreeMap<PlayerUuid, PlayerEntitySnapshot>,
+    item_entities: BTreeMap<EntityId, ItemEntitySnapshot>,
     active: bool,
     healthy: bool,
     self_initialized: bool,
@@ -107,6 +121,7 @@ impl ReplicationConnection {
             pending_limit,
             next_teleport_id: 2,
             entities: BTreeMap::new(),
+            item_entities: BTreeMap::new(),
             active: false,
             healthy: true,
             self_initialized: false,
@@ -131,6 +146,7 @@ impl ReplicationConnection {
         if self.pending.len() >= self.pending_limit {
             self.pending.clear();
             self.entities.clear();
+            self.item_entities.clear();
             self.healthy = false;
             exit.dropped_outputs = exit.dropped_outputs.saturating_add(1);
             let _ = self.endpoint.try_disconnect();
@@ -393,7 +409,7 @@ fn process_commands(
             }
             ReplicationCommand::Activate { uuid, reply } => {
                 let result = (|| -> Result<()> {
-                    let (self_state, snapshots) = runtime
+                    let (self_state, snapshots, item_snapshots) = runtime
                         .with_state(|state| -> Result<_> {
                             let self_state = match state.player(uuid) {
                                 Some(player) if player.connected => Some((
@@ -423,7 +439,12 @@ fn process_commands(
                                     )?,
                                 );
                             }
-                            Ok((self_state, snapshots))
+                            let item_snapshots = state
+                                .entities()
+                                .iter()
+                                .filter_map(|(_, entity)| item_snapshot_from_entity(entity))
+                                .collect::<Vec<_>>();
+                            Ok((self_state, snapshots, item_snapshots))
                         })
                         .context("cannot read activation snapshot")??;
                     let connection = connections.get_mut(&uuid).with_context(|| {
@@ -438,6 +459,11 @@ fn process_commands(
                     if entity_replication_enabled(&config.entity_protocol_ids) {
                         for snapshot in snapshots {
                             queue_player_spawn(connection, snapshot, config, exit)?;
+                        }
+                    }
+                    if item_entity_replication_enabled(config) {
+                        for snapshot in item_snapshots {
+                            queue_item_spawn(connection, snapshot, config, exit)?;
                         }
                     }
                     if !connection.healthy {
@@ -874,36 +900,249 @@ fn dispatch_event(
             }
         }
         GameEvent::EntityRemoved { entity_id } => {
-            let payload = encode_remove_entities(&[entity_id])
-                .context("cannot encode non-player entity removal")?;
-            broadcast(
-                connections,
-                PlayOutput::ProtocolPacket {
-                    kind: PacketKind::RemoveEntities,
-                    payload,
-                },
-                exit,
-            );
+            queue_item_remove(connections, entity_id, exit)?;
+        }
+        GameEvent::ItemEntityChanged { entity_id, stack } => {
+            queue_item_stack_update(connections, entity_id, &stack, config, exit)?;
         }
         GameEvent::ItemPickedUp {
             uuid,
+            entity_id,
             inserted,
             item,
-            ..
-        } => target_chat(
-            connections,
-            uuid,
-            format!("Picked up {inserted} {item}"),
-            true,
-            exit,
-        ),
-        GameEvent::EntitySpawned { .. }
-        | GameEvent::PlayerVelocityChanged { .. }
+        } => {
+            if let Some(collector) = player_snapshot(runtime, uuid)? {
+                queue_item_pickup(connections, entity_id, collector.entity_id, inserted, exit)?;
+            }
+            target_chat(
+                connections,
+                uuid,
+                format!("Picked up {inserted} {item}"),
+                true,
+                exit,
+            );
+        }
+        GameEvent::EntitySpawned { entity } => {
+            if item_entity_replication_enabled(config)
+                && let Some(snapshot) = item_snapshot_from_entity(&entity)
+            {
+                for connection in connections.values_mut() {
+                    queue_item_spawn(connection, snapshot.clone(), config, exit)?;
+                }
+            }
+        }
+        GameEvent::PlayerVelocityChanged { .. }
         | GameEvent::PlayerAttributeChanged { .. }
         | GameEvent::PlayerStatusEffectChanged { .. }
         | GameEvent::TimeChanged { .. }
         | GameEvent::SaveRequested
         | GameEvent::ShutdownRequested => {}
+    }
+    Ok(())
+}
+
+fn item_entity_replication_enabled(config: &GameReplicationConfig) -> bool {
+    config.item_entity_metadata.is_some()
+        && config
+            .entity_protocol_ids
+            .protocol_id("minecraft:item")
+            .is_some()
+}
+
+fn item_snapshot_from_entity(entity: &Entity) -> Option<ItemEntitySnapshot> {
+    let EntityPayload::Item(item) = &entity.payload else {
+        return None;
+    };
+    Some(ItemEntitySnapshot {
+        entity_id: entity.id,
+        uuid: entity.uuid,
+        transform: entity.transform,
+        velocity: entity.velocity,
+        stack: item.stack.clone(),
+    })
+}
+
+fn queue_item_spawn(
+    connection: &mut ReplicationConnection,
+    snapshot: ItemEntitySnapshot,
+    config: &GameReplicationConfig,
+    exit: &mut GameReplicationExit,
+) -> Result<()> {
+    if !item_entity_replication_enabled(config) || !connection.active || !connection.healthy {
+        return Ok(());
+    }
+    if let Some(tracked) = connection.item_entities.get(&snapshot.entity_id) {
+        if tracked.uuid == snapshot.uuid {
+            let stack_changed = tracked.stack != snapshot.stack;
+            if stack_changed
+                && !queue_item_stack_update_for_connection(
+                    connection,
+                    snapshot.entity_id,
+                    &snapshot.stack,
+                    config,
+                    exit,
+                )?
+            {
+                queue_item_remove_for_connection(connection, snapshot.entity_id, exit)?;
+                return Ok(());
+            }
+            connection
+                .item_entities
+                .insert(snapshot.entity_id, snapshot);
+            return Ok(());
+        }
+        queue_item_remove_for_connection(connection, snapshot.entity_id, exit)?;
+    }
+    let Some(add_payload) = encode_add_entity_with_uuid(
+        snapshot.entity_id,
+        snapshot.uuid,
+        "minecraft:item",
+        snapshot.transform,
+        snapshot.velocity,
+        &config.entity_protocol_ids,
+    )
+    .context("cannot encode item add-entity packet")?
+    else {
+        return Ok(());
+    };
+    let metadata = config
+        .item_entity_metadata
+        .context("item entity metadata protocol is unavailable")?;
+    let Some(data_payload) = encode_item_entity_data(
+        snapshot.entity_id,
+        &snapshot.stack,
+        &config.item_protocol_ids,
+        &config.data_component_protocol_ids,
+        metadata,
+    )
+    .context("cannot encode item entity stack metadata")?
+    else {
+        return Ok(());
+    };
+    connection.queue(
+        PlayOutput::ProtocolPacket {
+            kind: PacketKind::AddEntity,
+            payload: add_payload,
+        },
+        exit,
+    );
+    connection.queue(
+        PlayOutput::ProtocolPacket {
+            kind: PacketKind::SetEntityData,
+            payload: data_payload,
+        },
+        exit,
+    );
+    if connection.healthy {
+        connection
+            .item_entities
+            .insert(snapshot.entity_id, snapshot);
+    }
+    Ok(())
+}
+
+fn queue_item_stack_update(
+    connections: &mut BTreeMap<PlayerUuid, ReplicationConnection>,
+    entity_id: EntityId,
+    stack: &ItemStack,
+    config: &GameReplicationConfig,
+    exit: &mut GameReplicationExit,
+) -> Result<()> {
+    for connection in connections.values_mut() {
+        if !connection.item_entities.contains_key(&entity_id) {
+            continue;
+        }
+        if queue_item_stack_update_for_connection(connection, entity_id, stack, config, exit)? {
+            if let Some(tracked) = connection.item_entities.get_mut(&entity_id) {
+                tracked.stack = stack.clone();
+            }
+        } else {
+            queue_item_remove_for_connection(connection, entity_id, exit)?;
+        }
+    }
+    Ok(())
+}
+
+fn queue_item_stack_update_for_connection(
+    connection: &mut ReplicationConnection,
+    entity_id: EntityId,
+    stack: &ItemStack,
+    config: &GameReplicationConfig,
+    exit: &mut GameReplicationExit,
+) -> Result<bool> {
+    let metadata = config
+        .item_entity_metadata
+        .context("item entity metadata protocol is unavailable")?;
+    let Some(payload) = encode_item_entity_data(
+        entity_id,
+        stack,
+        &config.item_protocol_ids,
+        &config.data_component_protocol_ids,
+        metadata,
+    )
+    .context("cannot encode item entity stack update")?
+    else {
+        return Ok(false);
+    };
+    Ok(connection.queue(
+        PlayOutput::ProtocolPacket {
+            kind: PacketKind::SetEntityData,
+            payload,
+        },
+        exit,
+    ))
+}
+
+fn queue_item_pickup(
+    connections: &mut BTreeMap<PlayerUuid, ReplicationConnection>,
+    item_entity_id: EntityId,
+    collector_entity_id: EntityId,
+    amount: u32,
+    exit: &mut GameReplicationExit,
+) -> Result<()> {
+    let payload = encode_take_item_entity(item_entity_id, collector_entity_id, amount)
+        .context("cannot encode item pickup animation")?;
+    for connection in connections.values_mut() {
+        if connection.item_entities.contains_key(&item_entity_id) {
+            connection.queue(
+                PlayOutput::ProtocolPacket {
+                    kind: PacketKind::TakeItemEntity,
+                    payload: payload.clone(),
+                },
+                exit,
+            );
+        }
+    }
+    Ok(())
+}
+
+fn queue_item_remove_for_connection(
+    connection: &mut ReplicationConnection,
+    entity_id: EntityId,
+    exit: &mut GameReplicationExit,
+) -> Result<()> {
+    if connection.item_entities.remove(&entity_id).is_none() {
+        return Ok(());
+    }
+    let payload =
+        encode_remove_entities(&[entity_id]).context("cannot encode non-player entity removal")?;
+    connection.queue(
+        PlayOutput::ProtocolPacket {
+            kind: PacketKind::RemoveEntities,
+            payload,
+        },
+        exit,
+    );
+    Ok(())
+}
+
+fn queue_item_remove(
+    connections: &mut BTreeMap<PlayerUuid, ReplicationConnection>,
+    entity_id: EntityId,
+    exit: &mut GameReplicationExit,
+) -> Result<()> {
+    for connection in connections.values_mut() {
+        queue_item_remove_for_connection(connection, entity_id, exit)?;
     }
     Ok(())
 }
@@ -1312,7 +1551,9 @@ fn flush_connections(
 mod tests {
     use super::*;
     use crate::play_connection::register_play_connection;
-    use ferrum_game::{CommandSource, HOTBAR_START, ItemStack, Transform};
+    use ferrum_game::{
+        CommandSource, HOTBAR_END, HOTBAR_START, ItemStack, MAIN_INVENTORY_START, Transform,
+    };
     use ferrum_runtime::{BoundedInputQueue, ConnectionId, worker_channel};
 
     fn spawn() -> Transform {
@@ -1321,8 +1562,19 @@ mod tests {
 
     fn entity_config() -> GameReplicationConfig {
         GameReplicationConfig {
-            entity_protocol_ids: EntityProtocolRegistry::new([("minecraft:player", 148)]).unwrap(),
+            entity_protocol_ids: EntityProtocolRegistry::new([
+                ("minecraft:item", 71),
+                ("minecraft:player", 148),
+            ])
+            .unwrap(),
             item_protocol_ids: ItemProtocolRegistry::new([("minecraft:stone", 1)]).unwrap(),
+            item_entity_metadata: Some(
+                ItemEntityMetadataProtocol::new(
+                    ferrum_version_26_1_2::ITEM_ENTITY_STACK_METADATA_INDEX,
+                    ferrum_version_26_1_2::ITEM_STACK_ENTITY_DATA_SERIALIZER_ID,
+                )
+                .unwrap(),
+            ),
             world: Some(RomPackWorld {
                 data_version: ferrum_version_26_1_2::WORLD_VERSION,
                 overworld_min_section_y: ferrum_version_26_1_2::OVERWORLD_MIN_SECTION_Y,
@@ -1423,6 +1675,25 @@ mod tests {
                 payload
             }
             output => panic!("expected {expected:?} protocol packet, got {output:?}"),
+        }
+    }
+
+    fn recv_protocol_until(
+        writer: &crate::play_connection::PlayWriterEndpoint,
+        workers: &mut ferrum_runtime::WorkerRuntime<
+            crate::authoritative_runtime::PlayInput,
+            PlayOutput,
+        >,
+        inputs: &mut BoundedInputQueue<crate::authoritative_runtime::PlayInput>,
+        expected: PacketKind,
+    ) -> Vec<u8> {
+        loop {
+            if let PlayOutput::ProtocolPacket { kind, payload } =
+                recv_raw_output(writer, workers, inputs)
+                && kind == expected
+            {
+                return payload;
+            }
         }
     }
 
@@ -2144,6 +2415,201 @@ mod tests {
                 ..
             }
         ));
+        service.shutdown().unwrap();
+    }
+
+    #[test]
+    fn activation_snapshots_preexisting_item_entities() {
+        let game = SharedGameRuntime::vanilla_overworld();
+        let spawned = game
+            .spawn_item_entity(
+                spawn(),
+                ItemStack::new("minecraft:stone", 3).unwrap(),
+                Velocity::default(),
+                None,
+            )
+            .unwrap();
+        let item_id = match &spawned[0] {
+            GameEvent::EntitySpawned { entity } => entity.id,
+            event => panic!("unexpected event: {event:?}"),
+        };
+        let service = spawn_game_replication(&game, entity_config()).unwrap();
+        let player = PlayerUuid::new(51);
+        let (connector, mut workers) = worker_channel(NonZeroUsize::new(32).unwrap());
+        let (reader, writer) = register_play_connection(
+            &connector,
+            ConnectionId::new(51),
+            NonZeroUsize::new(16).unwrap(),
+        )
+        .unwrap();
+        let mut inputs = BoundedInputQueue::try_new(32).unwrap();
+        ingest(&mut workers, &mut inputs);
+        service.control().register(player, reader).unwrap();
+        service.control().activate(player).unwrap();
+
+        let add = recv_protocol_until(&writer, &mut workers, &mut inputs, PacketKind::AddEntity);
+        let (encoded_entity_id, entity_id_bytes) = read_varint(&add);
+        assert_eq!(encoded_entity_id, i32::try_from(item_id.get()).unwrap());
+        let type_offset = entity_id_bytes + 16;
+        assert_eq!(read_varint(&add[type_offset..]).0, 71);
+
+        let metadata = recv_protocol_until(
+            &writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::SetEntityData,
+        );
+        let (encoded_entity_id, entity_id_bytes) = read_varint(&metadata);
+        assert_eq!(encoded_entity_id, i32::try_from(item_id.get()).unwrap());
+        assert_eq!(
+            &metadata[entity_id_bytes..],
+            &[
+                ferrum_version_26_1_2::ITEM_ENTITY_STACK_METADATA_INDEX,
+                ferrum_version_26_1_2::ITEM_STACK_ENTITY_DATA_SERIALIZER_ID as u8,
+                3,
+                1,
+                0,
+                0,
+                0xff,
+            ]
+        );
+        service.shutdown().unwrap();
+    }
+
+    #[test]
+    fn partial_and_full_item_pickups_replicate_animation_metadata_and_removal() {
+        let game = SharedGameRuntime::vanilla_overworld();
+        let service = spawn_game_replication(&game, entity_config()).unwrap();
+        let player = PlayerUuid::new(52);
+        let (connector, mut workers) = worker_channel(NonZeroUsize::new(64).unwrap());
+        let (reader, writer) = register_play_connection(
+            &connector,
+            ConnectionId::new(52),
+            NonZeroUsize::new(32).unwrap(),
+        )
+        .unwrap();
+        let mut inputs = BoundedInputQueue::try_new(64).unwrap();
+        ingest(&mut workers, &mut inputs);
+        service.control().register(player, reader).unwrap();
+        service.control().activate(player).unwrap();
+        game.connect_player(player, "Alex", spawn()).unwrap();
+        let collector_entity_id = game
+            .with_state(|state| state.player(player).unwrap().entity_id.unwrap())
+            .unwrap();
+        game.with_state_mut(|state| {
+            let inventory = &mut state.player_mut(player).unwrap().inventory;
+            for slot in MAIN_INVENTORY_START..=HOTBAR_END {
+                inventory
+                    .set_slot(slot, Some(ItemStack::new("minecraft:dirt", 64).unwrap()))
+                    .unwrap();
+            }
+            inventory
+                .set_slot(
+                    MAIN_INVENTORY_START,
+                    Some(ItemStack::new("minecraft:stone", 63).unwrap()),
+                )
+                .unwrap();
+            Ok(())
+        })
+        .unwrap();
+
+        let spawned = game
+            .spawn_item_entity(
+                spawn(),
+                ItemStack::new("minecraft:stone", 3).unwrap(),
+                Velocity::default(),
+                None,
+            )
+            .unwrap();
+        let item_id = match &spawned[0] {
+            GameEvent::EntitySpawned { entity } => entity.id,
+            event => panic!("unexpected event: {event:?}"),
+        };
+        recv_protocol_until(&writer, &mut workers, &mut inputs, PacketKind::AddEntity);
+        recv_protocol_until(
+            &writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::SetEntityData,
+        );
+        game.with_state_mut(|state| {
+            state
+                .entities_mut()
+                .get_mut(item_id)
+                .unwrap()
+                .item_mut()
+                .unwrap()
+                .pickup_delay_ticks = 0;
+            Ok(())
+        })
+        .unwrap();
+
+        game.pickup_nearby_items(player, 2.0).unwrap();
+        let take = recv_protocol_until(
+            &writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::TakeItemEntity,
+        );
+        let (taken_entity_id, taken_bytes) = read_varint(&take);
+        let (collector_id, collector_bytes) = read_varint(&take[taken_bytes..]);
+        let (amount, _) = read_varint(&take[taken_bytes + collector_bytes..]);
+        assert_eq!(taken_entity_id, i32::try_from(item_id.get()).unwrap());
+        assert_eq!(
+            collector_id,
+            i32::try_from(collector_entity_id.get()).unwrap()
+        );
+        assert_eq!(amount, 1);
+        let update = recv_protocol_until(
+            &writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::SetEntityData,
+        );
+        let (_, update_entity_id_bytes) = read_varint(&update);
+        assert_eq!(
+            &update[update_entity_id_bytes..],
+            &[
+                ferrum_version_26_1_2::ITEM_ENTITY_STACK_METADATA_INDEX,
+                ferrum_version_26_1_2::ITEM_STACK_ENTITY_DATA_SERIALIZER_ID as u8,
+                2,
+                1,
+                0,
+                0,
+                0xff,
+            ]
+        );
+
+        game.with_state_mut(|state| {
+            state.player_mut(player).unwrap().inventory.clear();
+            Ok(())
+        })
+        .unwrap();
+        game.pickup_nearby_items(player, 2.0).unwrap();
+        let take = recv_protocol_until(
+            &writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::TakeItemEntity,
+        );
+        let (_, entity_id_bytes) = read_varint(&take);
+        let (_, collector_id_bytes) = read_varint(&take[entity_id_bytes..]);
+        assert_eq!(
+            read_varint(&take[entity_id_bytes + collector_id_bytes..]).0,
+            2
+        );
+        let remove = recv_protocol_until(
+            &writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::RemoveEntities,
+        );
+        let (removed_count, count_bytes) = read_varint(&remove);
+        assert_eq!(removed_count, 1);
+        assert_eq!(
+            read_varint(&remove[count_bytes..]).0,
+            i32::try_from(item_id.get()).unwrap()
+        );
         service.shutdown().unwrap();
     }
 

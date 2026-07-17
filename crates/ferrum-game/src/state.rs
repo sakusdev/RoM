@@ -93,6 +93,10 @@ pub enum GameEvent {
     EntityRemoved {
         entity_id: EntityId,
     },
+    ItemEntityChanged {
+        entity_id: EntityId,
+        stack: ItemStack,
+    },
     ItemPickedUp {
         uuid: PlayerUuid,
         entity_id: EntityId,
@@ -513,7 +517,7 @@ impl GameState {
                 continue;
             }
             inventory_changed = true;
-            if let Some(remainder) = remainder {
+            let remainder = if let Some(remainder) = remainder {
                 let entity = self.entities.get_mut(candidate_id).ok_or(
                     GameStateError::MissingItemEntity {
                         entity_id: candidate_id,
@@ -524,13 +528,12 @@ impl GameState {
                     .ok_or(GameStateError::NotItemEntity {
                         entity_id: candidate_id,
                     })?
-                    .stack = remainder;
+                    .stack = remainder.clone();
+                Some(remainder)
             } else {
                 self.entities.despawn(candidate_id);
-                events.push(GameEvent::EntityRemoved {
-                    entity_id: candidate_id,
-                });
-            }
+                None
+            };
             events.push(GameEvent::InventoryChanged {
                 uuid,
                 inserted,
@@ -555,6 +558,16 @@ impl GameState {
                 item: item_name,
                 inserted,
             });
+            if let Some(stack) = remainder {
+                events.push(GameEvent::ItemEntityChanged {
+                    entity_id: candidate_id,
+                    stack,
+                });
+            } else {
+                events.push(GameEvent::EntityRemoved {
+                    entity_id: candidate_id,
+                });
+            }
         }
         if inventory_changed {
             let player = self
@@ -1505,6 +1518,86 @@ mod tests {
                 .unwrap()
                 .count(),
             12
+        );
+    }
+
+    #[test]
+    fn partial_item_pickup_updates_the_authoritative_entity_after_the_pickup_event() {
+        let uuid = PlayerUuid::new(42);
+        let mut state = GameState::default();
+        state.connect_player(uuid, "Alex", spawn()).unwrap();
+        let player = state.player_mut(uuid).unwrap();
+        for slot in crate::MAIN_INVENTORY_START..=crate::HOTBAR_END {
+            player
+                .inventory
+                .set_slot(slot, Some(ItemStack::new("minecraft:dirt", 64).unwrap()))
+                .unwrap();
+        }
+        player
+            .inventory
+            .set_slot(
+                crate::MAIN_INVENTORY_START,
+                Some(ItemStack::new("minecraft:stone", 63).unwrap()),
+            )
+            .unwrap();
+
+        let spawned = state
+            .spawn_item_entity(
+                spawn(),
+                ItemStack::new("minecraft:stone", 3).unwrap(),
+                Velocity::default(),
+                None,
+            )
+            .unwrap();
+        let item_id = match &spawned[0] {
+            GameEvent::EntitySpawned { entity } => entity.id,
+            event => panic!("unexpected event: {event:?}"),
+        };
+        state
+            .entities_mut()
+            .get_mut(item_id)
+            .unwrap()
+            .item_mut()
+            .unwrap()
+            .pickup_delay_ticks = 0;
+
+        let events = state.pickup_nearby_items(uuid, 2.0).unwrap();
+        let pickup_index = events
+            .iter()
+            .position(|event| {
+                matches!(
+                    event,
+                    GameEvent::ItemPickedUp {
+                        entity_id,
+                        inserted: 1,
+                        ..
+                    } if *entity_id == item_id
+                )
+            })
+            .expect("partial pickup event");
+        let changed_index = events
+            .iter()
+            .position(|event| {
+                matches!(
+                    event,
+                    GameEvent::ItemEntityChanged {
+                        entity_id,
+                        stack,
+                    } if *entity_id == item_id && stack.count() == 2
+                )
+            })
+            .expect("item stack change event");
+        assert!(pickup_index < changed_index);
+        assert_eq!(
+            state
+                .entities()
+                .get(item_id)
+                .unwrap()
+                .item()
+                .unwrap()
+                .stack
+                .count(),
+            2
         );
     }
 

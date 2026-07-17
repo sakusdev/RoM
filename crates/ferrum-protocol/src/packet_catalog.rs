@@ -381,6 +381,9 @@ pub fn known_packet_kind(
         (ProtocolPhase::Play, PacketDirection::Clientbound, "set_entity_data") => {
             Some(PacketKind::SetEntityData)
         }
+        (ProtocolPhase::Play, PacketDirection::Clientbound, "take_item_entity") => {
+            Some(PacketKind::TakeItemEntity)
+        }
         (ProtocolPhase::Play, PacketDirection::Clientbound, "set_equipment") => {
             Some(PacketKind::SetEquipment)
         }
@@ -467,6 +470,7 @@ pub const fn canonical_packet_name(kind: PacketKind) -> &'static str {
         PacketKind::TeleportEntity => "minecraft:teleport_entity",
         PacketKind::RotateHead => "minecraft:rotate_head",
         PacketKind::SetEntityData => "minecraft:set_entity_data",
+        PacketKind::TakeItemEntity => "minecraft:take_item_entity",
         PacketKind::SetEquipment => "minecraft:set_equipment",
         PacketKind::SetHealth => "minecraft:set_health",
         PacketKind::HurtAnimation => "minecraft:hurt_animation",

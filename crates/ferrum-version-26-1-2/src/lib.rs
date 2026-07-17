@@ -35,6 +35,10 @@ pub const OVERWORLD_SEA_LEVEL: i32 = 63;
 pub const FLAT_WORLD_FLOOR_Y: i32 = 63;
 pub const FLAT_WORLD_SPAWN_X: i32 = 0;
 pub const FLAT_WORLD_SPAWN_Z: i32 = 0;
+/// ItemEntity.DATA_ITEM accessor index derived from the SHA-1-verified official 26.1.2 server.
+pub const ITEM_ENTITY_STACK_METADATA_INDEX: u8 = 8;
+/// EntityDataSerializers.ITEM_STACK ID derived from the official 26.1.2 serializer registration order.
+pub const ITEM_STACK_ENTITY_DATA_SERIALIZER_ID: i32 = 7;
 
 /// Number of tag registries that are valid in the client Configuration registry access.
 pub const NETWORK_TAG_REGISTRY_COUNT: usize = 16;
@@ -94,6 +98,10 @@ pub fn protocol_profile() -> Result<ProtocolProfile, ProfileError> {
         (PacketKind::DefaultSpawnPosition, 0x61),
         (PacketKind::PlayerPosition, 0x48),
         (PacketKind::SystemChat, 0x79),
+        (PacketKind::AddEntity, 0x01),
+        (PacketKind::RemoveEntities, 0x4d),
+        (PacketKind::SetEntityData, 0x63),
+        (PacketKind::TakeItemEntity, 0x7c),
         (PacketKind::SetHealth, 0x68),
         (PacketKind::HurtAnimation, 0x2a),
         (PacketKind::PlayerCombatKill, 0x44),
@@ -198,6 +206,10 @@ mod tests {
             0x5e
         );
         assert_eq!(packets.require(PacketKind::SystemChat).unwrap(), 0x79);
+        assert_eq!(packets.require(PacketKind::AddEntity).unwrap(), 0x01);
+        assert_eq!(packets.require(PacketKind::RemoveEntities).unwrap(), 0x4d);
+        assert_eq!(packets.require(PacketKind::SetEntityData).unwrap(), 0x63);
+        assert_eq!(packets.require(PacketKind::TakeItemEntity).unwrap(), 0x7c);
         assert_eq!(
             packets
                 .require(PacketKind::SelectKnownPacksRequest)
