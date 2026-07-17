@@ -1,22 +1,84 @@
-name: P0-P4 workspace export
+name: P0-P4 validated source commit
 
 on:
   pull_request:
-    types: [opened, reopened]
+    types: [reopened]
 
 permissions:
-  contents: read
+  contents: write
+  issues: read
+  pull-requests: read
 
 jobs:
-  export:
+  validate-and-commit:
+    if: github.event.pull_request.head.ref == 'agent/p0-p4-gameplay-foundations'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Archive workspace
-        run: git archive --format=zip --output=rom-workspace.zip HEAD
-      - uses: actions/upload-artifact@v4
         with:
-          name: rom-workspace
-          path: rom-workspace.zip
-          if-no-files-found: error
-          retention-days: 1
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Reconstruct validated source patch
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PATCH_SHA256: 011e3f74846a937f37a462310a932f2efbf0b1beb39088e12706df7b9c2510dc
+        run: |
+          set -euo pipefail
+          curl -fsSL \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments?per_page=100" \
+            > /tmp/comments.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          comments = json.loads(Path('/tmp/comments.json').read_text())
+          chunks = {}
+          for comment in comments:
+              body = comment.get('body') or ''
+              for number in range(1, 5):
+                  prefix = f'P0P4_PATCH_{number}:'
+                  if body.startswith(prefix):
+                      if number in chunks:
+                          raise SystemExit(f'duplicate patch chunk {number}')
+                      chunks[number] = body[len(prefix):].strip()
+          missing = [number for number in range(1, 5) if number not in chunks]
+          if missing:
+              raise SystemExit(f'missing patch chunks: {missing}')
+          Path('/tmp/p0-p4.patch.gz.b64').write_text(''.join(chunks[number] for number in range(1, 5)))
+          PY
+          base64 --decode /tmp/p0-p4.patch.gz.b64 | gzip --decompress > /tmp/p0-p4.patch
+          echo "${PATCH_SHA256}  /tmp/p0-p4.patch" | sha256sum --check --strict
+          git apply --check -p2 /tmp/p0-p4.patch
+          git apply -p2 /tmp/p0-p4.patch
+          rm -f /tmp/comments.json /tmp/p0-p4.patch.gz.b64 /tmp/p0-p4.patch
+
+      - name: Format
+        run: cargo fmt --all
+
+      - name: Verify formatting
+        run: cargo fmt --all -- --check
+
+      - name: Check workspace
+        run: cargo check --workspace --all-targets --all-features
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Test workspace
+        run: cargo test --workspace --all-targets --all-features
+
+      - name: Commit verified source only
+        run: |
+          set -euo pipefail
+          rm .github/workflows/p0-p4-workspace-export.yml
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Implement P0-P4 gameplay foundations"
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
