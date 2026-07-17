@@ -90,22 +90,10 @@ jobs:
           menu_path = Path('crates/ferrum-game/src/menu.rs')
           menu = menu_path.read_text()
           replacements = [
-              (
-                  '        let slot = self\n',
-                  '        let slot_count = self.slots.len();\n        let slot = self\n',
-              ),
-              (
-                  '                slots: self.slots.len(),\n',
-                  '                slots: slot_count,\n',
-              ),
-              (
-                  '        let property = self\n',
-                  '        let property_count = self.properties.len();\n        let property = self\n',
-              ),
-              (
-                  '                properties: self.properties.len(),\n',
-                  '                properties: property_count,\n',
-              ),
+              ('        let slot = self\n', '        let slot_count = self.slots.len();\n        let slot = self\n'),
+              ('                slots: self.slots.len(),\n', '                slots: slot_count,\n'),
+              ('        let property = self\n', '        let property_count = self.properties.len();\n        let property = self\n'),
+              ('                properties: self.properties.len(),\n', '                properties: property_count,\n'),
           ]
           for original, replacement in replacements:
               if menu.count(original) != 1:
@@ -149,10 +137,44 @@ jobs:
         run: exit 1
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        id: clippy
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          cargo clippy --workspace --all-targets --all-features -- -D warnings 2>&1 | tee /tmp/clippy.log
+
+      - name: Upload Clippy diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p0-p4-clippy
+          path: /tmp/clippy.log
+          if-no-files-found: ignore
+          retention-days: 1
+
+      - name: Enforce Clippy
+        if: steps.clippy.outcome == 'failure'
+        run: exit 1
 
       - name: Test workspace
-        run: cargo test --workspace --all-targets --all-features
+        id: tests
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          cargo test --workspace --all-targets --all-features 2>&1 | tee /tmp/tests.log
+
+      - name: Upload test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: p0-p4-tests
+          path: /tmp/tests.log
+          if-no-files-found: ignore
+          retention-days: 1
+
+      - name: Enforce tests
+        if: steps.tests.outcome == 'failure'
+        run: exit 1
 
       - name: Commit verified source only
         run: |
