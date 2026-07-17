@@ -67,66 +67,17 @@ jobs:
           echo 'db5ca74172acdcad709b1dc9c5671960c8b9b08d547cccb42b33b9dbae7e50c7  /tmp/p0-p4.chunk3' | sha256sum --check --strict
           echo '40b98c3511b66a63c501aeec58b15d887bf0e2e020818429d1ec478f7bce1518  /tmp/p0-p4.chunk4' | sha256sum --check --strict
 
-      - name: Verify patch transport
+      - name: Verify and apply source patch
         run: |
           set -euo pipefail
           base64 --decode /tmp/p0-p4.patch.gz.b64 > /tmp/p0-p4.patch.gz
           gzip --test /tmp/p0-p4.patch.gz
           gzip --decompress --stdout /tmp/p0-p4.patch.gz > /tmp/p0-p4.patch
           echo '011e3f74846a937f37a462310a932f2efbf0b1beb39088e12706df7b9c2510dc  /tmp/p0-p4.patch' | sha256sum --check --strict
-
-      - name: Apply source patch
-        run: |
-          set -euo pipefail
           git apply --check -p2 /tmp/p0-p4.patch
           git apply -p2 /tmp/p0-p4.patch
+          python3 .github/p0-p4-reviewed-fixes.py
           rm -f /tmp/comments.json /tmp/p0-p4.chunk* /tmp/p0-p4.patch.gz.b64 /tmp/p0-p4.patch.gz /tmp/p0-p4.patch
-
-      - name: Apply reviewed compile and lint fixes
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          menu_path = Path('crates/ferrum-game/src/menu.rs')
-          menu = menu_path.read_text()
-          replacements = [
-              ('        let slot = self\n', '        let slot_count = self.slots.len();\n        let slot = self\n'),
-              ('                slots: self.slots.len(),\n', '                slots: slot_count,\n'),
-              ('        let property = self\n', '        let property_count = self.properties.len();\n        let property = self\n'),
-              ('                properties: self.properties.len(),\n', '                properties: property_count,\n'),
-          ]
-          for original, replacement in replacements:
-              if menu.count(original) != 1:
-                  raise SystemExit(f'expected menu pattern not found exactly once: {original!r}')
-              menu = menu.replace(original, replacement)
-          menu_path.write_text(menu)
-
-          entity_path = Path('crates/ferrum-game/src/entity.rs')
-          entity = entity_path.read_text()
-          original = '                age_ticks: 20,\n                data: BTreeMap::new(),\n'
-          replacement = '                age_ticks: 20,\n                payload: EntityPayload::Generic,\n                data: BTreeMap::new(),\n'
-          if entity.count(original) != 1:
-              raise SystemExit('expected restored entity fixture was not found exactly once')
-          entity_path.write_text(entity.replace(original, replacement))
-
-          collections = [
-              (
-                  Path('crates/ferrum-world/src/block.rs'),
-                  '    #[must_use]\n    pub fn len(&self) -> usize {\n        self.by_state.len()\n    }\n',
-                  '    #[must_use]\n    pub fn len(&self) -> usize {\n        self.by_state.len()\n    }\n\n    #[must_use]\n    pub fn is_empty(&self) -> bool {\n        self.by_state.is_empty()\n    }\n',
-              ),
-              (
-                  Path('crates/ferrum-world/src/block_entity.rs'),
-                  '    #[must_use]\n    pub fn len(&self) -> usize {\n        self.entries.len()\n    }\n',
-                  '    #[must_use]\n    pub fn len(&self) -> usize {\n        self.entries.len()\n    }\n\n    #[must_use]\n    pub fn is_empty(&self) -> bool {\n        self.entries.is_empty()\n    }\n',
-              ),
-          ]
-          for path, original, replacement in collections:
-              source = path.read_text()
-              if source.count(original) != 1:
-                  raise SystemExit(f'expected len method not found exactly once in {path}')
-              path.write_text(source.replace(original, replacement))
-          PY
 
       - name: Format
         run: cargo fmt --all
@@ -197,7 +148,7 @@ jobs:
       - name: Commit verified source only
         run: |
           set -euo pipefail
-          rm .github/workflows/p0-p4-workspace-export.yml
+          rm .github/workflows/p0-p4-workspace-export.yml .github/p0-p4-reviewed-fixes.py
           git diff --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
