@@ -112,13 +112,13 @@ jobs:
           collections = [
               (
                   Path('crates/ferrum-world/src/block.rs'),
-                  '    pub fn len(&self) -> usize {\n        self.behaviors.len()\n    }\n',
-                  '    pub fn len(&self) -> usize {\n        self.behaviors.len()\n    }\n\n    pub fn is_empty(&self) -> bool {\n        self.behaviors.is_empty()\n    }\n',
+                  '    #[must_use]\n    pub fn len(&self) -> usize {\n        self.by_state.len()\n    }\n',
+                  '    #[must_use]\n    pub fn len(&self) -> usize {\n        self.by_state.len()\n    }\n\n    #[must_use]\n    pub fn is_empty(&self) -> bool {\n        self.by_state.is_empty()\n    }\n',
               ),
               (
                   Path('crates/ferrum-world/src/block_entity.rs'),
-                  '    pub fn len(&self) -> usize {\n        self.entities.len()\n    }\n',
-                  '    pub fn len(&self) -> usize {\n        self.entities.len()\n    }\n\n    pub fn is_empty(&self) -> bool {\n        self.entities.is_empty()\n    }\n',
+                  '    #[must_use]\n    pub fn len(&self) -> usize {\n        self.entries.len()\n    }\n',
+                  '    #[must_use]\n    pub fn len(&self) -> usize {\n        self.entries.len()\n    }\n\n    #[must_use]\n    pub fn is_empty(&self) -> bool {\n        self.entries.is_empty()\n    }\n',
               ),
           ]
           for path, original, replacement in collections:
