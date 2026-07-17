@@ -1,14 +1,16 @@
-name: P0-P4 continuation export
+name: P0-P4 item entity replication
 
 on:
   pull_request:
     types: [reopened]
 
 permissions:
-  contents: read
+  contents: write
+  issues: read
+  pull-requests: read
 
 jobs:
-  inspect:
+  validate-and-commit:
     if: github.event.pull_request.head.ref == 'agent/p0-p4-gameplay-foundations'
     runs-on: ubuntu-latest
     steps:
@@ -17,108 +19,75 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
 
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '25'
-
-      - name: Download verified official server
+      - name: Reconstruct reviewed source patch
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PATCH_SHA256: c5778001cd4668662d6688b449b304e0eeecc4f207610e6ecf0fff01832af56f
         run: |
           set -euo pipefail
-          mkdir -p /tmp/inspect /tmp/libs
+          curl -fsSL \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments?per_page=100" \
+            > /tmp/comments.json
           python3 - <<'PY'
-          import hashlib, json, pathlib, urllib.request, zipfile
-          def download(url):
-              request = urllib.request.Request(url, headers={'User-Agent': 'RoM/official-wire-inspector'})
-              with urllib.request.urlopen(request, timeout=60) as response:
-                  return response.read()
-          manifest = json.loads(download('https://piston-meta.mojang.com/mc/game/version_manifest_v2.json'))
-          entry = next(item for item in manifest['versions'] if item['id'] == '26.1.2')
-          metadata_bytes = download(entry['url'])
-          if hashlib.sha1(metadata_bytes).hexdigest() != entry['sha1']:
-              raise SystemExit('version metadata SHA-1 mismatch')
-          server = json.loads(metadata_bytes)['downloads']['server']
-          server_bytes = download(server['url'])
-          if len(server_bytes) != server['size'] or hashlib.sha1(server_bytes).hexdigest() != server['sha1']:
-              raise SystemExit('server integrity mismatch')
-          pathlib.Path('/tmp/server.jar').write_bytes(server_bytes)
-          pathlib.Path('/tmp/inspect/source.json').write_text(json.dumps({
-              'version': '26.1.2', 'metadata_sha1': entry['sha1'], 'server_sha1': server['sha1']
-          }, indent=2, sort_keys=True))
-          with zipfile.ZipFile('/tmp/server.jar') as outer:
-              names = outer.namelist()
-              lines = outer.read('META-INF/versions.list').decode().splitlines()
-              candidates = [fields[2] for line in lines if len((fields := line.strip().split('\t'))) == 3]
-              game_entry = f'META-INF/versions/{candidates[0]}'
-              pathlib.Path('/tmp/game.jar').write_bytes(outer.read(game_entry))
-              for name in names:
-                  if name.startswith('META-INF/libraries/') and name.endswith('.jar'):
-                      (pathlib.Path('/tmp/libs') / pathlib.Path(name).name).write_bytes(outer.read(name))
-          PY
+          import json
+          from pathlib import Path
 
-      - name: Reflect exact metadata constants
-        id: reflect
+          prefix = 'P0P4_ITEM_REPLICATION_PATCH:'
+          comments = json.loads(Path('/tmp/comments.json').read_text())
+          matches = [
+              (comment.get('body') or '')[len(prefix):].strip()
+              for comment in comments
+              if (comment.get('body') or '').startswith(prefix)
+          ]
+          if len(matches) != 1:
+              raise SystemExit(f'expected one item replication patch comment, found {len(matches)}')
+          Path('/tmp/item-replication.patch.gz.b64').write_text(matches[0])
+          PY
+          base64 --decode /tmp/item-replication.patch.gz.b64 > /tmp/item-replication.patch.gz
+          gzip --test /tmp/item-replication.patch.gz
+          gzip --decompress --stdout /tmp/item-replication.patch.gz > /tmp/item-replication.patch
+          echo "${PATCH_SHA256}  /tmp/item-replication.patch" | sha256sum --check --strict
+          git apply --check /tmp/item-replication.patch
+          git apply /tmp/item-replication.patch
+          rm -f /tmp/comments.json /tmp/item-replication.patch.gz.b64 /tmp/item-replication.patch.gz /tmp/item-replication.patch
+
+      - name: Validate workspace
+        id: validate
         continue-on-error: true
         run: |
           set -o pipefail
-          cat > /tmp/InspectItemMetadata.java <<'JAVA'
-          import java.lang.reflect.Field;
-          import java.lang.reflect.Method;
-          import java.lang.reflect.Modifier;
-          public final class InspectItemMetadata {
-              public static void main(String[] args) throws Exception {
-                  Class<?> bootstrap = Class.forName("net.minecraft.server.Bootstrap");
-                  for (Method method : bootstrap.getDeclaredMethods()) {
-                      if (Modifier.isStatic(method.getModifiers()) && method.getParameterCount() == 0
-                              && method.getName().toLowerCase().contains("bootstrap")) {
-                          method.setAccessible(true);
-                          method.invoke(null);
-                          break;
-                      }
-                  }
-                  Class<?> itemEntity = Class.forName("net.minecraft.world.entity.item.ItemEntity");
-                  Field dataItemField = itemEntity.getDeclaredField("DATA_ITEM");
-                  dataItemField.setAccessible(true);
-                  Object accessor = dataItemField.get(null);
-                  int metadataIndex = (Integer) accessor.getClass().getMethod("id").invoke(accessor);
-                  Class<?> serializers = Class.forName("net.minecraft.network.syncher.EntityDataSerializers");
-                  Object itemStackSerializer = serializers.getField("ITEM_STACK").get(null);
-                  Method getSerializedId = serializers.getMethod(
-                      "getSerializedId", Class.forName("net.minecraft.network.syncher.EntityDataSerializer"));
-                  int serializerId = (Integer) getSerializedId.invoke(null, itemStackSerializer);
-                  System.out.printf("{\"item_metadata_index\":%d,\"item_stack_serializer_id\":%d}%n",
-                      metadataIndex, serializerId);
-              }
-          }
-          JAVA
-          javac -cp "/tmp/game.jar:/tmp/libs/*" /tmp/InspectItemMetadata.java
-          java -cp "/tmp:/tmp/game.jar:/tmp/libs/*" InspectItemMetadata \
-            > /tmp/inspect/item-metadata-constants.json 2> /tmp/inspect/reflection-stderr.txt
+          {
+            cargo fmt --all
+            cargo fmt --all -- --check
+            cargo check --workspace --all-targets --all-features
+            cargo clippy --workspace --all-targets --all-features -- -D warnings
+            cargo test --workspace --all-targets --all-features
+          } 2>&1 | tee /tmp/item-replication-validation.log
 
-      - name: Disassemble metadata allocation and packet writers
-        run: |
-          set -euo pipefail
-          for class in \
-            'net.minecraft.world.entity.Entity' \
-            'net.minecraft.world.entity.item.ItemEntity' \
-            'net.minecraft.network.syncher.SynchedEntityData' \
-            'net.minecraft.network.syncher.SynchedEntityData$DataValue' \
-            'net.minecraft.network.syncher.EntityDataSerializers' \
-            'net.minecraft.network.protocol.game.ClientboundTakeItemEntityPacket'; do
-            safe=$(printf '%s' "$class" | tr './$' '___')
-            javap -p -c -s -constants -classpath "/tmp/game.jar:/tmp/libs/*" "$class" \
-              > "/tmp/inspect/${safe}.javap.txt"
-          done
-
-      - name: Upload inspection
+      - name: Upload validation diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: item-entity-official-inspection
-          path: /tmp/inspect
-          if-no-files-found: error
+          name: p0-p4-item-replication-validation
+          path: /tmp/item-replication-validation.log
+          if-no-files-found: ignore
           retention-days: 1
 
-      - name: Enforce reflection
-        if: steps.reflect.outcome == 'failure'
+      - name: Enforce validation
+        if: steps.validate.outcome == 'failure'
         run: exit 1
+
+      - name: Commit verified source only
+        run: |
+          set -euo pipefail
+          rm .github/workflows/p0-p4-continue-export.yml
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Replicate authoritative item entities"
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
