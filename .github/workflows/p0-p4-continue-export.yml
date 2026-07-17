@@ -1,0 +1,31 @@
+name: P0-P4 continuation export
+
+on:
+  pull_request:
+    types: [reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    if: github.event.pull_request.head.ref == 'agent/p0-p4-gameplay-foundations'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Export source tree
+        run: |
+          set -euo pipefail
+          tar --exclude=.git --exclude=target -czf /tmp/rom-p0-p4-source.tar.gz .
+
+      - name: Upload source tree
+        uses: actions/upload-artifact@v4
+        with:
+          name: rom-p0-p4-source
+          path: /tmp/rom-p0-p4-source.tar.gz
+          if-no-files-found: error
+          retention-days: 1
