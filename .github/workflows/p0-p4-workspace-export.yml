@@ -59,17 +59,13 @@ jobs:
           Path('/tmp/p0-p4.patch.gz.b64').write_text(encoded)
           PY
 
-      - name: Verify patch chunk 1
-        run: echo '30de7682a19f6ebf19fd8f409e492ff8cb8126bd099c90d966d51097b171f080  /tmp/p0-p4.chunk1' | sha256sum --check --strict
-
-      - name: Verify patch chunk 2
-        run: echo '764ad54c6cabd73f2a38cb1e459a44bab37898ae46bd2042fa17109c25d10321  /tmp/p0-p4.chunk2' | sha256sum --check --strict
-
-      - name: Verify patch chunk 3
-        run: echo 'db5ca74172acdcad709b1dc9c5671960c8b9b08d547cccb42b33b9dbae7e50c7  /tmp/p0-p4.chunk3' | sha256sum --check --strict
-
-      - name: Verify patch chunk 4
-        run: echo '40b98c3511b66a63c501aeec58b15d887bf0e2e020818429d1ec478f7bce1518  /tmp/p0-p4.chunk4' | sha256sum --check --strict
+      - name: Verify patch chunks
+        run: |
+          set -euo pipefail
+          echo '30de7682a19f6ebf19fd8f409e492ff8cb8126bd099c90d966d51097b171f080  /tmp/p0-p4.chunk1' | sha256sum --check --strict
+          echo '764ad54c6cabd73f2a38cb1e459a44bab37898ae46bd2042fa17109c25d10321  /tmp/p0-p4.chunk2' | sha256sum --check --strict
+          echo 'db5ca74172acdcad709b1dc9c5671960c8b9b08d547cccb42b33b9dbae7e50c7  /tmp/p0-p4.chunk3' | sha256sum --check --strict
+          echo '40b98c3511b66a63c501aeec58b15d887bf0e2e020818429d1ec478f7bce1518  /tmp/p0-p4.chunk4' | sha256sum --check --strict
 
       - name: Verify patch transport
         run: |
@@ -85,6 +81,52 @@ jobs:
           git apply --check -p2 /tmp/p0-p4.patch
           git apply -p2 /tmp/p0-p4.patch
           rm -f /tmp/comments.json /tmp/p0-p4.chunk* /tmp/p0-p4.patch.gz.b64 /tmp/p0-p4.patch.gz /tmp/p0-p4.patch
+
+      - name: Apply reviewed compile fixes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('crates/ferrum-game/src/menu.rs')
+          source = path.read_text()
+          original_slot = '''        let slot = self
+              .slots
+              .get_mut(index)
+              .ok_or(MenuError::SlotOutOfRange {
+                  index,
+                  slots: self.slots.len(),
+              })?;
+          '''
+          fixed_slot = '''        let slot_count = self.slots.len();
+          let slot = self
+              .slots
+              .get_mut(index)
+              .ok_or(MenuError::SlotOutOfRange {
+                  index,
+                  slots: slot_count,
+              })?;
+          '''
+          original_property = '''        let property = self
+              .properties
+              .get_mut(index)
+              .ok_or(MenuError::PropertyOutOfRange {
+                  index,
+                  properties: self.properties.len(),
+              })?;
+          '''
+          fixed_property = '''        let property_count = self.properties.len();
+          let property = self
+              .properties
+              .get_mut(index)
+              .ok_or(MenuError::PropertyOutOfRange {
+                  index,
+                  properties: property_count,
+              })?;
+          '''
+          if source.count(original_slot) != 1 or source.count(original_property) != 1:
+              raise SystemExit('expected menu borrow patterns were not found exactly once')
+          path.write_text(source.replace(original_slot, fixed_slot).replace(original_property, fixed_property))
+          PY
 
       - name: Format
         run: cargo fmt --all
