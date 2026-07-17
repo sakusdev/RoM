@@ -82,7 +82,7 @@ jobs:
           git apply -p2 /tmp/p0-p4.patch
           rm -f /tmp/comments.json /tmp/p0-p4.chunk* /tmp/p0-p4.patch.gz.b64 /tmp/p0-p4.patch.gz /tmp/p0-p4.patch
 
-      - name: Apply reviewed compile fixes
+      - name: Apply reviewed compile and lint fixes
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -108,6 +108,24 @@ jobs:
           if entity.count(original) != 1:
               raise SystemExit('expected restored entity fixture was not found exactly once')
           entity_path.write_text(entity.replace(original, replacement))
+
+          collections = [
+              (
+                  Path('crates/ferrum-world/src/block.rs'),
+                  '    pub fn len(&self) -> usize {\n        self.behaviors.len()\n    }\n',
+                  '    pub fn len(&self) -> usize {\n        self.behaviors.len()\n    }\n\n    pub fn is_empty(&self) -> bool {\n        self.behaviors.is_empty()\n    }\n',
+              ),
+              (
+                  Path('crates/ferrum-world/src/block_entity.rs'),
+                  '    pub fn len(&self) -> usize {\n        self.entities.len()\n    }\n',
+                  '    pub fn len(&self) -> usize {\n        self.entities.len()\n    }\n\n    pub fn is_empty(&self) -> bool {\n        self.entities.is_empty()\n    }\n',
+              ),
+          ]
+          for path, original, replacement in collections:
+              source = path.read_text()
+              if source.count(original) != 1:
+                  raise SystemExit(f'expected len method not found exactly once in {path}')
+              path.write_text(source.replace(original, replacement))
           PY
 
       - name: Format
