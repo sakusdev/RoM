@@ -19,11 +19,10 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
 
-      - name: Reconstruct validated source patch
+      - name: Fetch patch chunks
         env:
           GITHUB_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          PATCH_SHA256: 011e3f74846a937f37a462310a932f2efbf0b1beb39088e12706df7b9c2510dc
         run: |
           set -euo pipefail
           curl -fsSL \
@@ -49,13 +48,31 @@ jobs:
           missing = [number for number in range(1, 5) if number not in chunks]
           if missing:
               raise SystemExit(f'missing patch chunks: {missing}')
-          Path('/tmp/p0-p4.patch.gz.b64').write_text(''.join(chunks[number] for number in range(1, 5)))
+          for number in range(1, 5):
+              print(f'chunk {number}: {len(chunks[number])} bytes')
+          encoded = ''.join(chunks[number] for number in range(1, 5))
+          print(f'combined: {len(encoded)} bytes')
+          if len(encoded) != 36980:
+              raise SystemExit(f'combined patch transport length mismatch: {len(encoded)}')
+          Path('/tmp/p0-p4.patch.gz.b64').write_text(encoded)
           PY
-          base64 --decode /tmp/p0-p4.patch.gz.b64 | gzip --decompress > /tmp/p0-p4.patch
+
+      - name: Verify patch transport
+        env:
+          PATCH_SHA256: 011e3f74846a937f37a462310a932f2efbf0b1beb39088e12706df7b9c2510dc
+        run: |
+          set -euo pipefail
+          base64 --decode /tmp/p0-p4.patch.gz.b64 > /tmp/p0-p4.patch.gz
+          gzip --test /tmp/p0-p4.patch.gz
+          gzip --decompress --stdout /tmp/p0-p4.patch.gz > /tmp/p0-p4.patch
           echo "${PATCH_SHA256}  /tmp/p0-p4.patch" | sha256sum --check --strict
+
+      - name: Apply source patch
+        run: |
+          set -euo pipefail
           git apply --check -p2 /tmp/p0-p4.patch
           git apply -p2 /tmp/p0-p4.patch
-          rm -f /tmp/comments.json /tmp/p0-p4.patch.gz.b64 /tmp/p0-p4.patch
+          rm -f /tmp/comments.json /tmp/p0-p4.patch.gz.b64 /tmp/p0-p4.patch.gz /tmp/p0-p4.patch
 
       - name: Format
         run: cargo fmt --all
