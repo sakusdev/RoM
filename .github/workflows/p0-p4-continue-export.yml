@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 jobs:
-  export:
+  inspect:
     if: github.event.pull_request.head.ref == 'agent/p0-p4-gameplay-foundations'
     runs-on: ubuntu-latest
     steps:
@@ -17,15 +17,94 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
 
-      - name: Export source tree
+      - name: Download verified official server and mappings
         run: |
           set -euo pipefail
-          tar --exclude=.git --exclude=target -czf /tmp/rom-p0-p4-source.tar.gz .
+          mkdir -p /tmp/inspect /tmp/libs
+          python3 - <<'PY'
+          import hashlib, json, pathlib, urllib.request, zipfile
 
-      - name: Upload source tree
+          version = '26.1.2'
+          manifest_url = 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json'
+
+          def download(url):
+              with urllib.request.urlopen(url, timeout=60) as response:
+                  return response.read()
+
+          manifest = json.loads(download(manifest_url))
+          entry = next(item for item in manifest['versions'] if item['id'] == version)
+          version_bytes = download(entry['url'])
+          if hashlib.sha1(version_bytes).hexdigest() != entry['sha1']:
+              raise SystemExit('version metadata SHA-1 mismatch')
+          metadata = json.loads(version_bytes)
+
+          for key, output in [('server', '/tmp/server.jar'), ('server_mappings', '/tmp/server_mappings.txt')]:
+              artifact = metadata['downloads'][key]
+              data = download(artifact['url'])
+              if len(data) != artifact['size'] or hashlib.sha1(data).hexdigest() != artifact['sha1']:
+                  raise SystemExit(f'{key} integrity mismatch')
+              pathlib.Path(output).write_bytes(data)
+
+          with zipfile.ZipFile('/tmp/server.jar') as outer:
+              lines = outer.read('META-INF/versions.list').decode().splitlines()
+              candidates = []
+              for line in lines:
+                  fields = line.strip().split('\t')
+                  if len(fields) == 3:
+                      candidates.append(fields[2])
+              if len(candidates) != 1:
+                  raise SystemExit(f'expected one embedded game jar, found {candidates}')
+              pathlib.Path('/tmp/game.jar').write_bytes(outer.read(candidates[0]))
+              for name in outer.namelist():
+                  if name.startswith('META-INF/libraries/') and name.endswith('.jar'):
+                      target = pathlib.Path('/tmp/libs') / pathlib.Path(name).name
+                      target.write_bytes(outer.read(name))
+
+          mappings = pathlib.Path('/tmp/server_mappings.txt').read_text()
+          targets = [
+              'net.minecraft.world.entity.item.ItemEntity',
+              'net.minecraft.network.syncher.EntityDataAccessor',
+              'net.minecraft.network.syncher.EntityDataSerializers',
+              'net.minecraft.network.syncher.SynchedEntityData',
+              'net.minecraft.network.protocol.game.ClientboundSetEntityDataPacket',
+              'net.minecraft.network.protocol.game.ClientboundAddEntityPacket',
+          ]
+          lines = mappings.splitlines()
+          excerpts = []
+          class_map = {}
+          current = None
+          for line in lines:
+              if line and not line.startswith(' ') and line.endswith(':') and ' -> ' in line:
+                  original, obfuscated = line[:-1].split(' -> ', 1)
+                  current = original
+                  if original in targets:
+                      class_map[original] = obfuscated
+                      excerpts.append(line)
+                  continue
+              if current in targets and line.startswith('    '):
+                  excerpts.append(line)
+          pathlib.Path('/tmp/inspect/mapping-excerpts.txt').write_text('\n'.join(excerpts) + '\n')
+          pathlib.Path('/tmp/inspect/classes.json').write_text(json.dumps(class_map, indent=2, sort_keys=True))
+          PY
+
+      - name: Disassemble mapped classes
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' > /tmp/classes.list
+          import json
+          for value in json.load(open('/tmp/inspect/classes.json')).values():
+              print(value)
+          PY
+          while IFS= read -r class; do
+            safe=$(printf '%s' "$class" | tr './$' '___')
+            javap -p -c -s -classpath "/tmp/game.jar:/tmp/libs/*" "$class" > "/tmp/inspect/${safe}.javap.txt"
+          done < /tmp/classes.list
+          sha1sum /tmp/server.jar /tmp/server_mappings.txt > /tmp/inspect/source-sha1.txt
+
+      - name: Upload inspection
         uses: actions/upload-artifact@v4
         with:
-          name: rom-p0-p4-source
-          path: /tmp/rom-p0-p4-source.tar.gz
+          name: item-entity-official-inspection
+          path: /tmp/inspect
           if-no-files-found: error
           retention-days: 1
