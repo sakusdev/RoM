@@ -50,13 +50,18 @@ jobs:
           }, indent=2, sort_keys=True))
 
           with zipfile.ZipFile('/tmp/server.jar') as outer:
+              names = outer.namelist()
+              pathlib.Path('/tmp/inspect/server-bundle-entries.txt').write_text('\n'.join(names) + '\n')
               lines = outer.read('META-INF/versions.list').decode().splitlines()
               pathlib.Path('/tmp/inspect/versions.list').write_text('\n'.join(lines) + '\n')
               candidates = [fields[2] for line in lines if len((fields := line.strip().split('\t'))) == 3]
               if len(candidates) != 1:
                   raise SystemExit(f'expected one embedded game jar, found {candidates}')
-              pathlib.Path('/tmp/game.jar').write_bytes(outer.read(candidates[0]))
-              for name in outer.namelist():
+              game_entry = f'META-INF/versions/{candidates[0]}'
+              if game_entry not in names:
+                  raise SystemExit(f'embedded game jar is missing: {game_entry}')
+              pathlib.Path('/tmp/game.jar').write_bytes(outer.read(game_entry))
+              for name in names:
                   if name.startswith('META-INF/libraries/') and name.endswith('.jar'):
                       (pathlib.Path('/tmp/libs') / pathlib.Path(name).name).write_bytes(outer.read(name))
           PY
