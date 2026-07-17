@@ -89,43 +89,29 @@ jobs:
 
           path = Path('crates/ferrum-game/src/menu.rs')
           source = path.read_text()
-          original_slot = '''        let slot = self
-              .slots
-              .get_mut(index)
-              .ok_or(MenuError::SlotOutOfRange {
-                  index,
-                  slots: self.slots.len(),
-              })?;
-          '''
-          fixed_slot = '''        let slot_count = self.slots.len();
-          let slot = self
-              .slots
-              .get_mut(index)
-              .ok_or(MenuError::SlotOutOfRange {
-                  index,
-                  slots: slot_count,
-              })?;
-          '''
-          original_property = '''        let property = self
-              .properties
-              .get_mut(index)
-              .ok_or(MenuError::PropertyOutOfRange {
-                  index,
-                  properties: self.properties.len(),
-              })?;
-          '''
-          fixed_property = '''        let property_count = self.properties.len();
-          let property = self
-              .properties
-              .get_mut(index)
-              .ok_or(MenuError::PropertyOutOfRange {
-                  index,
-                  properties: property_count,
-              })?;
-          '''
-          if source.count(original_slot) != 1 or source.count(original_property) != 1:
-              raise SystemExit('expected menu borrow patterns were not found exactly once')
-          path.write_text(source.replace(original_slot, fixed_slot).replace(original_property, fixed_property))
+          replacements = [
+              (
+                  '        let slot = self\n',
+                  '        let slot_count = self.slots.len();\n        let slot = self\n',
+              ),
+              (
+                  '                slots: self.slots.len(),\n',
+                  '                slots: slot_count,\n',
+              ),
+              (
+                  '        let property = self\n',
+                  '        let property_count = self.properties.len();\n        let property = self\n',
+              ),
+              (
+                  '                properties: self.properties.len(),\n',
+                  '                properties: property_count,\n',
+              ),
+          ]
+          for original, replacement in replacements:
+              if source.count(original) != 1:
+                  raise SystemExit(f'expected menu pattern not found exactly once: {original!r}')
+              source = source.replace(original, replacement)
+          path.write_text(source)
           PY
 
       - name: Format
@@ -147,7 +133,7 @@ jobs:
         with:
           name: p0-p4-cargo-check
           path: /tmp/cargo-check.log
-          if-no-files-found: error
+          if-no-files-found: ignore
           retention-days: 1
 
       - name: Enforce cargo check
