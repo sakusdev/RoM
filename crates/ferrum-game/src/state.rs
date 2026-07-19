@@ -1306,9 +1306,7 @@ pub enum GameStateError {
         uuid: PlayerUuid,
         slot: EquipmentSlot,
     },
-    #[error(
-        "player {uuid:?} has {actual} equipped in {slot:?}, but {expected} was required"
-    )]
+    #[error("player {uuid:?} has {actual} equipped in {slot:?}, but {expected} was required")]
     UnexpectedEquippedItem {
         uuid: PlayerUuid,
         slot: EquipmentSlot,

@@ -5,8 +5,8 @@ use super::{
 use crate::codec::{PacketReader, build_packet, read_packet};
 use anyhow::{Context, Result, bail};
 use ferrum_game::{
-    CommandSource, EquipmentSlot, GameEvent, GameMode, ItemStack,
-    PlayerUuid as GamePlayerUuid, Transform, Velocity,
+    CommandSource, EquipmentSlot, GameEvent, GameMode, ItemStack, PlayerUuid as GamePlayerUuid,
+    Transform, Velocity,
 };
 use ferrum_play::{
     BlockPosition, InteractionHand, ItemProtocolRegistry, PlayerActionStatus, PlayerMovement,
@@ -1024,10 +1024,12 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
                                     })
                                     .map(|plan| {
                                         (
-                                            WorldEvent::BlockMutation(ferrum_world::BlockMutation {
-                                                position,
-                                                state: air,
-                                            }),
+                                            WorldEvent::BlockMutation(
+                                                ferrum_world::BlockMutation {
+                                                    position,
+                                                    state: air,
+                                                },
+                                            ),
                                             plan,
                                         )
                                     }),

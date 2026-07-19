@@ -10,9 +10,9 @@ use std::{
 };
 
 use ferrum_game::{
-    CommandError, CommandOutcome, CommandSource, ContainerClick, DamageSource, GameEvent,
-    EquipmentSlot, GameSnapshot, GameState, GameStateError, ItemStack, PersistenceError,
-    PlayerUuid, StatusEffectInstance, Transform, Velocity, execute_command,
+    CommandError, CommandOutcome, CommandSource, ContainerClick, DamageSource, EquipmentSlot,
+    GameEvent, GameSnapshot, GameState, GameStateError, ItemStack, PersistenceError, PlayerUuid,
+    StatusEffectInstance, Transform, Velocity, execute_command,
 };
 use thiserror::Error;
 
