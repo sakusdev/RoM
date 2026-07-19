@@ -1724,12 +1724,8 @@ fn validate_movement_collision(
     let Some(next) = movement_position(movement) else {
         return Ok(());
     };
-    let delta: [f64; 3] =
-        std::array::from_fn(|axis| next[axis] - player.position[axis]);
-    let distance = delta
-        .into_iter()
-        .map(f64::abs)
-        .fold(0.0_f64, f64::max);
+    let delta: [f64; 3] = std::array::from_fn(|axis| next[axis] - player.position[axis]);
+    let distance = delta.into_iter().map(f64::abs).fold(0.0_f64, f64::max);
     let steps = (distance / COLLISION_STEP).ceil().max(1.0) as usize;
     if steps > MAX_COLLISION_STEPS {
         bail!("player collision path exceeds {MAX_COLLISION_STEPS} bounded steps");
@@ -1742,10 +1738,7 @@ fn validate_movement_collision(
     Ok(())
 }
 
-fn validate_player_bounds_collision(
-    shared_world: &SharedWorld,
-    position: [f64; 3],
-) -> Result<()> {
+fn validate_player_bounds_collision(shared_world: &SharedWorld, position: [f64; 3]) -> Result<()> {
     let half_width = PLAYER_WIDTH / 2.0;
     let bounds = Aabb::new(
         [
@@ -1769,9 +1762,7 @@ fn validate_player_bounds_collision(
             for x in minimum[0]..=maximum[0] {
                 candidates = candidates.saturating_add(1);
                 if candidates > MAX_COLLISION_BLOCK_CANDIDATES {
-                    bail!(
-                        "player collision query exceeds {MAX_COLLISION_BLOCK_CANDIDATES} blocks"
-                    );
+                    bail!("player collision query exceeds {MAX_COLLISION_BLOCK_CANDIDATES} blocks");
                 }
                 let position = BlockPos { x, y, z };
                 let Some(state) = shared_world.interaction_block_state(position)? else {
@@ -1779,17 +1770,15 @@ fn validate_player_bounds_collision(
                 };
                 let intersects = shared_world.block_behavior(state).map_or_else(
                     || {
-                        state
-                            != BlockStateId::new(shared_world.world_profile().block_states.air)
+                        state != BlockStateId::new(shared_world.world_profile().block_states.air)
                             && Aabb::unit_cube()
                                 .translated([f64::from(x), f64::from(y), f64::from(z)])
                                 .intersects(bounds)
                     },
                     |behavior| {
-                        behavior.collision.intersects(
-                            bounds,
-                            [f64::from(x), f64::from(y), f64::from(z)],
-                        )
+                        behavior
+                            .collision
+                            .intersects(bounds, [f64::from(x), f64::from(y), f64::from(z)])
                     },
                 );
                 if intersects {
@@ -1860,10 +1849,8 @@ fn is_block_interaction_visible(
     }
     let direction = normalized_direction(eye, target)?;
     let max_distance = distance + COLLISION_EPSILON;
-    let minimum: [i32; 3] =
-        std::array::from_fn(|axis| eye[axis].min(target[axis]).floor() as i32);
-    let maximum: [i32; 3] =
-        std::array::from_fn(|axis| eye[axis].max(target[axis]).floor() as i32);
+    let minimum: [i32; 3] = std::array::from_fn(|axis| eye[axis].min(target[axis]).floor() as i32);
+    let maximum: [i32; 3] = std::array::from_fn(|axis| eye[axis].max(target[axis]).floor() as i32);
     let mut candidates = 0_usize;
     let mut nearest: Option<(f64, BlockPos)> = None;
     for y in minimum[1]..=maximum[1] {
@@ -1882,12 +1869,13 @@ fn is_block_interaction_visible(
                     behavior
                         .collision
                         .raycast(eye, direction, max_distance, offset)?
-                } else if state
-                    != BlockStateId::new(shared_world.world_profile().block_states.air)
+                } else if state != BlockStateId::new(shared_world.world_profile().block_states.air)
                 {
-                    Aabb::unit_cube()
-                        .translated(offset)
-                        .ray_intersection(eye, direction, max_distance)?
+                    Aabb::unit_cube().translated(offset).ray_intersection(
+                        eye,
+                        direction,
+                        max_distance,
+                    )?
                 } else {
                     None
                 };
