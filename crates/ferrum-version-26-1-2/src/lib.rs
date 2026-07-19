@@ -102,8 +102,13 @@ pub fn protocol_profile() -> Result<ProtocolProfile, ProfileError> {
         (PacketKind::RemoveEntities, 0x4d),
         (PacketKind::SetEntityData, 0x63),
         (PacketKind::TakeItemEntity, 0x7c),
+        (PacketKind::SetEntityMotion, 0x65),
+        (PacketKind::DamageEvent, 0x19),
         (PacketKind::SetHealth, 0x68),
         (PacketKind::HurtAnimation, 0x2a),
+        (PacketKind::UpdateAttributes, 0x83),
+        (PacketKind::UpdateMobEffect, 0x84),
+        (PacketKind::RemoveMobEffect, 0x4e),
         (PacketKind::PlayerCombatKill, 0x44),
         (PacketKind::Respawn, 0x52),
         (PacketKind::AcceptTeleportation, 0x00),
@@ -210,6 +215,11 @@ mod tests {
         assert_eq!(packets.require(PacketKind::RemoveEntities).unwrap(), 0x4d);
         assert_eq!(packets.require(PacketKind::SetEntityData).unwrap(), 0x63);
         assert_eq!(packets.require(PacketKind::TakeItemEntity).unwrap(), 0x7c);
+        assert_eq!(packets.require(PacketKind::SetEntityMotion).unwrap(), 0x65);
+        assert_eq!(packets.require(PacketKind::DamageEvent).unwrap(), 0x19);
+        assert_eq!(packets.require(PacketKind::UpdateAttributes).unwrap(), 0x83);
+        assert_eq!(packets.require(PacketKind::UpdateMobEffect).unwrap(), 0x84);
+        assert_eq!(packets.require(PacketKind::RemoveMobEffect).unwrap(), 0x4e);
         assert_eq!(
             packets
                 .require(PacketKind::SelectKnownPacksRequest)

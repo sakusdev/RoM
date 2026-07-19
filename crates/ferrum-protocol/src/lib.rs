@@ -105,8 +105,13 @@ pub enum PacketKind {
     SetEntityData,
     TakeItemEntity,
     SetEquipment,
+    SetEntityMotion,
+    DamageEvent,
     SetHealth,
     HurtAnimation,
+    UpdateAttributes,
+    UpdateMobEffect,
+    RemoveMobEffect,
     PlayerCombatKill,
     Respawn,
     PlayerInfoUpdate,
@@ -177,8 +182,13 @@ impl PacketKind {
         Self::SetEntityData,
         Self::TakeItemEntity,
         Self::SetEquipment,
+        Self::SetEntityMotion,
+        Self::DamageEvent,
         Self::SetHealth,
         Self::HurtAnimation,
+        Self::UpdateAttributes,
+        Self::UpdateMobEffect,
+        Self::RemoveMobEffect,
         Self::PlayerCombatKill,
         Self::Respawn,
         Self::PlayerInfoUpdate,
@@ -296,8 +306,13 @@ impl PacketKind {
             | Self::SetEntityData
             | Self::TakeItemEntity
             | Self::SetEquipment
+            | Self::SetEntityMotion
+            | Self::DamageEvent
             | Self::SetHealth
             | Self::HurtAnimation
+            | Self::UpdateAttributes
+            | Self::UpdateMobEffect
+            | Self::RemoveMobEffect
             | Self::PlayerCombatKill
             | Self::Respawn
             | Self::PlayerInfoUpdate

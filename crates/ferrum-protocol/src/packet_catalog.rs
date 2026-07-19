@@ -387,11 +387,26 @@ pub fn known_packet_kind(
         (ProtocolPhase::Play, PacketDirection::Clientbound, "set_equipment") => {
             Some(PacketKind::SetEquipment)
         }
+        (ProtocolPhase::Play, PacketDirection::Clientbound, "set_entity_motion") => {
+            Some(PacketKind::SetEntityMotion)
+        }
+        (ProtocolPhase::Play, PacketDirection::Clientbound, "damage_event") => {
+            Some(PacketKind::DamageEvent)
+        }
         (ProtocolPhase::Play, PacketDirection::Clientbound, "set_health") => {
             Some(PacketKind::SetHealth)
         }
         (ProtocolPhase::Play, PacketDirection::Clientbound, "hurt_animation") => {
             Some(PacketKind::HurtAnimation)
+        }
+        (ProtocolPhase::Play, PacketDirection::Clientbound, "update_attributes") => {
+            Some(PacketKind::UpdateAttributes)
+        }
+        (ProtocolPhase::Play, PacketDirection::Clientbound, "update_mob_effect") => {
+            Some(PacketKind::UpdateMobEffect)
+        }
+        (ProtocolPhase::Play, PacketDirection::Clientbound, "remove_mob_effect") => {
+            Some(PacketKind::RemoveMobEffect)
         }
         (ProtocolPhase::Play, PacketDirection::Clientbound, "player_combat_kill") => {
             Some(PacketKind::PlayerCombatKill)
@@ -472,8 +487,13 @@ pub const fn canonical_packet_name(kind: PacketKind) -> &'static str {
         PacketKind::SetEntityData => "minecraft:set_entity_data",
         PacketKind::TakeItemEntity => "minecraft:take_item_entity",
         PacketKind::SetEquipment => "minecraft:set_equipment",
+        PacketKind::SetEntityMotion => "minecraft:set_entity_motion",
+        PacketKind::DamageEvent => "minecraft:damage_event",
         PacketKind::SetHealth => "minecraft:set_health",
         PacketKind::HurtAnimation => "minecraft:hurt_animation",
+        PacketKind::UpdateAttributes => "minecraft:update_attributes",
+        PacketKind::UpdateMobEffect => "minecraft:update_mob_effect",
+        PacketKind::RemoveMobEffect => "minecraft:remove_mob_effect",
         PacketKind::PlayerCombatKill => "minecraft:player_combat_kill",
         PacketKind::Respawn => "minecraft:respawn",
         PacketKind::PlayerInfoUpdate => "minecraft:player_info_update",

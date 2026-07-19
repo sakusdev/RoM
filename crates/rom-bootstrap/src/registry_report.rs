@@ -1,7 +1,10 @@
 use std::{collections::BTreeSet, fs, path::Path};
 
 use anyhow::{Context, Result, bail};
-use ferrum_rompack::{RomPackDataComponent, RomPackEntityType, RomPackItem};
+use ferrum_rompack::{
+    RomPackDataComponent, RomPackEntityType, RomPackItem, RomPackProtocolEntry,
+    RomPackProtocolRegistry,
+};
 use serde_json::Value;
 
 const MAX_REGISTRY_REPORT_BYTES: u64 = 64 * 1024 * 1024;
@@ -11,6 +14,7 @@ pub struct RegistryProtocolReport {
     pub items: Vec<RomPackItem>,
     pub entity_types: Vec<RomPackEntityType>,
     pub data_components: Vec<RomPackDataComponent>,
+    pub protocol_registries: Vec<RomPackProtocolRegistry>,
 }
 
 pub fn read_registry_protocol_report(path: &Path) -> Result<RegistryProtocolReport> {
@@ -63,10 +67,12 @@ pub fn parse_registry_protocol_report(bytes: &[u8]) -> Result<RegistryProtocolRe
             protocol_id,
         })
         .collect();
+    let protocol_registries = parse_protocol_registries(&root)?;
     Ok(RegistryProtocolReport {
         items,
         entity_types,
         data_components,
+        protocol_registries,
     })
 }
 
@@ -108,6 +114,25 @@ fn parse_registry(root: &Value, registry_id: &str) -> Result<Vec<(String, i32)>>
     Ok(values)
 }
 
+fn parse_protocol_registries(root: &Value) -> Result<Vec<RomPackProtocolRegistry>> {
+    let registries = root
+        .as_object()
+        .context("registry report root must be an object")?;
+    let mut result = Vec::with_capacity(registries.len());
+    for registry_id in registries.keys() {
+        let entries = parse_registry(root, registry_id)?
+            .into_iter()
+            .map(|(id, protocol_id)| RomPackProtocolEntry { id, protocol_id })
+            .collect();
+        result.push(RomPackProtocolRegistry {
+            id: registry_id.clone(),
+            entries,
+        });
+    }
+    result.sort_by(|left, right| left.id.cmp(&right.id));
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,6 +167,12 @@ mod tests {
         assert_eq!(report.entity_types[1].protocol_id, 147);
         assert_eq!(report.data_components[0].component, "minecraft:custom_name");
         assert_eq!(report.data_components[1].protocol_id, 3);
+        assert_eq!(report.protocol_registries.len(), 3);
+        assert_eq!(
+            report.protocol_registries[2].id,
+            "minecraft:item"
+        );
+        assert_eq!(report.protocol_registries[2].entries[0].protocol_id, 0);
     }
 
     #[test]

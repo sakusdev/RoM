@@ -5,6 +5,7 @@
 mod block_interaction;
 mod chunk_stream;
 mod entity;
+mod entity_sync;
 mod health;
 mod inventory;
 mod movement;
@@ -21,6 +22,11 @@ pub use entity::{
     encode_empty_entity_data, encode_entity_movement, encode_item_entity_data,
     encode_player_info_remove, encode_player_info_update, encode_remove_entities,
     encode_rotate_head, encode_take_item_entity, encode_teleport_entity,
+};
+pub use entity_sync::{
+    EntitySyncEncodeError, ProtocolIdRegistry, encode_damage_event,
+    encode_remove_mob_effect, encode_set_entity_motion, encode_update_attribute,
+    encode_update_attributes, encode_update_mob_effect,
 };
 pub use health::{HealthEncodeError, encode_set_health};
 pub use inventory::{

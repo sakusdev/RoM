@@ -8,18 +8,21 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use ferrum_game::{
-    Entity, EntityId, EntityPayload, EntityUuid, EquipmentSlot, GameEvent, GameMode, GameState,
-    ItemStack, PLAYER_INVENTORY_SLOTS, PlayerState, PlayerUuid, Transform, Velocity, Vitals,
+    AttributeSet, Entity, EntityId, EntityPayload, EntityUuid, EquipmentSlot, GameEvent, GameMode,
+    GameState, ItemStack, PLAYER_INVENTORY_SLOTS, PlayerState, PlayerUuid, StatusEffectSet,
+    Transform, Velocity, Vitals,
 };
 use ferrum_play::{
     CommonPlayerSpawnInfo, DataComponentProtocolRegistry, EncodedEntityMovement,
     EntityMovementKind, EntityProtocolRegistry, EquipmentEntry, ItemEntityMetadataProtocol,
     ItemProtocolRegistry, PlayerInfoEntry, Respawn, RespawnDataToKeep, encode_add_entity,
-    encode_add_entity_with_uuid, encode_empty_entity_data, encode_entity_movement,
-    encode_hurt_animation, encode_item_entity_data, encode_player_combat_kill,
-    encode_player_info_remove, encode_player_info_update, encode_remove_entities, encode_respawn,
-    encode_rotate_head, encode_set_equipment, encode_set_health, encode_take_item_entity,
-    encode_teleport_entity,
+    ProtocolIdRegistry, encode_add_entity_with_uuid, encode_damage_event,
+    encode_empty_entity_data, encode_entity_movement, encode_hurt_animation,
+    encode_item_entity_data, encode_player_combat_kill, encode_player_info_remove,
+    encode_player_info_update, encode_remove_entities, encode_remove_mob_effect, encode_respawn,
+    encode_rotate_head, encode_set_entity_motion, encode_set_equipment, encode_set_health,
+    encode_take_item_entity, encode_teleport_entity, encode_update_attribute,
+    encode_update_attributes, encode_update_mob_effect,
 };
 use ferrum_protocol::PacketKind;
 use ferrum_rompack::RomPackWorld;
@@ -44,6 +47,9 @@ pub struct GameReplicationConfig {
     pub entity_protocol_ids: EntityProtocolRegistry,
     pub item_protocol_ids: ItemProtocolRegistry,
     pub data_component_protocol_ids: DataComponentProtocolRegistry,
+    pub attribute_protocol_ids: ProtocolIdRegistry,
+    pub mob_effect_protocol_ids: ProtocolIdRegistry,
+    pub damage_type_protocol_ids: ProtocolIdRegistry,
     pub item_entity_metadata: Option<ItemEntityMetadataProtocol>,
     pub world: Option<RomPackWorld>,
 }
@@ -59,6 +65,9 @@ impl Default for GameReplicationConfig {
             entity_protocol_ids: EntityProtocolRegistry::default(),
             item_protocol_ids: ItemProtocolRegistry::default(),
             data_component_protocol_ids: DataComponentProtocolRegistry::default(),
+            attribute_protocol_ids: ProtocolIdRegistry::default(),
+            mob_effect_protocol_ids: ProtocolIdRegistry::default(),
+            damage_type_protocol_ids: ProtocolIdRegistry::default(),
             item_entity_metadata: None,
             world: None,
         }
@@ -89,6 +98,8 @@ struct PlayerEntitySnapshot {
     velocity: Velocity,
     equipment: Vec<EquipmentEntry>,
     selected_hotbar: u8,
+    attributes: AttributeSet,
+    status_effects: StatusEffectSet,
 }
 
 #[derive(Debug, Clone)]
@@ -454,6 +465,7 @@ fn process_commands(
                     if let Some((vitals, snapshot)) = self_state {
                         queue_set_health(connection, vitals, exit)?;
                         queue_player_info_update(connection, &snapshot, exit)?;
+                        queue_player_state_sync(connection, &snapshot, config, exit)?;
                         connection.self_initialized = true;
                     }
                     if entity_replication_enabled(&config.entity_protocol_ids) {
@@ -566,6 +578,7 @@ fn dispatch_event(
                 }
                 if let Some(snapshot) = snapshot.as_ref() {
                     queue_player_info_update(connection, snapshot, exit)?;
+                    queue_player_state_sync(connection, snapshot, config, exit)?;
                 }
                 connection.self_initialized = true;
             }
@@ -787,12 +800,30 @@ fn dispatch_event(
             );
         }
         GameEvent::PlayerDamaged {
-            uuid, entity_id, ..
+            uuid,
+            entity_id,
+            source,
+            ..
         } => {
+            let damage_payload = encode_damage_event(
+                entity_id,
+                source,
+                &config.damage_type_protocol_ids,
+            )
+            .context("cannot encode player damage source")?;
             let payload = encode_hurt_animation(entity_id, 0.0)
                 .context("cannot encode player hurt animation")?;
             for (target, connection) in connections.iter_mut() {
                 if *target == uuid || connection.entities.contains_key(&uuid) {
+                    if let Some(payload) = damage_payload.clone() {
+                        connection.queue(
+                            PlayOutput::ProtocolPacket {
+                                kind: PacketKind::DamageEvent,
+                                payload,
+                            },
+                            exit,
+                        );
+                    }
                     connection.queue(
                         PlayOutput::ProtocolPacket {
                             kind: PacketKind::HurtAnimation,
@@ -800,6 +831,110 @@ fn dispatch_event(
                         },
                         exit,
                     );
+                }
+            }
+        }
+        GameEvent::PlayerVelocityChanged {
+            uuid,
+            entity_id,
+            velocity,
+        } => {
+            let payload = encode_set_entity_motion(entity_id, velocity)
+                .context("cannot encode player entity motion")?;
+            for (target, connection) in connections.iter_mut() {
+                if *target == uuid || connection.entities.contains_key(&uuid) {
+                    connection.queue(
+                        PlayOutput::ProtocolPacket {
+                            kind: PacketKind::SetEntityMotion,
+                            payload: payload.clone(),
+                        },
+                        exit,
+                    );
+                    if let Some(tracked) = connection.entities.get_mut(&uuid) {
+                        tracked.velocity = velocity;
+                    }
+                }
+            }
+        }
+        GameEvent::PlayerAttributeChanged {
+            uuid, attribute, ..
+        } => {
+            let Some(snapshot) = player_snapshot(runtime, uuid)? else {
+                return Ok(());
+            };
+            let instance = snapshot.attributes.get(&attribute).with_context(|| {
+                format!("attribute update references missing attribute {attribute}")
+            })?;
+            let payload = encode_update_attribute(
+                snapshot.entity_id,
+                &attribute,
+                instance,
+                &config.attribute_protocol_ids,
+            )
+            .context("cannot encode player attribute update")?;
+            if let Some(payload) = payload {
+                for (target, connection) in connections.iter_mut() {
+                    if *target == uuid || connection.entities.contains_key(&uuid) {
+                        connection.queue(
+                            PlayOutput::ProtocolPacket {
+                                kind: PacketKind::UpdateAttributes,
+                                payload: payload.clone(),
+                            },
+                            exit,
+                        );
+                        if let Some(tracked) = connection.entities.get_mut(&uuid)
+                            && let Some(tracked_instance) =
+                                tracked.attributes.get_mut(&attribute)
+                        {
+                            *tracked_instance = instance.clone();
+                        }
+                    }
+                }
+            }
+        }
+        GameEvent::PlayerStatusEffectChanged {
+            uuid,
+            effect,
+            active,
+        } => {
+            let Some(snapshot) = player_snapshot(runtime, uuid)? else {
+                return Ok(());
+            };
+            let (kind, payload) = if active {
+                let instance = snapshot.status_effects.get(&effect).with_context(|| {
+                    format!("active status-effect update is missing effect {effect}")
+                })?;
+                (
+                    PacketKind::UpdateMobEffect,
+                    encode_update_mob_effect(
+                        snapshot.entity_id,
+                        instance,
+                        &config.mob_effect_protocol_ids,
+                    )
+                    .context("cannot encode player status-effect update")?,
+                )
+            } else {
+                (
+                    PacketKind::RemoveMobEffect,
+                    encode_remove_mob_effect(
+                        snapshot.entity_id,
+                        &effect,
+                        &config.mob_effect_protocol_ids,
+                    )
+                    .context("cannot encode player status-effect removal")?,
+                )
+            };
+            if let Some(payload) = payload {
+                for (target, connection) in connections.iter_mut() {
+                    if *target == uuid || connection.entities.contains_key(&uuid) {
+                        connection.queue(
+                            PlayOutput::ProtocolPacket {
+                                kind,
+                                payload: payload.clone(),
+                            },
+                            exit,
+                        );
+                    }
                 }
             }
         }
@@ -931,10 +1066,7 @@ fn dispatch_event(
                 }
             }
         }
-        GameEvent::PlayerVelocityChanged { .. }
-        | GameEvent::PlayerAttributeChanged { .. }
-        | GameEvent::PlayerStatusEffectChanged { .. }
-        | GameEvent::TimeChanged { .. }
+        GameEvent::TimeChanged { .. }
         | GameEvent::SaveRequested
         | GameEvent::ShutdownRequested => {}
     }
@@ -1202,6 +1334,8 @@ fn player_snapshot_from_state(
         velocity: entity.velocity,
         equipment: player_equipment(player),
         selected_hotbar: player.inventory.selected_hotbar(),
+        attributes: player.attributes.clone(),
+        status_effects: player.status_effects.clone(),
     }))
 }
 
@@ -1288,6 +1422,7 @@ fn queue_player_spawn(
         },
         exit,
     );
+    queue_player_state_sync(connection, &snapshot, config, exit)?;
     if connection.healthy {
         connection.entities.insert(snapshot.uuid, snapshot);
     }
@@ -1501,6 +1636,47 @@ fn queue_set_health(
     Ok(())
 }
 
+fn queue_player_state_sync(
+    connection: &mut ReplicationConnection,
+    snapshot: &PlayerEntitySnapshot,
+    config: &GameReplicationConfig,
+    exit: &mut GameReplicationExit,
+) -> Result<()> {
+    if let Some(payload) = encode_update_attributes(
+        snapshot.entity_id,
+        &snapshot.attributes,
+        &config.attribute_protocol_ids,
+    )
+    .context("cannot encode player attribute snapshot")?
+    {
+        connection.queue(
+            PlayOutput::ProtocolPacket {
+                kind: PacketKind::UpdateAttributes,
+                payload,
+            },
+            exit,
+        );
+    }
+    for effect in snapshot.status_effects.iter().map(|(_, effect)| effect) {
+        if let Some(payload) = encode_update_mob_effect(
+            snapshot.entity_id,
+            effect,
+            &config.mob_effect_protocol_ids,
+        )
+        .context("cannot encode player status-effect snapshot")?
+        {
+            connection.queue(
+                PlayOutput::ProtocolPacket {
+                    kind: PacketKind::UpdateMobEffect,
+                    payload,
+                },
+                exit,
+            );
+        }
+    }
+    Ok(())
+}
+
 fn target_chat(
     connections: &mut BTreeMap<PlayerUuid, ReplicationConnection>,
     uuid: PlayerUuid,
@@ -1552,7 +1728,8 @@ mod tests {
     use super::*;
     use crate::play_connection::register_play_connection;
     use ferrum_game::{
-        CommandSource, HOTBAR_END, HOTBAR_START, ItemStack, MAIN_INVENTORY_START, Transform,
+        CommandSource, DamageKind, DamageSource, HOTBAR_END, HOTBAR_START, ItemStack,
+        MAIN_INVENTORY_START, StatusEffectId, StatusEffectInstance, Transform,
     };
     use ferrum_runtime::{BoundedInputQueue, ConnectionId, worker_channel};
 
@@ -1598,6 +1775,30 @@ mod tests {
             }),
             ..GameReplicationConfig::default()
         }
+    }
+
+    fn player_state_sync_config() -> GameReplicationConfig {
+        let mut config = entity_config();
+        config.attribute_protocol_ids = ProtocolIdRegistry::new([
+            ("minecraft:armor", 0),
+            ("minecraft:armor_toughness", 1),
+            ("minecraft:attack_damage", 2),
+            ("minecraft:attack_speed", 4),
+            ("minecraft:block_interaction_range", 6),
+            ("minecraft:entity_interaction_range", 10),
+            ("minecraft:gravity", 14),
+            ("minecraft:knockback_resistance", 16),
+            ("minecraft:max_health", 19),
+            ("minecraft:movement_speed", 22),
+            ("minecraft:safe_fall_distance", 24),
+            ("minecraft:step_height", 28),
+        ])
+        .unwrap();
+        config.mob_effect_protocol_ids =
+            ProtocolIdRegistry::new([("minecraft:haste", 2)]).unwrap();
+        config.damage_type_protocol_ids =
+            ProtocolIdRegistry::new([("minecraft:player_attack", 34)]).unwrap();
+        config
     }
 
     fn ingest(
@@ -2339,6 +2540,134 @@ mod tests {
                 ..
             }
         ));
+        service.shutdown().unwrap();
+    }
+
+    #[test]
+    fn replicates_attributes_effects_damage_sources_and_velocity_to_watchers() {
+        let game = SharedGameRuntime::vanilla_overworld();
+        let service = spawn_game_replication(&game, player_state_sync_config()).unwrap();
+        let steve = PlayerUuid::new(451);
+        let observer = PlayerUuid::new(452);
+        let (connector, mut workers) = worker_channel(NonZeroUsize::new(256).unwrap());
+        let (steve_reader, steve_writer) = register_play_connection(
+            &connector,
+            ConnectionId::new(451),
+            NonZeroUsize::new(128).unwrap(),
+        )
+        .unwrap();
+        let (observer_reader, observer_writer) = register_play_connection(
+            &connector,
+            ConnectionId::new(452),
+            NonZeroUsize::new(128).unwrap(),
+        )
+        .unwrap();
+        let mut inputs = BoundedInputQueue::try_new(256).unwrap();
+        ingest(&mut workers, &mut inputs);
+
+        service.control().register(steve, steve_reader).unwrap();
+        service.control().activate(steve).unwrap();
+        game.connect_player(steve, "Steve", spawn()).unwrap();
+        let initial_attributes = recv_protocol_until(
+            &steve_writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::UpdateAttributes,
+        );
+        let (steve_entity_id, entity_id_bytes) = read_varint(&initial_attributes);
+        assert_eq!(read_varint(&initial_attributes[entity_id_bytes..]).0, 12);
+
+        service
+            .control()
+            .register(observer, observer_reader)
+            .unwrap();
+        service.control().activate(observer).unwrap();
+        let observer_snapshot = recv_protocol_until(
+            &observer_writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::UpdateAttributes,
+        );
+        assert_eq!(read_varint(&observer_snapshot).0, steve_entity_id);
+
+        game.set_player_attribute_base(steve, "minecraft:movement_speed", 0.2)
+            .unwrap();
+        for writer in [&steve_writer, &observer_writer] {
+            let payload = recv_protocol_until(
+                writer,
+                &mut workers,
+                &mut inputs,
+                PacketKind::UpdateAttributes,
+            );
+            let (entity_id, entity_id_bytes) = read_varint(&payload);
+            let (count, count_bytes) = read_varint(&payload[entity_id_bytes..]);
+            assert_eq!(entity_id, steve_entity_id);
+            assert_eq!(count, 1);
+            assert_eq!(read_varint(&payload[entity_id_bytes + count_bytes..]).0, 22);
+        }
+
+        game.add_status_effect(
+            steve,
+            StatusEffectInstance::new(StatusEffectId::new("minecraft:haste").unwrap(), 1, 200)
+                .unwrap(),
+        )
+        .unwrap();
+        for writer in [&steve_writer, &observer_writer] {
+            let payload = recv_protocol_until(
+                writer,
+                &mut workers,
+                &mut inputs,
+                PacketKind::UpdateMobEffect,
+            );
+            let (entity_id, entity_id_bytes) = read_varint(&payload);
+            assert_eq!(entity_id, steve_entity_id);
+            assert_eq!(read_varint(&payload[entity_id_bytes..]).0, 2);
+        }
+
+        game.apply_knockback(steve, [1.0, 0.0], 0.4).unwrap();
+        for writer in [&steve_writer, &observer_writer] {
+            let payload = recv_protocol_until(
+                writer,
+                &mut workers,
+                &mut inputs,
+                PacketKind::SetEntityMotion,
+            );
+            assert_eq!(read_varint(&payload).0, steve_entity_id);
+        }
+
+        let source = DamageSource {
+            kind: DamageKind::PlayerAttack,
+            attacker: None,
+            direct_entity: None,
+            bypasses_armor: false,
+            bypasses_invulnerability: false,
+        };
+        game.damage_player_with_source(steve, 1.0, source).unwrap();
+        for writer in [&steve_writer, &observer_writer] {
+            let payload = recv_protocol_until(
+                writer,
+                &mut workers,
+                &mut inputs,
+                PacketKind::DamageEvent,
+            );
+            let (entity_id, entity_id_bytes) = read_varint(&payload);
+            assert_eq!(entity_id, steve_entity_id);
+            assert_eq!(read_varint(&payload[entity_id_bytes..]).0, 34);
+        }
+
+        game.remove_status_effect(steve, "minecraft:haste")
+            .unwrap();
+        for writer in [&steve_writer, &observer_writer] {
+            let payload = recv_protocol_until(
+                writer,
+                &mut workers,
+                &mut inputs,
+                PacketKind::RemoveMobEffect,
+            );
+            let (entity_id, entity_id_bytes) = read_varint(&payload);
+            assert_eq!(entity_id, steve_entity_id);
+            assert_eq!(read_varint(&payload[entity_id_bytes..]).0, 2);
+        }
         service.shutdown().unwrap();
     }
 
