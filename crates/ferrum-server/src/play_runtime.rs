@@ -29,9 +29,9 @@ use ferrum_server::{
     play_input::decode_play_input,
 };
 use ferrum_world::{
-    AppliedWorldEvent, BiomeId, BlockBehavior, BlockBehaviorRegistry, BlockDrop, BlockPos,
+    Aabb, AppliedWorldEvent, BiomeId, BlockBehavior, BlockBehaviorRegistry, BlockDrop, BlockPos,
     BlockStateId, ChunkPos, ChunkStore, ChunkView, ChunkViewDelta, FlatWorldSpec, StaticChunk,
-    ToolKind, ToolProfile, ToolTier, VoxelShape, WorldError, WorldEvent,
+    ToolKind, ToolProfile, ToolTier, VoxelShape, WorldError, WorldEvent, normalized_direction,
 };
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -50,6 +50,13 @@ const MAX_WORLD_UPDATES_PER_DRAIN: usize = 64;
 const MAX_PLAYER_MOVE_DELTA: f64 = 100.0;
 const MAX_PLAYER_MOVE_DELTA_SQUARED: f64 = MAX_PLAYER_MOVE_DELTA * MAX_PLAYER_MOVE_DELTA;
 const PLAYER_EYE_HEIGHT: f64 = 1.62;
+const PLAYER_WIDTH: f64 = 0.6;
+const PLAYER_HEIGHT: f64 = 1.8;
+const COLLISION_EPSILON: f64 = 1.0e-7;
+const COLLISION_STEP: f64 = 0.25;
+const MAX_COLLISION_STEPS: usize = 128;
+const MAX_COLLISION_BLOCK_CANDIDATES: usize = 64;
+const MAX_RAYCAST_BLOCK_CANDIDATES: usize = 4_096;
 const MAX_BLOCK_INTERACTION_REACH: f64 = 6.0;
 const MAX_BLOCK_INTERACTION_REACH_SQUARED: f64 =
     MAX_BLOCK_INTERACTION_REACH * MAX_BLOCK_INTERACTION_REACH;
@@ -1105,6 +1112,7 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
                             }
                             validate_movement_delta(&player, movement)?;
                             validate_movement_floor(movement, world_profile.floor_y)?;
+                            validate_movement_collision(shared_world, &player, movement)?;
                             let previous_chunk = player.chunk_pos();
                             player.apply(movement);
                             if let Some(gameplay) = gameplay {
@@ -1207,6 +1215,11 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
                 Some(PacketKind::PlayerAction) => {
                     let action = decode_player_action(packet_reader.take_remaining())?;
                     let sequence = action.sequence;
+                    let block_interaction_allowed = if gameplay.is_some() {
+                        is_block_interaction_visible(shared_world, &player, action.position)?
+                    } else {
+                        is_block_interaction_within_reach(&player, action.position)
+                    };
                     let planned = match action.status {
                         PlayerActionStatus::DropAllItems => {
                             active_block_break = None;
@@ -1233,7 +1246,7 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
                         PlayerActionStatus::StartDestroyBlock
                         | PlayerActionStatus::AbortDestroyBlock
                         | PlayerActionStatus::StopDestroyBlock
-                            if is_block_interaction_within_reach(&player, action.position) =>
+                            if block_interaction_allowed =>
                         {
                             if let Some(gameplay) = gameplay {
                                 plan_live_block_break(
@@ -1284,7 +1297,12 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
                 Some(PacketKind::UseItemOn) => {
                     let interaction = decode_use_item_on_block(packet_reader.take_remaining())?;
                     let sequence = interaction.sequence;
-                    if is_block_interaction_within_reach(&player, interaction.position) {
+                    let block_interaction_allowed = if gameplay.is_some() {
+                        is_block_interaction_visible(shared_world, &player, interaction.position)?
+                    } else {
+                        is_block_interaction_within_reach(&player, interaction.position)
+                    };
+                    if block_interaction_allowed {
                         let placement = match gameplay {
                             Some(gameplay) => {
                                 gameplay.placement_plan(interaction.hand, shared_world)?
@@ -1698,6 +1716,91 @@ fn validate_movement_floor(movement: PlayerMovement, floor_y: i32) -> Result<()>
     Ok(())
 }
 
+fn validate_movement_collision(
+    shared_world: &SharedWorld,
+    player: &PlayerState,
+    movement: PlayerMovement,
+) -> Result<()> {
+    let Some(next) = movement_position(movement) else {
+        return Ok(());
+    };
+    let delta: [f64; 3] =
+        std::array::from_fn(|axis| next[axis] - player.position[axis]);
+    let distance = delta
+        .into_iter()
+        .map(f64::abs)
+        .fold(0.0_f64, f64::max);
+    let steps = (distance / COLLISION_STEP).ceil().max(1.0) as usize;
+    if steps > MAX_COLLISION_STEPS {
+        bail!("player collision path exceeds {MAX_COLLISION_STEPS} bounded steps");
+    }
+    for step in 1..=steps {
+        let progress = step as f64 / steps as f64;
+        let position = std::array::from_fn(|axis| player.position[axis] + delta[axis] * progress);
+        validate_player_bounds_collision(shared_world, position)?;
+    }
+    Ok(())
+}
+
+fn validate_player_bounds_collision(
+    shared_world: &SharedWorld,
+    position: [f64; 3],
+) -> Result<()> {
+    let half_width = PLAYER_WIDTH / 2.0;
+    let bounds = Aabb::new(
+        [
+            position[0] - half_width,
+            position[1],
+            position[2] - half_width,
+        ],
+        [
+            position[0] + half_width,
+            position[1] + PLAYER_HEIGHT,
+            position[2] + half_width,
+        ],
+    )?;
+    let minimum = bounds.min.map(|value| value.floor() as i32);
+    let maximum = bounds
+        .max
+        .map(|value| (value - COLLISION_EPSILON).floor() as i32);
+    let mut candidates = 0_usize;
+    for y in minimum[1]..=maximum[1] {
+        for z in minimum[2]..=maximum[2] {
+            for x in minimum[0]..=maximum[0] {
+                candidates = candidates.saturating_add(1);
+                if candidates > MAX_COLLISION_BLOCK_CANDIDATES {
+                    bail!(
+                        "player collision query exceeds {MAX_COLLISION_BLOCK_CANDIDATES} blocks"
+                    );
+                }
+                let position = BlockPos { x, y, z };
+                let Some(state) = shared_world.interaction_block_state(position)? else {
+                    continue;
+                };
+                let intersects = shared_world.block_behavior(state).map_or_else(
+                    || {
+                        state
+                            != BlockStateId::new(shared_world.world_profile().block_states.air)
+                            && Aabb::unit_cube()
+                                .translated([f64::from(x), f64::from(y), f64::from(z)])
+                                .intersects(bounds)
+                    },
+                    |behavior| {
+                        behavior.collision.intersects(
+                            bounds,
+                            [f64::from(x), f64::from(y), f64::from(z)],
+                        )
+                    },
+                );
+                if intersects {
+                    bail!("player movement intersects block {x},{y},{z}");
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn movement_position(movement: PlayerMovement) -> Option<[f64; 3]> {
     match movement {
         PlayerMovement::Position { position, .. }
@@ -1726,6 +1829,85 @@ fn is_block_interaction_within_reach(player: &PlayerState, position: BlockPositi
         })
         .sum::<f64>();
     distance_squared <= MAX_BLOCK_INTERACTION_REACH_SQUARED
+}
+
+fn is_block_interaction_visible(
+    shared_world: &SharedWorld,
+    player: &PlayerState,
+    position: BlockPosition,
+) -> Result<bool> {
+    if !is_block_interaction_within_reach(player, position) {
+        return Ok(false);
+    }
+    let eye = [
+        player.position[0],
+        player.position[1] + PLAYER_EYE_HEIGHT,
+        player.position[2],
+    ];
+    let target = [
+        f64::from(position.x) + 0.5,
+        f64::from(position.y) + 0.5,
+        f64::from(position.z) + 0.5,
+    ];
+    let distance = eye
+        .into_iter()
+        .zip(target)
+        .map(|(from, to)| (to - from).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    if distance <= COLLISION_EPSILON {
+        return Ok(false);
+    }
+    let direction = normalized_direction(eye, target)?;
+    let max_distance = distance + COLLISION_EPSILON;
+    let minimum: [i32; 3] =
+        std::array::from_fn(|axis| eye[axis].min(target[axis]).floor() as i32);
+    let maximum: [i32; 3] =
+        std::array::from_fn(|axis| eye[axis].max(target[axis]).floor() as i32);
+    let mut candidates = 0_usize;
+    let mut nearest: Option<(f64, BlockPos)> = None;
+    for y in minimum[1]..=maximum[1] {
+        for z in minimum[2]..=maximum[2] {
+            for x in minimum[0]..=maximum[0] {
+                candidates = candidates.saturating_add(1);
+                if candidates > MAX_RAYCAST_BLOCK_CANDIDATES {
+                    bail!("block raycast exceeds {MAX_RAYCAST_BLOCK_CANDIDATES} candidates");
+                }
+                let block = BlockPos { x, y, z };
+                let Some(state) = shared_world.interaction_block_state(block)? else {
+                    continue;
+                };
+                let offset = [f64::from(x), f64::from(y), f64::from(z)];
+                let hit = if let Some(behavior) = shared_world.block_behavior(state) {
+                    behavior
+                        .collision
+                        .raycast(eye, direction, max_distance, offset)?
+                } else if state
+                    != BlockStateId::new(shared_world.world_profile().block_states.air)
+                {
+                    Aabb::unit_cube()
+                        .translated(offset)
+                        .ray_intersection(eye, direction, max_distance)?
+                } else {
+                    None
+                };
+                let Some(hit) = hit else {
+                    continue;
+                };
+                if nearest.is_none_or(|(distance, _)| hit.distance < distance) {
+                    nearest = Some((hit.distance, block));
+                }
+            }
+        }
+    }
+    Ok(nearest.is_some_and(|(_, block)| {
+        block
+            == BlockPos {
+                x: position.x,
+                y: position.y,
+                z: position.z,
+            }
+    }))
 }
 
 fn is_placement_target_air(shared_world: &SharedWorld, event: WorldEvent) -> Result<bool> {
@@ -2226,6 +2408,88 @@ mod tests {
     }
 
     #[test]
+    fn movement_collision_rejects_entering_solid_block_shapes() {
+        let world = SharedWorld::static_flat();
+        let player = PlayerState::new([0.5, 64.0, 0.5], 0.0, 0.0, true, false).unwrap();
+        assert!(
+            validate_movement_collision(
+                &world,
+                &player,
+                PlayerMovement::Position {
+                    position: [0.5, 64.0, 0.5],
+                    flags: ferrum_play::MovementFlags {
+                        on_ground: true,
+                        horizontal_collision: false,
+                    },
+                },
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_movement_collision(
+                &world,
+                &player,
+                PlayerMovement::Position {
+                    position: [0.5, 63.5, 0.5],
+                    flags: ferrum_play::MovementFlags {
+                        on_ground: false,
+                        horizontal_collision: true,
+                    },
+                },
+            )
+            .is_err()
+        );
+
+        world
+            .apply_event(
+                ConnectionId::new(98),
+                WorldEvent::BlockMutation(ferrum_world::BlockMutation {
+                    position: BlockPos { x: 1, y: 64, z: 0 },
+                    state: BlockStateId::new(world.world_profile().block_states.stone),
+                }),
+            )
+            .unwrap();
+        assert!(
+            validate_movement_collision(
+                &world,
+                &player,
+                PlayerMovement::Position {
+                    position: [2.5, 64.0, 0.5],
+                    flags: ferrum_play::MovementFlags {
+                        on_ground: true,
+                        horizontal_collision: true,
+                    },
+                },
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn block_raycast_rejects_occluded_targets_and_accepts_the_first_shape() {
+        let world = SharedWorld::static_flat();
+        let player = PlayerState::new([0.5, 65.0, 0.5], 0.0, 0.0, true, false).unwrap();
+        let grass = BlockPosition { x: 0, y: 63, z: 0 };
+        let stone = BlockPosition { x: 0, y: 61, z: 0 };
+        assert!(is_block_interaction_visible(&world, &player, grass).unwrap());
+        assert!(!is_block_interaction_visible(&world, &player, stone).unwrap());
+
+        let air = BlockStateId::new(world.world_profile().block_states.air);
+        for y in [62, 63] {
+            world
+                .apply_event(
+                    ConnectionId::new(99),
+                    WorldEvent::BlockMutation(ferrum_world::BlockMutation {
+                        position: BlockPos { x: 0, y, z: 0 },
+                        state: air,
+                    }),
+                )
+                .unwrap();
+        }
+        assert!(is_block_interaction_visible(&world, &player, stone).unwrap());
+    }
+
+    #[test]
     fn gameplay_plans_enforce_modes_tools_and_generated_block_states() {
         let world = SharedWorld::static_flat();
         let runtime = SharedGameRuntime::vanilla_overworld();
@@ -2455,6 +2719,18 @@ mod tests {
 
         let broken = BlockPos { x: 0, y: 61, z: 0 };
         let placed = BlockPos { x: 1, y: 64, z: 0 };
+        let air = BlockStateId::new(world.world_profile().block_states.air);
+        for y in [62, 63] {
+            world
+                .apply_event(
+                    connection,
+                    WorldEvent::BlockMutation(ferrum_world::BlockMutation {
+                        position: BlockPos { x: 0, y, z: 0 },
+                        state: air,
+                    }),
+                )
+                .unwrap();
+        }
         let mut input = Vec::new();
         write_packet(
             &mut input,
