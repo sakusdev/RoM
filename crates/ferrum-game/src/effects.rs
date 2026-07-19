@@ -214,9 +214,7 @@ mod tests {
     #[test]
     fn mining_effect_levels_are_exposed_for_break_speed_validation() {
         let mut effects = StatusEffectSet::default();
-        effects
-            .insert(effect("minecraft:haste", 1, 20))
-            .unwrap();
+        effects.insert(effect("minecraft:haste", 1, 20)).unwrap();
         effects
             .insert(effect("minecraft:mining_fatigue", 2, 20))
             .unwrap();

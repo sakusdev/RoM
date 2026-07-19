@@ -488,7 +488,10 @@ mod tests {
             .unwrap()
             .with_component(DAMAGE_COMPONENT, serde_json::json!({ "varint": -1 }));
         let before = malformed.clone();
-        assert_eq!(malformed.damage(), Err(InventoryError::InvalidDamageComponent));
+        assert_eq!(
+            malformed.damage(),
+            Err(InventoryError::InvalidDamageComponent)
+        );
         assert_eq!(
             malformed.apply_durability_damage(1, 59),
             Err(InventoryError::InvalidDamageComponent)

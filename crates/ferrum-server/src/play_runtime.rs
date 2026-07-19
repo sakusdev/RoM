@@ -12,11 +12,10 @@ use ferrum_play::{
     BlockPosition, InteractionHand, ItemProtocolRegistry, PlayerAction, PlayerActionStatus,
     PlayerMovement, PlayerState, block_position_to_world, decode_close_container,
     decode_container_click, decode_creative_slot_update, decode_player_action,
-    decode_use_item_on_block,
-    encode_block_changed_ack, encode_block_update, encode_chunk_batch_finished,
-    encode_chunk_batch_start, encode_forget_level_chunk, encode_keep_alive,
-    encode_level_chunk_with_light, encode_set_chunk_cache_center, encode_system_chat,
-    player_action_to_world_event, use_item_on_block_to_world_event,
+    decode_use_item_on_block, encode_block_changed_ack, encode_block_update,
+    encode_chunk_batch_finished, encode_chunk_batch_start, encode_forget_level_chunk,
+    encode_keep_alive, encode_level_chunk_with_light, encode_set_chunk_cache_center,
+    encode_system_chat, player_action_to_world_event, use_item_on_block_to_world_event,
 };
 use ferrum_protocol::{
     PacketDirection, PacketKind, ProtocolPhase, ProtocolProfile, ProtocolSession,
@@ -282,9 +281,10 @@ impl<'a> GameplaySync<'a> {
             EquipmentSlot::MainHand,
             whole_stack,
         ) {
-            Ok(_) | Err(GameRuntimeError::State(
-                ferrum_game::GameStateError::MissingEquippedItem { .. },
-            )) => Ok(()),
+            Ok(_)
+            | Err(GameRuntimeError::State(ferrum_game::GameStateError::MissingEquippedItem {
+                ..
+            })) => Ok(()),
             Err(error) => Err(error.into()),
         }
     }
@@ -354,8 +354,7 @@ impl<'a> GameplaySync<'a> {
                 let tool = held_item
                     .as_deref()
                     .map_or_else(ToolProfile::hand, tool_profile_for_item);
-                let required_ticks =
-                    behavior.break_time_ticks(tool, haste_level, fatigue_level);
+                let required_ticks = behavior.break_time_ticks(tool, haste_level, fatigue_level);
                 let mut drops = Vec::new();
                 for drop in &behavior.drops {
                     if drop.requires_correct_tool && !behavior.can_harvest(tool) {
@@ -2344,9 +2343,7 @@ mod tests {
                     .inventory
                     .set_slot(
                         ferrum_game::HOTBAR_START,
-                        Some(
-                            ItemStack::with_max_count("minecraft:wooden_pickaxe", 1, 1).unwrap(),
-                        ),
+                        Some(ItemStack::with_max_count("minecraft:wooden_pickaxe", 1, 1).unwrap()),
                     )
                     .map_err(ferrum_game::GameStateError::from)?;
                 Ok(())
@@ -2442,9 +2439,7 @@ mod tests {
                     .inventory
                     .set_slot(
                         ferrum_game::HOTBAR_START,
-                        Some(
-                            ItemStack::with_max_count("minecraft:wooden_pickaxe", 1, 1).unwrap(),
-                        ),
+                        Some(ItemStack::with_max_count("minecraft:wooden_pickaxe", 1, 1).unwrap()),
                     )
                     .map_err(ferrum_game::GameStateError::from)?;
                 player
@@ -2482,11 +2477,7 @@ mod tests {
         )
         .unwrap();
         for _ in 0..23 {
-            write_packet(
-                &mut input,
-                &build_packet(0x0b, |_| Ok(())).unwrap(),
-            )
-            .unwrap();
+            write_packet(&mut input, &build_packet(0x0b, |_| Ok(())).unwrap()).unwrap();
         }
         write_packet(
             &mut input,
@@ -2578,7 +2569,10 @@ mod tests {
                 let player = state.player(uuid).unwrap();
                 assert_eq!(player.inventory.selected_hotbar(), 1);
                 assert_eq!(
-                    player.inventory.slot(ferrum_game::HOTBAR_START).unwrap()
+                    player
+                        .inventory
+                        .slot(ferrum_game::HOTBAR_START)
+                        .unwrap()
                         .as_ref()
                         .unwrap()
                         .damage()
@@ -2697,10 +2691,7 @@ mod tests {
                     player.inventory.selected_stack().unwrap().item(),
                     "minecraft:dirt"
                 );
-                let offhand = player
-                    .inventory
-                    .equipment(EquipmentSlot::OffHand)
-                    .unwrap();
+                let offhand = player.inventory.equipment(EquipmentSlot::OffHand).unwrap();
                 assert_eq!(offhand.item(), "minecraft:stone");
                 assert_eq!(offhand.count(), 1);
                 let dropped = state

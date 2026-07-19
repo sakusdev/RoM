@@ -959,7 +959,11 @@ impl GameState {
             yaw.cos() * horizontal,
         ])?;
         let transform = Transform::new(
-            [source.position[0], source.position[1] + 1.3, source.position[2]],
+            [
+                source.position[0],
+                source.position[1] + 1.3,
+                source.position[2],
+            ],
             source.yaw,
             source.pitch,
             false,
