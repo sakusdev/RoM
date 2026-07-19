@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/p0-p4-gameplay-foundations
+  pull_request:
+    branches:
+      - master
 
 permissions:
   contents: read
