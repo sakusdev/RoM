@@ -54,7 +54,10 @@ const PLAYER_WIDTH: f64 = 0.6;
 const PLAYER_HEIGHT: f64 = 1.8;
 const COLLISION_EPSILON: f64 = 1.0e-7;
 const COLLISION_STEP: f64 = 0.25;
-const MAX_COLLISION_STEPS: usize = 128;
+// Keep the swept-collision budget aligned with the largest movement packet that
+// `validate_movement_delta` accepts. At a quarter-block sampling interval a
+// legal 100-block correction needs at most 400 samples.
+const MAX_COLLISION_STEPS: usize = 400;
 const MAX_COLLISION_BLOCK_CANDIDATES: usize = 64;
 const MAX_RAYCAST_BLOCK_CANDIDATES: usize = 4_096;
 const MAX_BLOCK_INTERACTION_REACH: f64 = 6.0;
