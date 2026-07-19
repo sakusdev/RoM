@@ -6,10 +6,10 @@ use thiserror::Error;
 use crate::{
     AttributeError, CombatError, ContainerClick, ContainerError, ContainerMutation,
     ContainerSnapshot, DamageContext, DamageKind, DamageSource, Difficulty, Entity, EntityError,
-    EntityId, EntityPayload, EntityStore, EntityType, EntityUuid, GameMode, InventoryError,
-    ItemEntityData, ItemStack, PlayerError, PlayerState, PlayerUuid, StatusEffectError,
-    StatusEffectInstance, Transform, Velocity, Vitals, calculate_damage, fall_damage,
-    knockback_velocity,
+    EntityId, EntityPayload, EntityStore, EntityType, EntityUuid, EquipmentSlot, GameMode,
+    InventoryError, ItemEntityData, ItemStack, PlayerError, PlayerState, PlayerUuid,
+    StatusEffectError, StatusEffectInstance, Transform, Velocity, Vitals, calculate_damage,
+    fall_damage, knockback_velocity,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -830,6 +830,49 @@ impl GameState {
         }])
     }
 
+    pub fn consume_equipped_item(
+        &mut self,
+        uuid: PlayerUuid,
+        slot: EquipmentSlot,
+        expected_item: &str,
+        amount: u32,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
+        self.connected_entity_id(uuid)?;
+        let player = self
+            .players
+            .get_mut(&uuid)
+            .ok_or(GameStateError::UnknownPlayer { uuid })?;
+        let inventory_slot = slot.inventory_index(player.inventory.selected_hotbar());
+        let mut stack = player
+            .inventory
+            .slot(inventory_slot)?
+            .cloned()
+            .ok_or(GameStateError::MissingEquippedItem { uuid, slot })?;
+        if stack.item() != expected_item {
+            return Err(GameStateError::UnexpectedEquippedItem {
+                uuid,
+                slot,
+                expected: expected_item.to_owned(),
+                actual: stack.item().to_owned(),
+            });
+        }
+        let became_empty = stack.consume(amount)?;
+        player
+            .inventory
+            .set_slot(inventory_slot, (!became_empty).then_some(stack))?;
+        Ok(vec![
+            GameEvent::InventorySlotChanged {
+                uuid,
+                slot: inventory_slot,
+                stack: player.inventory.slots()[inventory_slot].clone(),
+            },
+            GameEvent::ContainerContentChanged {
+                uuid,
+                snapshot: player.inventory_session.snapshot(&player.inventory),
+            },
+        ])
+    }
+
     pub fn damage_player(
         &mut self,
         uuid: PlayerUuid,
@@ -1258,6 +1301,20 @@ pub enum GameStateError {
     MissingItemEntity { entity_id: EntityId },
     #[error("entity {entity_id:?} is not an item entity")]
     NotItemEntity { entity_id: EntityId },
+    #[error("player {uuid:?} has no item equipped in {slot:?}")]
+    MissingEquippedItem {
+        uuid: PlayerUuid,
+        slot: EquipmentSlot,
+    },
+    #[error(
+        "player {uuid:?} has {actual} equipped in {slot:?}, but {expected} was required"
+    )]
+    UnexpectedEquippedItem {
+        uuid: PlayerUuid,
+        slot: EquipmentSlot,
+        expected: String,
+        actual: String,
+    },
     #[error("unknown player attribute {attribute}")]
     UnknownAttribute { attribute: String },
 }
@@ -1346,6 +1403,67 @@ mod tests {
             }] if *event_uuid == uuid
         ));
         assert!(state.select_hotbar(uuid, 9).is_err());
+    }
+
+    #[test]
+    fn consumes_the_expected_equipped_stack_and_publishes_slot_state() {
+        let uuid = PlayerUuid::new(9);
+        let mut state = GameState::default();
+        state.connect_player(uuid, "Steve", spawn()).unwrap();
+        state
+            .player_mut(uuid)
+            .unwrap()
+            .inventory
+            .set_slot(
+                crate::HOTBAR_START,
+                Some(ItemStack::new("minecraft:stone", 2).unwrap()),
+            )
+            .unwrap();
+
+        let events = state
+            .consume_equipped_item(uuid, EquipmentSlot::MainHand, "minecraft:stone", 1)
+            .unwrap();
+        assert!(matches!(
+            events.as_slice(),
+            [
+                GameEvent::InventorySlotChanged {
+                    slot,
+                    stack: Some(stack),
+                    ..
+                },
+                GameEvent::ContainerContentChanged { .. }
+            ] if *slot == crate::HOTBAR_START && stack.count() == 1
+        ));
+
+        let error = state
+            .consume_equipped_item(uuid, EquipmentSlot::MainHand, "minecraft:dirt", 1)
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            GameStateError::UnexpectedEquippedItem { .. }
+        ));
+        assert_eq!(
+            state
+                .player(uuid)
+                .unwrap()
+                .inventory
+                .selected_stack()
+                .unwrap()
+                .count(),
+            1
+        );
+
+        state
+            .consume_equipped_item(uuid, EquipmentSlot::MainHand, "minecraft:stone", 1)
+            .unwrap();
+        assert!(
+            state
+                .player(uuid)
+                .unwrap()
+                .inventory
+                .selected_stack()
+                .is_none()
+        );
     }
 
     #[test]

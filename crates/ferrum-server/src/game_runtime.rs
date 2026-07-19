@@ -11,8 +11,8 @@ use std::{
 
 use ferrum_game::{
     CommandError, CommandOutcome, CommandSource, ContainerClick, DamageSource, GameEvent,
-    GameSnapshot, GameState, GameStateError, ItemStack, PersistenceError, PlayerUuid,
-    StatusEffectInstance, Transform, Velocity, execute_command,
+    EquipmentSlot, GameSnapshot, GameState, GameStateError, ItemStack, PersistenceError,
+    PlayerUuid, StatusEffectInstance, Transform, Velocity, execute_command,
 };
 use thiserror::Error;
 
@@ -117,6 +117,20 @@ impl SharedGameRuntime {
         selected_hotbar: u8,
     ) -> Result<Vec<GameEvent>, GameRuntimeError> {
         let events = self.write()?.select_hotbar(uuid, selected_hotbar)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn consume_equipped_item(
+        &self,
+        uuid: PlayerUuid,
+        slot: EquipmentSlot,
+        expected_item: &str,
+        amount: u32,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self
+            .write()?
+            .consume_equipped_item(uuid, slot, expected_item, amount)?;
         self.publish(&events)?;
         Ok(events)
     }
