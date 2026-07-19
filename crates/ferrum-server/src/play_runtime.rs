@@ -2696,8 +2696,8 @@ mod tests {
                 assert_eq!(offhand.count(), 1);
                 let dropped = state
                     .entities()
-                    .values()
-                    .filter_map(|entity| entity.item())
+                    .iter()
+                    .filter_map(|(_, entity)| entity.item())
                     .map(|item| (item.stack.item(), item.stack.count()))
                     .collect::<Vec<_>>();
                 assert_eq!(dropped, vec![("minecraft:stone", 1)]);

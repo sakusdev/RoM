@@ -1710,8 +1710,8 @@ mod tests {
         assert_eq!(
             state
                 .entities()
-                .values()
-                .filter(|entity| entity.item().is_some())
+                .iter()
+                .filter(|(_, entity)| entity.item().is_some())
                 .count(),
             2
         );
