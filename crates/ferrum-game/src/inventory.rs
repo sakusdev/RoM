@@ -19,6 +19,7 @@ pub const HOTBAR_END: usize = 44;
 pub const OFFHAND_SLOT: usize = 45;
 pub const HOTBAR_SLOTS: u8 = 9;
 pub const MAX_VANILLA_STACK_SIZE: u32 = 64;
+pub const DAMAGE_COMPONENT: &str = "minecraft:damage";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EquipmentSlot {
@@ -119,6 +120,46 @@ impl ItemStack {
     #[must_use]
     pub fn components(&self) -> &BTreeMap<String, Value> {
         &self.components
+    }
+
+    pub fn damage(&self) -> Result<u32, InventoryError> {
+        let Some(value) = self.components.get(DAMAGE_COMPONENT) else {
+            return Ok(0);
+        };
+        let damage = value
+            .as_object()
+            .filter(|object| object.len() == 1)
+            .and_then(|object| object.get("varint"))
+            .and_then(Value::as_i64)
+            .and_then(|value| u32::try_from(value).ok())
+            .ok_or(InventoryError::InvalidDamageComponent)?;
+        Ok(damage)
+    }
+
+    /// Applies deterministic durability damage. Returns `true` when the item broke.
+    pub fn apply_durability_damage(
+        &mut self,
+        amount: u32,
+        max_damage: u32,
+    ) -> Result<bool, InventoryError> {
+        if amount == 0 {
+            return Err(InventoryError::InvalidDurabilityDamage { amount });
+        }
+        if max_damage == 0 {
+            return Err(InventoryError::InvalidMaximumDurability { max_damage });
+        }
+        let damage = self
+            .damage()?
+            .checked_add(amount)
+            .ok_or(InventoryError::DurabilityDamageOverflow)?;
+        if damage >= max_damage {
+            return Ok(true);
+        }
+        self.components.insert(
+            DAMAGE_COMPONENT.to_owned(),
+            serde_json::json!({ "varint": damage }),
+        );
+        Ok(false)
     }
 
     #[must_use]
@@ -362,6 +403,14 @@ pub enum InventoryError {
     InvalidSplitAmount { amount: u32, available: u32 },
     #[error("cannot consume {requested} items from a stack containing {available}")]
     InsufficientStackCount { requested: u32, available: u32 },
+    #[error("durability damage must be positive, got {amount}")]
+    InvalidDurabilityDamage { amount: u32 },
+    #[error("maximum durability must be positive, got {max_damage}")]
+    InvalidMaximumDurability { max_damage: u32 },
+    #[error("minecraft:damage must be represented as a non-negative VarInt component")]
+    InvalidDamageComponent,
+    #[error("durability damage overflowed u32")]
+    DurabilityDamageOverflow,
     #[error("inventory has {actual} slots; expected {expected}")]
     InvalidSlotCount { actual: usize, expected: usize },
     #[error("inventory slot {index} is outside 0..{PLAYER_INVENTORY_SLOTS}")]
@@ -420,6 +469,31 @@ mod tests {
         inventory.set_slot(9, Some(named)).unwrap();
         inventory.insert(ItemStack::new("minecraft:stone", 1).unwrap());
         assert_eq!(inventory.occupied_slots(), 2);
+    }
+
+    #[test]
+    fn durability_damage_updates_the_wire_component_and_reports_breakage() {
+        let mut tool = ItemStack::with_max_count("minecraft:wooden_pickaxe", 1, 1).unwrap();
+        assert_eq!(tool.damage().unwrap(), 0);
+        assert!(!tool.apply_durability_damage(1, 59).unwrap());
+        assert_eq!(tool.damage().unwrap(), 1);
+        assert!(!tool.apply_durability_damage(57, 59).unwrap());
+        assert_eq!(tool.damage().unwrap(), 58);
+        assert!(tool.apply_durability_damage(1, 59).unwrap());
+    }
+
+    #[test]
+    fn malformed_or_overflowing_damage_is_rejected_without_mutation() {
+        let mut malformed = ItemStack::new("minecraft:wooden_pickaxe", 1)
+            .unwrap()
+            .with_component(DAMAGE_COMPONENT, serde_json::json!({ "varint": -1 }));
+        let before = malformed.clone();
+        assert_eq!(malformed.damage(), Err(InventoryError::InvalidDamageComponent));
+        assert_eq!(
+            malformed.apply_durability_damage(1, 59),
+            Err(InventoryError::InvalidDamageComponent)
+        );
+        assert_eq!(malformed, before);
     }
 
     #[test]

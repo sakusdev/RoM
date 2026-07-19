@@ -146,12 +146,27 @@ impl StatusEffectSet {
     }
 
     #[must_use]
+    pub fn haste_level(&self) -> u8 {
+        self.effect_level("minecraft:haste")
+    }
+
+    #[must_use]
+    pub fn mining_fatigue_level(&self) -> u8 {
+        self.effect_level("minecraft:mining_fatigue")
+    }
+
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.effects.is_empty()
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&StatusEffectId, &StatusEffectInstance)> {
         self.effects.iter()
+    }
+
+    fn effect_level(&self, id: &str) -> u8 {
+        self.get(id)
+            .map_or(0, |effect| effect.level().min(u16::from(u8::MAX)) as u8)
     }
 }
 
@@ -194,5 +209,18 @@ mod tests {
         assert!(effects.tick().is_empty());
         assert_eq!(effects.tick().len(), 1);
         assert!(effects.is_empty());
+    }
+
+    #[test]
+    fn mining_effect_levels_are_exposed_for_break_speed_validation() {
+        let mut effects = StatusEffectSet::default();
+        effects
+            .insert(effect("minecraft:haste", 1, 20))
+            .unwrap();
+        effects
+            .insert(effect("minecraft:mining_fatigue", 2, 20))
+            .unwrap();
+        assert_eq!(effects.haste_level(), 2);
+        assert_eq!(effects.mining_fatigue_level(), 3);
     }
 }

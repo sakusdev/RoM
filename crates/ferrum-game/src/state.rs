@@ -873,6 +873,142 @@ impl GameState {
         ])
     }
 
+    pub fn damage_equipped_item(
+        &mut self,
+        uuid: PlayerUuid,
+        slot: EquipmentSlot,
+        expected_item: &str,
+        amount: u32,
+        max_damage: u32,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
+        self.connected_entity_id(uuid)?;
+        let player = self
+            .players
+            .get_mut(&uuid)
+            .ok_or(GameStateError::UnknownPlayer { uuid })?;
+        let inventory_slot = slot.inventory_index(player.inventory.selected_hotbar());
+        let mut stack = player
+            .inventory
+            .slot(inventory_slot)?
+            .cloned()
+            .ok_or(GameStateError::MissingEquippedItem { uuid, slot })?;
+        if stack.item() != expected_item {
+            return Err(GameStateError::UnexpectedEquippedItem {
+                uuid,
+                slot,
+                expected: expected_item.to_owned(),
+                actual: stack.item().to_owned(),
+            });
+        }
+        let broke = stack.apply_durability_damage(amount, max_damage)?;
+        player
+            .inventory
+            .set_slot(inventory_slot, (!broke).then_some(stack))?;
+        Ok(vec![
+            GameEvent::InventorySlotChanged {
+                uuid,
+                slot: inventory_slot,
+                stack: player.inventory.slots()[inventory_slot].clone(),
+            },
+            GameEvent::ContainerContentChanged {
+                uuid,
+                snapshot: player.inventory_session.snapshot(&player.inventory),
+            },
+        ])
+    }
+
+    pub fn drop_equipped_item(
+        &mut self,
+        uuid: PlayerUuid,
+        slot: EquipmentSlot,
+        whole_stack: bool,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
+        let entity_id = self.connected_entity_id(uuid)?;
+        let source = self
+            .entities
+            .get(entity_id)
+            .ok_or(GameStateError::PlayerMissingEntity { uuid })?
+            .transform;
+        let inventory_slot = self
+            .players
+            .get(&uuid)
+            .ok_or(GameStateError::UnknownPlayer { uuid })?
+            .inventory
+            .selected_hotbar();
+        let inventory_slot = slot.inventory_index(inventory_slot);
+        let stack = self
+            .players
+            .get(&uuid)
+            .ok_or(GameStateError::UnknownPlayer { uuid })?
+            .inventory
+            .slot(inventory_slot)?
+            .cloned()
+            .ok_or(GameStateError::MissingEquippedItem { uuid, slot })?;
+        let dropped_count = if whole_stack { stack.count() } else { 1 };
+        let dropped = stack.copy_with_count(dropped_count)?;
+        let remaining = (dropped_count < stack.count())
+            .then(|| stack.copy_with_count(stack.count() - dropped_count))
+            .transpose()?;
+
+        let yaw = f64::from(source.yaw).to_radians();
+        let pitch = f64::from(source.pitch).to_radians();
+        let horizontal = pitch.cos() * 0.3;
+        let velocity = Velocity::new([
+            -yaw.sin() * horizontal,
+            -pitch.sin() * 0.3 + 0.1,
+            yaw.cos() * horizontal,
+        ])?;
+        let transform = Transform::new(
+            [source.position[0], source.position[1] + 1.3, source.position[2]],
+            source.yaw,
+            source.pitch,
+            false,
+        )?;
+
+        let player = self
+            .players
+            .get_mut(&uuid)
+            .ok_or(GameStateError::UnknownPlayer { uuid })?;
+        player.inventory.set_slot(inventory_slot, remaining)?;
+        let mut events = vec![
+            GameEvent::InventorySlotChanged {
+                uuid,
+                slot: inventory_slot,
+                stack: player.inventory.slots()[inventory_slot].clone(),
+            },
+            GameEvent::ContainerContentChanged {
+                uuid,
+                snapshot: player.inventory_session.snapshot(&player.inventory),
+            },
+            GameEvent::ItemsDropped {
+                uuid,
+                stacks: vec![dropped.clone()],
+            },
+        ];
+        events.extend(self.spawn_item_entity(transform, dropped, velocity, Some(uuid))?);
+        Ok(events)
+    }
+
+    pub fn swap_equipped_items(
+        &mut self,
+        uuid: PlayerUuid,
+        first: EquipmentSlot,
+        second: EquipmentSlot,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
+        self.connected_entity_id(uuid)?;
+        let selected_hotbar = self
+            .players
+            .get(&uuid)
+            .ok_or(GameStateError::UnknownPlayer { uuid })?
+            .inventory
+            .selected_hotbar();
+        self.swap_inventory_slots(
+            uuid,
+            first.inventory_index(selected_hotbar),
+            second.inventory_index(selected_hotbar),
+        )
+    }
+
     pub fn damage_player(
         &mut self,
         uuid: PlayerUuid,
@@ -1461,6 +1597,119 @@ mod tests {
                 .inventory
                 .selected_stack()
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn damages_and_breaks_the_expected_equipped_tool() {
+        let uuid = PlayerUuid::new(10);
+        let mut state = GameState::default();
+        state.connect_player(uuid, "Steve", spawn()).unwrap();
+        state
+            .player_mut(uuid)
+            .unwrap()
+            .inventory
+            .set_slot(
+                crate::HOTBAR_START,
+                Some(ItemStack::with_max_count("minecraft:wooden_pickaxe", 1, 1).unwrap()),
+            )
+            .unwrap();
+
+        state
+            .damage_equipped_item(
+                uuid,
+                EquipmentSlot::MainHand,
+                "minecraft:wooden_pickaxe",
+                58,
+                59,
+            )
+            .unwrap();
+        assert_eq!(
+            state
+                .player(uuid)
+                .unwrap()
+                .inventory
+                .selected_stack()
+                .unwrap()
+                .damage()
+                .unwrap(),
+            58
+        );
+        state
+            .damage_equipped_item(
+                uuid,
+                EquipmentSlot::MainHand,
+                "minecraft:wooden_pickaxe",
+                1,
+                59,
+            )
+            .unwrap();
+        assert!(
+            state
+                .player(uuid)
+                .unwrap()
+                .inventory
+                .selected_stack()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn drops_one_or_all_equipped_items_as_authoritative_entities() {
+        let uuid = PlayerUuid::new(11);
+        let mut state = GameState::default();
+        state.connect_player(uuid, "Steve", spawn()).unwrap();
+        state
+            .player_mut(uuid)
+            .unwrap()
+            .inventory
+            .set_slot(
+                crate::HOTBAR_START,
+                Some(ItemStack::new("minecraft:cobblestone", 3).unwrap()),
+            )
+            .unwrap();
+
+        let events = state
+            .drop_equipped_item(uuid, EquipmentSlot::MainHand, false)
+            .unwrap();
+        assert!(events.iter().any(|event| matches!(
+            event,
+            GameEvent::EntitySpawned { entity }
+                if entity.item().is_some_and(|item| item.stack.count() == 1)
+                    && entity.transform.position[0] == 0.5
+                    && (entity.transform.position[1] - 66.3).abs() < 1.0e-10
+                    && entity.transform.position[2] == 0.5
+                    && entity.velocity.0[2] > 0.0
+        )));
+        assert_eq!(
+            state
+                .player(uuid)
+                .unwrap()
+                .inventory
+                .selected_stack()
+                .unwrap()
+                .count(),
+            2
+        );
+
+        state
+            .drop_equipped_item(uuid, EquipmentSlot::MainHand, true)
+            .unwrap();
+        assert!(
+            state
+                .player(uuid)
+                .unwrap()
+                .inventory
+                .selected_stack()
+                .is_none()
+        );
+        assert_eq!(
+            state
+                .entities()
+                .values()
+                .filter(|entity| entity.item().is_some())
+                .count(),
+            2
         );
     }
 

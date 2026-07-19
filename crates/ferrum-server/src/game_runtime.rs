@@ -135,6 +135,51 @@ impl SharedGameRuntime {
         Ok(events)
     }
 
+    pub fn damage_equipped_item(
+        &self,
+        uuid: PlayerUuid,
+        slot: EquipmentSlot,
+        expected_item: &str,
+        amount: u32,
+        max_damage: u32,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self.write()?.damage_equipped_item(
+            uuid,
+            slot,
+            expected_item,
+            amount,
+            max_damage,
+        )?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn drop_equipped_item(
+        &self,
+        uuid: PlayerUuid,
+        slot: EquipmentSlot,
+        whole_stack: bool,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self
+            .write()?
+            .drop_equipped_item(uuid, slot, whole_stack)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn swap_equipped_items(
+        &self,
+        uuid: PlayerUuid,
+        first: EquipmentSlot,
+        second: EquipmentSlot,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self
+            .write()?
+            .swap_equipped_items(uuid, first, second)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
     pub fn damage_player(
         &self,
         uuid: PlayerUuid,
