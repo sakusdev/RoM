@@ -105,7 +105,8 @@ jobs:
             'net.minecraft.network.protocol.game.ClientboundUpdateAttributesPacket$AttributeSnapshot' \
             'net.minecraft.world.entity.ai.attributes.AttributeModifier' \
             'net.minecraft.world.entity.ai.attributes.AttributeModifier$Operation' \
-            'net.minecraft.world.phys.Vec3'; do
+            'net.minecraft.world.phys.Vec3' \
+            'net.minecraft.network.codec.ByteBufCodecs'; do
             echo "ROM_JAVAP_BEGIN $class"
             javap -p -c -s -constants -classpath "/tmp/game.jar:/tmp/libs/*" "$class"
             echo "ROM_JAVAP_END $class"
