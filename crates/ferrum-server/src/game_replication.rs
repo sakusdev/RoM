@@ -2932,7 +2932,10 @@ mod tests {
             &mut inputs,
             PacketKind::HurtAnimation,
         );
-        assert_eq!(read_varint(&hurt).0, i32::try_from(entity_id.get()).unwrap());
+        assert_eq!(
+            read_varint(&hurt).0,
+            i32::try_from(entity_id.get()).unwrap()
+        );
 
         game.move_entity(
             entity_id,
