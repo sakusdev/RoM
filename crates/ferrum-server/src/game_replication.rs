@@ -1093,6 +1093,40 @@ fn dispatch_event(
                 }
             }
         }
+        GameEvent::LivingEntityDamaged {
+            entity_id, source, ..
+        } => {
+            let damage_payload =
+                encode_damage_event(entity_id, source, &config.damage_type_protocol_ids)
+                    .context("cannot encode non-player damage source")?;
+            for connection in connections.values_mut() {
+                let Some(yaw) = connection
+                    .non_player_entities
+                    .get(&entity_id)
+                    .map(|snapshot| snapshot.transform.yaw)
+                else {
+                    continue;
+                };
+                if let Some(payload) = damage_payload.clone() {
+                    connection.queue(
+                        PlayOutput::ProtocolPacket {
+                            kind: PacketKind::DamageEvent,
+                            payload,
+                        },
+                        exit,
+                    );
+                }
+                connection.queue(
+                    PlayOutput::ProtocolPacket {
+                        kind: PacketKind::HurtAnimation,
+                        payload: encode_hurt_animation(entity_id, yaw)
+                            .context("cannot encode non-player hurt animation")?,
+                    },
+                    exit,
+                );
+            }
+        }
+        GameEvent::LivingEntityKilled { .. } => {}
         GameEvent::EntityMoved {
             entity_id,
             transform,
@@ -2891,6 +2925,14 @@ mod tests {
             read_varint(&motion).0,
             i32::try_from(entity_id.get()).unwrap()
         );
+        game.damage_entity(entity_id, 1.0).unwrap();
+        let hurt = recv_protocol_until(
+            &writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::HurtAnimation,
+        );
+        assert_eq!(read_varint(&hurt).0, i32::try_from(entity_id.get()).unwrap());
 
         game.move_entity(
             entity_id,
@@ -2915,7 +2957,13 @@ mod tests {
             &mut inputs,
             PacketKind::SetEntityData,
         );
-        game.despawn_entity(entity_id).unwrap();
+        game.damage_entity(entity_id, 100.0).unwrap();
+        recv_protocol_until(
+            &writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::HurtAnimation,
+        );
         recv_protocol_until(
             &writer,
             &mut workers,

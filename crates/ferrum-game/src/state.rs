@@ -95,6 +95,19 @@ pub enum GameEvent {
         transform: Transform,
         velocity: Velocity,
     },
+    LivingEntityDamaged {
+        entity_id: EntityId,
+        amount: f32,
+        source: DamageSource,
+        previous_health: f32,
+        current_health: f32,
+    },
+    LivingEntityKilled {
+        entity_id: EntityId,
+        entity_type: String,
+        source: DamageSource,
+        dropped_stacks: usize,
+    },
     EntityRemoved {
         entity_id: EntityId,
     },
@@ -550,6 +563,133 @@ impl GameState {
             .despawn(entity_id)
             .expect("validated entity exists");
         Ok(vec![GameEvent::EntityRemoved { entity_id }])
+    }
+
+    pub fn damage_entity(
+        &mut self,
+        entity_id: EntityId,
+        amount: f32,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
+        self.damage_entity_with_source(
+            entity_id,
+            amount,
+            DamageSource::generic(DamageKind::Generic),
+        )
+    }
+
+    pub fn damage_entity_with_source(
+        &mut self,
+        entity_id: EntityId,
+        amount: f32,
+        source: DamageSource,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
+        let difficulty = self.difficulty;
+        let (previous_health, current_health, final_damage, entity_type, transform, drops) = {
+            let entity = self
+                .entities
+                .get_mut(entity_id)
+                .ok_or(EntityError::UnknownEntity { id: entity_id })?;
+            if entity.is_player() {
+                return Err(GameStateError::PlayerEntityRequiresConnection);
+            }
+            let entity_type = entity.entity_type.as_str().to_owned();
+            let transform = entity.transform;
+            let living = entity
+                .living_mut()
+                .ok_or(GameStateError::NotLivingEntity { entity_id })?;
+            if living.health <= 0.0 {
+                return Ok(Vec::new());
+            }
+            let result = calculate_damage(DamageContext {
+                raw_damage: amount,
+                armor: living.attributes.value("minecraft:armor").unwrap_or(0.0),
+                armor_toughness: living
+                    .attributes
+                    .value("minecraft:armor_toughness")
+                    .unwrap_or(0.0),
+                resistance_level: living.status_effects.damage_resistance_level(),
+                difficulty,
+                source,
+            })?;
+            if result.final_damage <= 0.0 {
+                return Ok(Vec::new());
+            }
+            let previous_health = living.health;
+            living.health = (living.health - result.final_damage).max(0.0);
+            (
+                previous_health,
+                living.health,
+                result.final_damage,
+                entity_type,
+                transform,
+                living.drops.clone(),
+            )
+        };
+        let mut events = vec![GameEvent::LivingEntityDamaged {
+            entity_id,
+            amount: final_damage,
+            source,
+            previous_health,
+            current_health,
+        }];
+        if current_health > 0.0 {
+            return Ok(events);
+        }
+
+        self.entities
+            .despawn(entity_id)
+            .expect("damaged living entity exists until fatal damage is finalized");
+        events.push(GameEvent::LivingEntityKilled {
+            entity_id,
+            entity_type,
+            source,
+            dropped_stacks: drops.len(),
+        });
+        events.push(GameEvent::EntityRemoved { entity_id });
+        let drop_transform = Transform {
+            on_ground: false,
+            ..transform
+        };
+        for (index, stack) in drops.into_iter().enumerate() {
+            let horizontal = (f64::from((index % 3) as u8) - 1.0) * 0.05;
+            events.extend(self.spawn_item_entity(
+                drop_transform,
+                stack,
+                Velocity::new([horizontal, 0.2, -horizontal])?,
+                None,
+            )?);
+        }
+        Ok(events)
+    }
+
+    pub fn apply_entity_knockback(
+        &mut self,
+        entity_id: EntityId,
+        direction_xz: [f64; 2],
+        strength: f64,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
+        let entity = self
+            .entities
+            .get(entity_id)
+            .ok_or(EntityError::UnknownEntity { id: entity_id })?;
+        if entity.is_player() {
+            return Err(GameStateError::PlayerEntityRequiresConnection);
+        }
+        let living = entity
+            .living()
+            .ok_or(GameStateError::NotLivingEntity { entity_id })?;
+        let resistance = living
+            .attributes
+            .value("minecraft:knockback_resistance")
+            .unwrap_or(0.0);
+        let transform = entity.transform;
+        let velocity = knockback_velocity(entity.velocity, direction_xz, strength, resistance)?;
+        self.entities.set_velocity(entity_id, velocity)?;
+        Ok(vec![GameEvent::EntityMoved {
+            entity_id,
+            transform,
+            velocity,
+        }])
     }
 
     pub fn pickup_nearby_items(
@@ -1544,6 +1684,8 @@ pub enum GameStateError {
     PlayerMissingEntity { uuid: PlayerUuid },
     #[error("player entities must be managed through the player connection lifecycle")]
     PlayerEntityRequiresConnection,
+    #[error("entity {entity_id:?} is not a living entity")]
+    NotLivingEntity { entity_id: EntityId },
     #[error("player {uuid:?} is dead and must respawn before healing")]
     PlayerDead { uuid: PlayerUuid },
     #[error("player {uuid:?} is alive and cannot respawn")]
@@ -2238,5 +2380,76 @@ mod tests {
             ),
             Err(GameStateError::PlayerEntityRequiresConnection)
         ));
+    }
+
+    #[test]
+    fn damages_knocks_back_kills_and_drops_living_entities() {
+        let mut state = GameState::default();
+        let living = crate::LivingEntityData::new(20.0)
+            .unwrap()
+            .with_drops(vec![ItemStack::new("minecraft:rotten_flesh", 2).unwrap()])
+            .unwrap();
+        let spawned = state
+            .spawn_entity(
+                EntityType::new("minecraft:zombie").unwrap(),
+                spawn(),
+                Velocity::default(),
+                EntityPayload::Living(living),
+            )
+            .unwrap();
+        let entity_id = match &spawned[0] {
+            GameEvent::EntitySpawned { entity } => entity.id,
+            event => panic!("unexpected event: {event:?}"),
+        };
+
+        let damaged = state
+            .damage_entity_with_source(
+                entity_id,
+                4.0,
+                DamageSource::generic(DamageKind::PlayerAttack),
+            )
+            .unwrap();
+        assert!(matches!(
+            damaged.as_slice(),
+            [GameEvent::LivingEntityDamaged {
+                entity_id: damaged_id,
+                amount,
+                previous_health,
+                current_health,
+                ..
+            }] if *damaged_id == entity_id
+                && *amount == 4.0
+                && *previous_health == 20.0
+                && *current_health == 16.0
+        ));
+        assert!(matches!(
+            state
+                .apply_entity_knockback(entity_id, [1.0, 0.0], 0.4)
+                .unwrap()
+                .as_slice(),
+            [GameEvent::EntityMoved { velocity, .. }] if velocity.0[0] > 0.0
+        ));
+
+        let killed = state.damage_entity(entity_id, 100.0).unwrap();
+        assert!(matches!(
+            killed.as_slice(),
+            [
+                GameEvent::LivingEntityDamaged { .. },
+                GameEvent::LivingEntityKilled {
+                    entity_id: killed_id,
+                    dropped_stacks: 1,
+                    ..
+                },
+                GameEvent::EntityRemoved {
+                    entity_id: removed_id
+                },
+                GameEvent::EntitySpawned { entity: dropped },
+            ] if *killed_id == entity_id
+                && *removed_id == entity_id
+                && dropped.item().is_some_and(|item| {
+                    item.stack.item() == "minecraft:rotten_flesh" && item.stack.count() == 2
+                })
+        ));
+        assert!(state.entities().get(entity_id).is_none());
     }
 }

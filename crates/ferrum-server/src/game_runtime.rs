@@ -263,6 +263,42 @@ impl SharedGameRuntime {
         Ok(events)
     }
 
+    pub fn damage_entity(
+        &self,
+        entity_id: EntityId,
+        amount: f32,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self.write()?.damage_entity(entity_id, amount)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn damage_entity_with_source(
+        &self,
+        entity_id: EntityId,
+        amount: f32,
+        source: DamageSource,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self
+            .write()?
+            .damage_entity_with_source(entity_id, amount, source)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn apply_entity_knockback(
+        &self,
+        entity_id: EntityId,
+        direction_xz: [f64; 2],
+        strength: f64,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self
+            .write()?
+            .apply_entity_knockback(entity_id, direction_xz, strength)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
     pub fn pickup_nearby_items(
         &self,
         uuid: PlayerUuid,

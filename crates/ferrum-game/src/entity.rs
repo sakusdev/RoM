@@ -143,6 +143,7 @@ impl Default for Velocity {
 pub const DEFAULT_ITEM_PICKUP_DELAY_TICKS: u32 = 10;
 pub const DEFAULT_ITEM_DESPAWN_TICKS: u64 = 20 * 60 * 5;
 pub const MAX_EXPERIENCE_ORB_VALUE: u32 = 32_767;
+pub const MAX_LIVING_ENTITY_DROPS: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ItemEntityData {
@@ -177,6 +178,8 @@ pub struct LivingEntityData {
     pub attributes: AttributeSet,
     #[serde(default)]
     pub status_effects: StatusEffectSet,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub drops: Vec<ItemStack>,
 }
 
 impl LivingEntityData {
@@ -189,7 +192,19 @@ impl LivingEntityData {
             max_health,
             attributes: AttributeSet::default(),
             status_effects: StatusEffectSet::default(),
+            drops: Vec::new(),
         })
+    }
+
+    pub fn with_drops(mut self, drops: Vec<ItemStack>) -> Result<Self, EntityError> {
+        if drops.len() > MAX_LIVING_ENTITY_DROPS {
+            return Err(EntityError::TooManyLivingEntityDrops {
+                actual: drops.len(),
+                limit: MAX_LIVING_ENTITY_DROPS,
+            });
+        }
+        self.drops = drops;
+        Ok(self)
     }
 }
 
@@ -241,6 +256,21 @@ impl Entity {
     pub fn item_mut(&mut self) -> Option<&mut ItemEntityData> {
         match &mut self.payload {
             EntityPayload::Item(item) => Some(item),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn living(&self) -> Option<&LivingEntityData> {
+        match &self.payload {
+            EntityPayload::Living(living) => Some(living),
+            _ => None,
+        }
+    }
+
+    pub fn living_mut(&mut self) -> Option<&mut LivingEntityData> {
+        match &mut self.payload {
+            EntityPayload::Living(living) => Some(living),
             _ => None,
         }
     }
@@ -497,6 +527,12 @@ fn validate_payload(payload: &EntityPayload) -> Result<(), EntityError> {
                     health: living.health,
                 });
             }
+            if living.drops.len() > MAX_LIVING_ENTITY_DROPS {
+                return Err(EntityError::TooManyLivingEntityDrops {
+                    actual: living.drops.len(),
+                    limit: MAX_LIVING_ENTITY_DROPS,
+                });
+            }
         }
         EntityPayload::ExperienceOrb { value } if *value > MAX_EXPERIENCE_ORB_VALUE => {
             return Err(EntityError::ExperienceOrbValueOutOfRange { value: *value });
@@ -553,6 +589,8 @@ pub enum EntityError {
     InvalidItemDespawnTicks { ticks: u64 },
     #[error("living entity health value {health} is invalid")]
     InvalidLivingHealth { health: f32 },
+    #[error("living entity has {actual} drop stacks; limit is {limit}")]
+    TooManyLivingEntityDrops { actual: usize, limit: usize },
     #[error("experience orb value {value} exceeds {MAX_EXPERIENCE_ORB_VALUE}")]
     ExperienceOrbValueOutOfRange { value: u32 },
     #[error("projectile gravity {gravity} must be finite and between 0 and 1")]
@@ -618,6 +656,22 @@ mod tests {
         let invalid_velocity = Velocity([f64::INFINITY, 0.0, 0.0]);
         assert!(store.set_velocity(id, invalid_velocity).is_err());
         assert_eq!(store.get(id).unwrap().velocity, Velocity::default());
+    }
+
+    #[test]
+    fn bounds_living_entity_drop_stacks() {
+        let stack = ItemStack::new("minecraft:rotten_flesh", 1).unwrap();
+        let error = LivingEntityData::new(20.0)
+            .unwrap()
+            .with_drops(vec![stack; MAX_LIVING_ENTITY_DROPS + 1])
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            EntityError::TooManyLivingEntityDrops {
+                actual,
+                limit: MAX_LIVING_ENTITY_DROPS,
+            } if actual == MAX_LIVING_ENTITY_DROPS + 1
+        ));
     }
 
     #[test]

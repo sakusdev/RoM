@@ -40,7 +40,7 @@ pub use effects::{
 pub use entity::{
     DEFAULT_ITEM_DESPAWN_TICKS, DEFAULT_ITEM_PICKUP_DELAY_TICKS, Entity, EntityError, EntityId,
     EntityPayload, EntityStore, EntityType, EntityUuid, ItemEntityData, LivingEntityData,
-    Transform, Velocity,
+    MAX_LIVING_ENTITY_DROPS, Transform, Velocity,
 };
 pub use inventory::{
     EquipmentSlot, HOTBAR_END, HOTBAR_SLOTS, HOTBAR_START, Inventory, InventoryError, ItemStack,
