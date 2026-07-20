@@ -90,6 +90,11 @@ pub enum GameEvent {
     EntitySpawned {
         entity: Entity,
     },
+    EntityMoved {
+        entity_id: EntityId,
+        transform: Transform,
+        velocity: Velocity,
+    },
     EntityRemoved {
         entity_id: EntityId,
     },
@@ -1297,9 +1302,27 @@ impl GameState {
                 });
             }
         }
+        let previous_motion = self
+            .entities
+            .iter()
+            .filter(|(_, entity)| !entity.is_player())
+            .map(|(&entity_id, entity)| (entity_id, (entity.transform, entity.velocity)))
+            .collect::<BTreeMap<_, _>>();
+        let removed = self.entities.tick();
+        for (entity_id, (previous_transform, previous_velocity)) in previous_motion {
+            let Some(entity) = self.entities.get(entity_id) else {
+                continue;
+            };
+            if entity.transform != previous_transform || entity.velocity != previous_velocity {
+                events.push(GameEvent::EntityMoved {
+                    entity_id,
+                    transform: entity.transform,
+                    velocity: entity.velocity,
+                });
+            }
+        }
         events.extend(
-            self.entities
-                .tick()
+            removed
                 .into_iter()
                 .map(|entity_id| GameEvent::EntityRemoved { entity_id }),
         );
@@ -2043,5 +2066,33 @@ mod tests {
             knockback[0],
             GameEvent::PlayerVelocityChanged { velocity, .. } if velocity.0[0] > 0.0
         ));
+    }
+
+    #[test]
+    fn ticking_moving_entities_emits_authoritative_motion() {
+        let mut state = GameState::default();
+        let spawned = state
+            .spawn_item_entity(
+                Transform::new([0.5, 70.0, 0.5], 0.0, 0.0, false).unwrap(),
+                ItemStack::new("minecraft:stone", 1).unwrap(),
+                Velocity::new([0.1, 0.0, 0.0]).unwrap(),
+                None,
+            )
+            .unwrap();
+        let entity_id = match &spawned[0] {
+            GameEvent::EntitySpawned { entity } => entity.id,
+            event => panic!("unexpected event: {event:?}"),
+        };
+        assert!(state.tick().iter().any(|event| matches!(
+            event,
+            GameEvent::EntityMoved {
+                entity_id: moved,
+                transform,
+                velocity,
+            } if *moved == entity_id
+                && transform.position[0] > 0.5
+                && transform.position[1] < 70.0
+                && velocity.0[1] < 0.0
+        )));
     }
 }

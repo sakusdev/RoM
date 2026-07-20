@@ -336,6 +336,14 @@ impl ServerState {
         let game_runtime = SharedGameRuntime::new(game_state);
         let game_service = spawn_game_service(game_runtime.clone(), persistence.game)?;
         let shared_runtime_config = shared_play_runtime_config(&play_policy)?;
+        let entity_tracking_range_blocks = u32::try_from(
+            play_policy
+                .chunk_radius
+                .checked_add(1)
+                .and_then(|radius| radius.checked_mul(16))
+                .context("entity tracking range overflow")?,
+        )
+        .context("entity tracking range cannot be negative")?;
         let shared_world = Arc::new(match loaded_chunks {
             Some(store) => {
                 play_runtime::SharedWorld::from_store_with_policy(store, world, play_policy)?
@@ -347,6 +355,7 @@ impl ServerState {
         let game_replication = spawn_game_replication(
             &game_runtime,
             GameReplicationConfig {
+                entity_tracking_range_blocks,
                 entity_protocol_ids,
                 item_protocol_ids,
                 data_component_protocol_ids,
