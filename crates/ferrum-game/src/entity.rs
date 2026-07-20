@@ -192,8 +192,7 @@ impl MobAi {
 
     #[must_use]
     pub fn hostile_default() -> Self {
-        Self::new(32.0, 0.1, 1.5, 3.0, 20)
-            .expect("built-in hostile mob AI values are valid")
+        Self::new(32.0, 0.1, 1.5, 3.0, 20).expect("built-in hostile mob AI values are valid")
     }
 }
 
@@ -611,7 +610,12 @@ fn validate_payload(payload: &EntityPayload) -> Result<(), EntityError> {
 
 fn validate_mob_ai(ai: &MobAi) -> Result<(), EntityError> {
     for (field, value, minimum, maximum) in [
-        ("follow_range", ai.follow_range, f64::EPSILON, MAX_MOB_FOLLOW_RANGE),
+        (
+            "follow_range",
+            ai.follow_range,
+            f64::EPSILON,
+            MAX_MOB_FOLLOW_RANGE,
+        ),
         (
             "movement_speed",
             ai.movement_speed,
@@ -640,9 +644,7 @@ fn validate_mob_ai(ai: &MobAi) -> Result<(), EntityError> {
             });
         }
     }
-    if ai.attack_interval_ticks == 0
-        || ai.attack_interval_ticks > MAX_MOB_ATTACK_INTERVAL_TICKS
-    {
+    if ai.attack_interval_ticks == 0 || ai.attack_interval_ticks > MAX_MOB_ATTACK_INTERVAL_TICKS {
         return Err(EntityError::InvalidMobAttackInterval {
             ticks: ai.attack_interval_ticks,
             maximum: MAX_MOB_ATTACK_INTERVAL_TICKS,

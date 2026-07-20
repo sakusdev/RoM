@@ -566,11 +566,7 @@ mod tests {
         assert_eq!(entity.entity_type.as_str(), "minecraft:zombie");
         assert!(entity.living().unwrap().ai.is_some());
         assert!(matches!(
-            execute_command(
-                &mut state,
-                &CommandSource::console(),
-                "/summon cow 8 65 0",
-            ),
+            execute_command(&mut state, &CommandSource::console(), "/summon cow 8 65 0",),
             Err(CommandError::UnsupportedSummonEntity { .. })
         ));
     }

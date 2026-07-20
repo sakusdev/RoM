@@ -61,8 +61,8 @@ pub use recipe::{
     ShapedRecipe, ShapelessRecipe, consume_crafting_match,
 };
 pub use state::{
-    GameEvent, GameRuleValue, GameState, GameStateError, GameTime, MAX_HOSTILE_MOBS,
-    MAX_HOSTILE_MOB_SPAWN_DISTANCE, MIN_HOSTILE_MOB_SPAWN_DISTANCE,
+    GameEvent, GameRuleValue, GameState, GameStateError, GameTime, MAX_HOSTILE_MOB_SPAWN_DISTANCE,
+    MAX_HOSTILE_MOBS, MIN_HOSTILE_MOB_SPAWN_DISTANCE,
 };
 
 pub const GAME_SNAPSHOT_SCHEMA_VERSION: u32 = 1;

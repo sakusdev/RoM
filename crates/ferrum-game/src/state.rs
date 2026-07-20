@@ -1619,8 +1619,7 @@ impl GameState {
             let target = targets
                 .iter()
                 .filter_map(|(uuid, position)| {
-                    let distance_squared =
-                        squared_distance(previous_transform.position, *position);
+                    let distance_squared = squared_distance(previous_transform.position, *position);
                     (distance_squared <= ai.follow_range.powi(2)).then_some((
                         *uuid,
                         *position,
