@@ -475,9 +475,9 @@ impl GameState {
             return Err(GameStateError::PlayerEntityRequiresConnection);
         }
         Velocity::new(velocity.0)?;
-        let entity_id =
-            self.entities
-                .spawn_generated(entity_type, transform, payload)?;
+        let entity_id = self
+            .entities
+            .spawn_generated(entity_type, transform, payload)?;
         self.entities.set_velocity(entity_id, velocity)?;
         let entity = self
             .entities

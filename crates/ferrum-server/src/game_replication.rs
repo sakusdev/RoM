@@ -1107,8 +1107,7 @@ fn dispatch_event(
                 for connection in connections.values_mut() {
                     queue_item_spawn(connection, snapshot.clone(), config, exit)?;
                 }
-            } else if let Some(snapshot) =
-                entity.as_ref().and_then(non_player_snapshot_from_entity)
+            } else if let Some(snapshot) = entity.as_ref().and_then(non_player_snapshot_from_entity)
             {
                 debug_assert_eq!(snapshot.transform, transform);
                 debug_assert_eq!(snapshot.velocity, velocity);
@@ -1576,11 +1575,7 @@ fn queue_non_player_remove_for_connection(
     entity_id: EntityId,
     exit: &mut GameReplicationExit,
 ) -> Result<()> {
-    if connection
-        .non_player_entities
-        .remove(&entity_id)
-        .is_none()
-    {
+    if connection.non_player_entities.remove(&entity_id).is_none() {
         return Ok(());
     }
     connection.queue(
@@ -2866,12 +2861,7 @@ mod tests {
             &mut inputs,
             PacketKind::MoveEntityPositionRotation,
         );
-        recv_protocol_until(
-            &writer,
-            &mut workers,
-            &mut inputs,
-            PacketKind::RotateHead,
-        );
+        recv_protocol_until(&writer, &mut workers, &mut inputs, PacketKind::RotateHead);
 
         game.move_entity(
             entity_id,
@@ -2897,7 +2887,10 @@ mod tests {
             &mut inputs,
             PacketKind::SetEntityMotion,
         );
-        assert_eq!(read_varint(&motion).0, i32::try_from(entity_id.get()).unwrap());
+        assert_eq!(
+            read_varint(&motion).0,
+            i32::try_from(entity_id.get()).unwrap()
+        );
 
         game.move_entity(
             entity_id,

@@ -10,8 +10,8 @@ use std::{
 };
 
 use ferrum_game::{
-    CommandError, CommandOutcome, CommandSource, ContainerClick, DamageSource, EquipmentSlot,
-    EntityId, EntityPayload, EntityType, GameEvent, GameSnapshot, GameState, GameStateError,
+    CommandError, CommandOutcome, CommandSource, ContainerClick, DamageSource, EntityId,
+    EntityPayload, EntityType, EquipmentSlot, GameEvent, GameSnapshot, GameState, GameStateError,
     ItemStack, PersistenceError, PlayerUuid, StatusEffectInstance, Transform, Velocity,
     execute_command,
 };
@@ -257,10 +257,7 @@ impl SharedGameRuntime {
         Ok(events)
     }
 
-    pub fn despawn_entity(
-        &self,
-        entity_id: EntityId,
-    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+    pub fn despawn_entity(&self, entity_id: EntityId) -> Result<Vec<GameEvent>, GameRuntimeError> {
         let events = self.write()?.despawn_entity(entity_id)?;
         self.publish(&events)?;
         Ok(events)
