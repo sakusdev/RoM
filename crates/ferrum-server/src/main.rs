@@ -21,11 +21,11 @@ use ferrum_nbt::{Tag, encode_anonymous};
 use ferrum_play::{
     BlockPosition, CommonPlayerSpawnInfo, DataComponentProtocolRegistry, DefaultSpawnPosition,
     EntityProtocolRegistry, GlobalPosition, ItemEntityMetadataProtocol, ItemProtocolRegistry,
-    JoinGame, PlayerPosition, PositionMoveRotation, ProtocolIdRegistry, encode_chunk_batch_finished,
-    encode_chunk_batch_start, encode_default_spawn_position, encode_join_game,
-    encode_level_chunk_with_light, encode_play_disconnect, encode_player_position,
-    encode_set_chunk_cache_center, encode_set_container_content, encode_set_container_slot,
-    encode_set_player_inventory_with_components, encode_system_chat,
+    JoinGame, PlayerPosition, PositionMoveRotation, ProtocolIdRegistry,
+    encode_chunk_batch_finished, encode_chunk_batch_start, encode_default_spawn_position,
+    encode_join_game, encode_level_chunk_with_light, encode_play_disconnect,
+    encode_player_position, encode_set_chunk_cache_center, encode_set_container_content,
+    encode_set_container_slot, encode_set_player_inventory_with_components, encode_system_chat,
 };
 use ferrum_protocol::{HandshakeIntent, PacketKind, PacketTable, ProtocolProfile, ProtocolSession};
 use ferrum_rompack::{RomPack, RomPackPacket, RomPackRegistry, RomPackWorld, read_rompack};
@@ -934,10 +934,8 @@ fn load_version_pack(path: &Path, config: &ServerConfig) -> Result<LoadedVersion
     .context("cannot build data component protocol registry from version pack")?;
     let attribute_protocol_ids = protocol_registry_from_pack(&pack, "minecraft:attribute")?;
     let mob_effect_protocol_ids = protocol_registry_from_pack(&pack, "minecraft:mob_effect")?;
-    let damage_type_protocol_ids = synchronized_registry_protocol_ids(
-        &pack.registries,
-        "minecraft:damage_type",
-    )?;
+    let damage_type_protocol_ids =
+        synchronized_registry_protocol_ids(&pack.registries, "minecraft:damage_type")?;
     println!(
         "loaded RoM version pack {} (SHA-256 {}, {} typed packets / {} catalog entries, {} items, data version {}, {} sections, {} registries / {} entries)",
         canonical.display(),

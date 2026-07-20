@@ -15,14 +15,14 @@ use ferrum_game::{
 use ferrum_play::{
     CommonPlayerSpawnInfo, DataComponentProtocolRegistry, EncodedEntityMovement,
     EntityMovementKind, EntityProtocolRegistry, EquipmentEntry, ItemEntityMetadataProtocol,
-    ItemProtocolRegistry, PlayerInfoEntry, Respawn, RespawnDataToKeep, encode_add_entity,
-    ProtocolIdRegistry, encode_add_entity_with_uuid, encode_damage_event,
-    encode_empty_entity_data, encode_entity_movement, encode_hurt_animation,
-    encode_item_entity_data, encode_player_combat_kill, encode_player_info_remove,
-    encode_player_info_update, encode_remove_entities, encode_remove_mob_effect, encode_respawn,
-    encode_rotate_head, encode_set_entity_motion, encode_set_equipment, encode_set_health,
-    encode_take_item_entity, encode_teleport_entity, encode_update_attribute,
-    encode_update_attributes, encode_update_mob_effect,
+    ItemProtocolRegistry, PlayerInfoEntry, ProtocolIdRegistry, Respawn, RespawnDataToKeep,
+    encode_add_entity, encode_add_entity_with_uuid, encode_damage_event, encode_empty_entity_data,
+    encode_entity_movement, encode_hurt_animation, encode_item_entity_data,
+    encode_player_combat_kill, encode_player_info_remove, encode_player_info_update,
+    encode_remove_entities, encode_remove_mob_effect, encode_respawn, encode_rotate_head,
+    encode_set_entity_motion, encode_set_equipment, encode_set_health, encode_take_item_entity,
+    encode_teleport_entity, encode_update_attribute, encode_update_attributes,
+    encode_update_mob_effect,
 };
 use ferrum_protocol::PacketKind;
 use ferrum_rompack::RomPackWorld;
@@ -805,12 +805,9 @@ fn dispatch_event(
             source,
             ..
         } => {
-            let damage_payload = encode_damage_event(
-                entity_id,
-                source,
-                &config.damage_type_protocol_ids,
-            )
-            .context("cannot encode player damage source")?;
+            let damage_payload =
+                encode_damage_event(entity_id, source, &config.damage_type_protocol_ids)
+                    .context("cannot encode player damage source")?;
             let payload = encode_hurt_animation(entity_id, 0.0)
                 .context("cannot encode player hurt animation")?;
             for (target, connection) in connections.iter_mut() {
@@ -883,8 +880,7 @@ fn dispatch_event(
                             exit,
                         );
                         if let Some(tracked) = connection.entities.get_mut(&uuid)
-                            && let Some(tracked_instance) =
-                                tracked.attributes.get_mut(&attribute)
+                            && let Some(tracked_instance) = tracked.attributes.get_mut(&attribute)
                         {
                             *tracked_instance = instance.clone();
                         }
@@ -1066,9 +1062,8 @@ fn dispatch_event(
                 }
             }
         }
-        GameEvent::TimeChanged { .. }
-        | GameEvent::SaveRequested
-        | GameEvent::ShutdownRequested => {}
+        GameEvent::TimeChanged { .. } | GameEvent::SaveRequested | GameEvent::ShutdownRequested => {
+        }
     }
     Ok(())
 }
@@ -1658,12 +1653,9 @@ fn queue_player_state_sync(
         );
     }
     for effect in snapshot.status_effects.iter().map(|(_, effect)| effect) {
-        if let Some(payload) = encode_update_mob_effect(
-            snapshot.entity_id,
-            effect,
-            &config.mob_effect_protocol_ids,
-        )
-        .context("cannot encode player status-effect snapshot")?
+        if let Some(payload) =
+            encode_update_mob_effect(snapshot.entity_id, effect, &config.mob_effect_protocol_ids)
+                .context("cannot encode player status-effect snapshot")?
         {
             connection.queue(
                 PlayOutput::ProtocolPacket {
@@ -1794,8 +1786,7 @@ mod tests {
             ("minecraft:step_height", 28),
         ])
         .unwrap();
-        config.mob_effect_protocol_ids =
-            ProtocolIdRegistry::new([("minecraft:haste", 2)]).unwrap();
+        config.mob_effect_protocol_ids = ProtocolIdRegistry::new([("minecraft:haste", 2)]).unwrap();
         config.damage_type_protocol_ids =
             ProtocolIdRegistry::new([("minecraft:player_attack", 34)]).unwrap();
         config
@@ -2644,19 +2635,14 @@ mod tests {
         };
         game.damage_player_with_source(steve, 1.0, source).unwrap();
         for writer in [&steve_writer, &observer_writer] {
-            let payload = recv_protocol_until(
-                writer,
-                &mut workers,
-                &mut inputs,
-                PacketKind::DamageEvent,
-            );
+            let payload =
+                recv_protocol_until(writer, &mut workers, &mut inputs, PacketKind::DamageEvent);
             let (entity_id, entity_id_bytes) = read_varint(&payload);
             assert_eq!(entity_id, steve_entity_id);
             assert_eq!(read_varint(&payload[entity_id_bytes..]).0, 34);
         }
 
-        game.remove_status_effect(steve, "minecraft:haste")
-            .unwrap();
+        game.remove_status_effect(steve, "minecraft:haste").unwrap();
         for writer in [&steve_writer, &observer_writer] {
             let payload = recv_protocol_until(
                 writer,

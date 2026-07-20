@@ -168,10 +168,7 @@ mod tests {
         assert_eq!(report.data_components[0].component, "minecraft:custom_name");
         assert_eq!(report.data_components[1].protocol_id, 3);
         assert_eq!(report.protocol_registries.len(), 3);
-        assert_eq!(
-            report.protocol_registries[2].id,
-            "minecraft:item"
-        );
+        assert_eq!(report.protocol_registries[2].id, "minecraft:item");
         assert_eq!(report.protocol_registries[2].entries[0].protocol_id, 0);
     }
 

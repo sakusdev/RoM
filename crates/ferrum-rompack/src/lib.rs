@@ -547,9 +547,7 @@ pub fn validate_rompack(pack: &RomPack, limits: RomPackLimits) -> Result<()> {
             bail!("version-pack protocol registries must be strictly sorted and unique");
         }
         previous_protocol_registry = Some(&registry.id);
-        if registry.entries.is_empty()
-            || registry.entries.len() > limits.max_entries_per_registry
-        {
+        if registry.entries.is_empty() || registry.entries.len() > limits.max_entries_per_registry {
             bail!(
                 "protocol registry {} entry count is outside the configured range",
                 registry.id

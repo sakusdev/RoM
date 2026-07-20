@@ -220,8 +220,8 @@ pub fn encode_set_entity_motion(
         if !component.is_finite() {
             return Err(EntitySyncEncodeError::NonFiniteVelocity);
         }
-        let value = (component.clamp(-MAX_PACKET_VELOCITY, MAX_PACKET_VELOCITY)
-            * VELOCITY_SCALE) as i16;
+        let value =
+            (component.clamp(-MAX_PACKET_VELOCITY, MAX_PACKET_VELOCITY) * VELOCITY_SCALE) as i16;
         output.extend_from_slice(&value.to_be_bytes());
     }
     Ok(output)
@@ -260,23 +260,16 @@ fn write_optional_entity_id(
     Ok(())
 }
 
-fn write_entity_id(
-    output: &mut Vec<u8>,
-    entity_id: EntityId,
-) -> Result<(), EntitySyncEncodeError> {
-    let value = i32::try_from(entity_id.get()).map_err(|_| {
-        EntitySyncEncodeError::EntityIdOutOfRange {
+fn write_entity_id(output: &mut Vec<u8>, entity_id: EntityId) -> Result<(), EntitySyncEncodeError> {
+    let value =
+        i32::try_from(entity_id.get()).map_err(|_| EntitySyncEncodeError::EntityIdOutOfRange {
             entity_id: entity_id.get(),
-        }
-    })?;
+        })?;
     write_varint(output, value);
     Ok(())
 }
 
-fn write_identifier(
-    output: &mut Vec<u8>,
-    identifier: &str,
-) -> Result<(), EntitySyncEncodeError> {
+fn write_identifier(output: &mut Vec<u8>, identifier: &str) -> Result<(), EntitySyncEncodeError> {
     validate_identifier(identifier)?;
     write_len(output, identifier.len())?;
     output.extend_from_slice(identifier.as_bytes());
@@ -312,9 +305,7 @@ fn validate_identifier(identifier: &str) -> Result<(), EntitySyncEncodeError> {
         && !path.is_empty()
         && identifier.len() <= MAX_IDENTIFIER_BYTES
         && namespace.bytes().all(|byte| {
-            byte.is_ascii_lowercase()
-                || byte.is_ascii_digit()
-                || matches!(byte, b'_' | b'-' | b'.')
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'_' | b'-' | b'.')
         })
         && path.bytes().all(|byte| {
             byte.is_ascii_lowercase()
@@ -374,25 +365,22 @@ mod tests {
 
     #[test]
     fn encodes_generated_attribute_ids_and_modifiers() {
-        let registry = ProtocolIdRegistry::new([
-            ("minecraft:armor", 0),
-            ("minecraft:movement_speed", 22),
-        ])
-        .unwrap();
+        let registry =
+            ProtocolIdRegistry::new([("minecraft:armor", 0), ("minecraft:movement_speed", 22)])
+                .unwrap();
         let mut attributes = AttributeSet::new();
         let mut speed = AttributeInstance::new(0.1, 0.0, 1_024.0).unwrap();
         speed
             .insert_modifier(
-                AttributeModifier::new(
-                    "test:sprint",
-                    0.3,
-                    AttributeOperation::AddMultipliedTotal,
-                )
-                .unwrap(),
+                AttributeModifier::new("test:sprint", 0.3, AttributeOperation::AddMultipliedTotal)
+                    .unwrap(),
             )
             .unwrap();
         attributes
-            .insert(ferrum_game::AttributeId::new("minecraft:movement_speed").unwrap(), speed)
+            .insert(
+                ferrum_game::AttributeId::new("minecraft:movement_speed").unwrap(),
+                speed,
+            )
             .unwrap();
         let payload = encode_update_attributes(entity_id(), &attributes, &registry)
             .unwrap()
@@ -409,12 +397,9 @@ mod tests {
     #[test]
     fn encodes_effect_flags_and_removal() {
         let registry = ProtocolIdRegistry::new([("minecraft:haste", 2)]).unwrap();
-        let mut effect = StatusEffectInstance::new(
-            StatusEffectId::new("minecraft:haste").unwrap(),
-            1,
-            200,
-        )
-        .unwrap();
+        let mut effect =
+            StatusEffectInstance::new(StatusEffectId::new("minecraft:haste").unwrap(), 1, 200)
+                .unwrap();
         effect.ambient = true;
         effect.show_icon = false;
         assert_eq!(
@@ -462,20 +447,13 @@ mod tests {
 
     #[test]
     fn unknown_generated_ids_are_never_guessed() {
-        let effect = StatusEffectInstance::new(
-            StatusEffectId::new("minecraft:speed").unwrap(),
-            0,
-            20,
-        )
-        .unwrap();
+        let effect =
+            StatusEffectInstance::new(StatusEffectId::new("minecraft:speed").unwrap(), 0, 20)
+                .unwrap();
         assert!(
-            encode_update_mob_effect(
-                entity_id(),
-                &effect,
-                &ProtocolIdRegistry::default()
-            )
-            .unwrap()
-            .is_none()
+            encode_update_mob_effect(entity_id(), &effect, &ProtocolIdRegistry::default())
+                .unwrap()
+                .is_none()
         );
     }
 }

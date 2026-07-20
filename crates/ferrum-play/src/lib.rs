@@ -24,9 +24,9 @@ pub use entity::{
     encode_rotate_head, encode_take_item_entity, encode_teleport_entity,
 };
 pub use entity_sync::{
-    EntitySyncEncodeError, ProtocolIdRegistry, encode_damage_event,
-    encode_remove_mob_effect, encode_set_entity_motion, encode_update_attribute,
-    encode_update_attributes, encode_update_mob_effect,
+    EntitySyncEncodeError, ProtocolIdRegistry, encode_damage_event, encode_remove_mob_effect,
+    encode_set_entity_motion, encode_update_attribute, encode_update_attributes,
+    encode_update_mob_effect,
 };
 pub use health::{HealthEncodeError, encode_set_health};
 pub use inventory::{
