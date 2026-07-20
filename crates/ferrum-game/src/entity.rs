@@ -309,6 +309,12 @@ impl EntityStore {
         transform: Transform,
         payload: EntityPayload,
     ) -> Result<EntityId, EntityError> {
+        Transform::new(
+            transform.position,
+            transform.yaw,
+            transform.pitch,
+            transform.on_ground,
+        )?;
         validate_payload(&payload)?;
         if self.uuids.contains_key(&uuid) {
             return Err(EntityError::DuplicateEntityUuid { uuid });
@@ -334,7 +340,12 @@ impl EntityStore {
     }
 
     pub fn insert_restored(&mut self, entity: Entity) -> Result<(), EntityError> {
-        validate_position(entity.transform.position)?;
+        Transform::new(
+            entity.transform.position,
+            entity.transform.yaw,
+            entity.transform.pitch,
+            entity.transform.on_ground,
+        )?;
         Velocity::new(entity.velocity.0)?;
         validate_payload(&entity.payload)?;
         if self.entities.contains_key(&entity.id) {
@@ -394,6 +405,12 @@ impl EntityStore {
         id: EntityId,
         transform: Transform,
     ) -> Result<Transform, EntityError> {
+        Transform::new(
+            transform.position,
+            transform.yaw,
+            transform.pitch,
+            transform.on_ground,
+        )?;
         let entity = self
             .entities
             .get_mut(&id)
@@ -406,6 +423,7 @@ impl EntityStore {
         id: EntityId,
         velocity: Velocity,
     ) -> Result<Velocity, EntityError> {
+        Velocity::new(velocity.0)?;
         let entity = self
             .entities
             .get_mut(&id)
@@ -582,6 +600,24 @@ mod tests {
         ));
         assert!(Transform::new([f64::NAN, 0.0, 0.0], 0.0, 0.0, false).is_err());
         assert!(Transform::new([MAX_ENTITY_COORDINATE + 1.0, 0.0, 0.0], 0.0, 0.0, false).is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_directly_constructed_motion_without_mutation() {
+        let mut store = EntityStore::new();
+        let id = store
+            .spawn(EntityUuid::new(12), player_type(), Transform::default())
+            .unwrap();
+        let invalid_transform = Transform {
+            position: [f64::NAN, 0.0, 0.0],
+            ..Transform::default()
+        };
+        assert!(store.set_transform(id, invalid_transform).is_err());
+        assert_eq!(store.get(id).unwrap().transform, Transform::default());
+
+        let invalid_velocity = Velocity([f64::INFINITY, 0.0, 0.0]);
+        assert!(store.set_velocity(id, invalid_velocity).is_err());
+        assert_eq!(store.get(id).unwrap().velocity, Velocity::default());
     }
 
     #[test]

@@ -464,6 +464,94 @@ impl GameState {
         Ok(vec![GameEvent::EntitySpawned { entity }])
     }
 
+    pub fn spawn_entity(
+        &mut self,
+        entity_type: EntityType,
+        transform: Transform,
+        velocity: Velocity,
+        payload: EntityPayload,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
+        if entity_type.as_str() == "minecraft:player" {
+            return Err(GameStateError::PlayerEntityRequiresConnection);
+        }
+        Velocity::new(velocity.0)?;
+        let entity_id =
+            self.entities
+                .spawn_generated(entity_type, transform, payload)?;
+        self.entities.set_velocity(entity_id, velocity)?;
+        let entity = self
+            .entities
+            .get(entity_id)
+            .expect("newly spawned entity exists")
+            .clone();
+        Ok(vec![GameEvent::EntitySpawned { entity }])
+    }
+
+    pub fn move_entity(
+        &mut self,
+        entity_id: EntityId,
+        transform: Transform,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
+        let entity = self
+            .entities
+            .get(entity_id)
+            .ok_or(EntityError::UnknownEntity { id: entity_id })?;
+        if entity.is_player() {
+            return Err(GameStateError::PlayerEntityRequiresConnection);
+        }
+        let velocity = entity.velocity;
+        if entity.transform == transform {
+            return Ok(Vec::new());
+        }
+        self.entities.set_transform(entity_id, transform)?;
+        Ok(vec![GameEvent::EntityMoved {
+            entity_id,
+            transform,
+            velocity,
+        }])
+    }
+
+    pub fn set_entity_velocity(
+        &mut self,
+        entity_id: EntityId,
+        velocity: Velocity,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
+        let entity = self
+            .entities
+            .get(entity_id)
+            .ok_or(EntityError::UnknownEntity { id: entity_id })?;
+        if entity.is_player() {
+            return Err(GameStateError::PlayerEntityRequiresConnection);
+        }
+        let transform = entity.transform;
+        if entity.velocity == velocity {
+            return Ok(Vec::new());
+        }
+        self.entities.set_velocity(entity_id, velocity)?;
+        Ok(vec![GameEvent::EntityMoved {
+            entity_id,
+            transform,
+            velocity,
+        }])
+    }
+
+    pub fn despawn_entity(
+        &mut self,
+        entity_id: EntityId,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
+        let entity = self
+            .entities
+            .get(entity_id)
+            .ok_or(EntityError::UnknownEntity { id: entity_id })?;
+        if entity.is_player() {
+            return Err(GameStateError::PlayerEntityRequiresConnection);
+        }
+        self.entities
+            .despawn(entity_id)
+            .expect("validated entity exists");
+        Ok(vec![GameEvent::EntityRemoved { entity_id }])
+    }
+
     pub fn pickup_nearby_items(
         &mut self,
         uuid: PlayerUuid,
@@ -1454,6 +1542,8 @@ pub enum GameStateError {
     PlayerNotConnected { uuid: PlayerUuid },
     #[error("connected player {uuid:?} has no entity")]
     PlayerMissingEntity { uuid: PlayerUuid },
+    #[error("player entities must be managed through the player connection lifecycle")]
+    PlayerEntityRequiresConnection,
     #[error("player {uuid:?} is dead and must respawn before healing")]
     PlayerDead { uuid: PlayerUuid },
     #[error("player {uuid:?} is alive and cannot respawn")]
@@ -2094,5 +2184,59 @@ mod tests {
                 && transform.position[1] < 70.0
                 && velocity.0[1] < 0.0
         )));
+    }
+
+    #[test]
+    fn manages_non_player_entity_lifecycle_without_bypassing_player_state() {
+        let mut state = GameState::default();
+        let spawned = state
+            .spawn_entity(
+                EntityType::new("minecraft:zombie").unwrap(),
+                spawn(),
+                Velocity::default(),
+                EntityPayload::Living(crate::LivingEntityData::new(20.0).unwrap()),
+            )
+            .unwrap();
+        let entity_id = match &spawned[0] {
+            GameEvent::EntitySpawned { entity } => entity.id,
+            event => panic!("unexpected event: {event:?}"),
+        };
+
+        let moved = Transform::new([4.5, 65.0, -2.5], 90.0, 0.0, true).unwrap();
+        assert!(matches!(
+            state.move_entity(entity_id, moved).unwrap().as_slice(),
+            [GameEvent::EntityMoved {
+                entity_id: moved_id,
+                transform,
+                ..
+            }] if *moved_id == entity_id && *transform == moved
+        ));
+        let velocity = Velocity::new([0.2, 0.1, -0.2]).unwrap();
+        assert!(matches!(
+            state
+                .set_entity_velocity(entity_id, velocity)
+                .unwrap()
+                .as_slice(),
+            [GameEvent::EntityMoved {
+                entity_id: moved_id,
+                velocity: moved_velocity,
+                ..
+            }] if *moved_id == entity_id && *moved_velocity == velocity
+        ));
+        assert_eq!(
+            state.despawn_entity(entity_id).unwrap(),
+            [GameEvent::EntityRemoved { entity_id }]
+        );
+        assert!(state.entities().get(entity_id).is_none());
+
+        assert!(matches!(
+            state.spawn_entity(
+                EntityType::new("minecraft:player").unwrap(),
+                spawn(),
+                Velocity::default(),
+                EntityPayload::Generic,
+            ),
+            Err(GameStateError::PlayerEntityRequiresConnection)
+        ));
     }
 }

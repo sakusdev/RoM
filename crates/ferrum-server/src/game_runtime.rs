@@ -11,8 +11,9 @@ use std::{
 
 use ferrum_game::{
     CommandError, CommandOutcome, CommandSource, ContainerClick, DamageSource, EquipmentSlot,
-    GameEvent, GameSnapshot, GameState, GameStateError, ItemStack, PersistenceError, PlayerUuid,
-    StatusEffectInstance, Transform, Velocity, execute_command,
+    EntityId, EntityPayload, EntityType, GameEvent, GameSnapshot, GameState, GameStateError,
+    ItemStack, PersistenceError, PlayerUuid, StatusEffectInstance, Transform, Velocity,
+    execute_command,
 };
 use thiserror::Error;
 
@@ -218,6 +219,49 @@ impl SharedGameRuntime {
         let events = self
             .write()?
             .spawn_item_entity(transform, stack, velocity, owner)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn spawn_entity(
+        &self,
+        entity_type: EntityType,
+        transform: Transform,
+        velocity: Velocity,
+        payload: EntityPayload,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self
+            .write()?
+            .spawn_entity(entity_type, transform, velocity, payload)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn move_entity(
+        &self,
+        entity_id: EntityId,
+        transform: Transform,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self.write()?.move_entity(entity_id, transform)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn set_entity_velocity(
+        &self,
+        entity_id: EntityId,
+        velocity: Velocity,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self.write()?.set_entity_velocity(entity_id, velocity)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn despawn_entity(
+        &self,
+        entity_id: EntityId,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self.write()?.despawn_entity(entity_id)?;
         self.publish(&events)?;
         Ok(events)
     }
@@ -553,5 +597,43 @@ mod tests {
             subscription.try_recv().unwrap(),
             GameEvent::PlayerKilled { .. }
         ));
+    }
+
+    #[test]
+    fn publishes_non_player_entity_lifecycle_events() {
+        let runtime = SharedGameRuntime::vanilla_overworld();
+        let subscription = runtime.subscribe(NonZeroUsize::new(4).unwrap()).unwrap();
+        let spawned = runtime
+            .spawn_entity(
+                EntityType::new("minecraft:zombie").unwrap(),
+                spawn(),
+                Velocity::default(),
+                EntityPayload::Living(ferrum_game::LivingEntityData::new(20.0).unwrap()),
+            )
+            .unwrap();
+        let entity_id = match &spawned[0] {
+            GameEvent::EntitySpawned { entity } => entity.id,
+            event => panic!("unexpected event: {event:?}"),
+        };
+        assert!(matches!(
+            subscription.try_recv().unwrap(),
+            GameEvent::EntitySpawned { entity } if entity.id == entity_id
+        ));
+
+        runtime
+            .move_entity(
+                entity_id,
+                Transform::new([2.5, 65.0, 0.5], 0.0, 0.0, true).unwrap(),
+            )
+            .unwrap();
+        assert!(matches!(
+            subscription.try_recv().unwrap(),
+            GameEvent::EntityMoved { entity_id: moved, .. } if moved == entity_id
+        ));
+        runtime.despawn_entity(entity_id).unwrap();
+        assert_eq!(
+            subscription.try_recv().unwrap(),
+            GameEvent::EntityRemoved { entity_id }
+        );
     }
 }

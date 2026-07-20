@@ -115,6 +115,17 @@ struct ItemEntitySnapshot {
     stack: ItemStack,
 }
 
+#[derive(Debug, Clone)]
+struct NonPlayerEntitySnapshot {
+    entity_id: EntityId,
+    uuid: EntityUuid,
+    entity_type: String,
+    transform: Transform,
+    velocity: Velocity,
+    attributes: Option<AttributeSet>,
+    status_effects: Option<StatusEffectSet>,
+}
+
 #[derive(Debug)]
 struct ReplicationConnection {
     endpoint: PlayReaderEndpoint,
@@ -123,6 +134,7 @@ struct ReplicationConnection {
     next_teleport_id: i32,
     entities: BTreeMap<PlayerUuid, PlayerEntitySnapshot>,
     item_entities: BTreeMap<EntityId, ItemEntitySnapshot>,
+    non_player_entities: BTreeMap<EntityId, NonPlayerEntitySnapshot>,
     viewer_transform: Option<Transform>,
     active: bool,
     healthy: bool,
@@ -138,6 +150,7 @@ impl ReplicationConnection {
             next_teleport_id: 2,
             entities: BTreeMap::new(),
             item_entities: BTreeMap::new(),
+            non_player_entities: BTreeMap::new(),
             viewer_transform: None,
             active: false,
             healthy: true,
@@ -164,6 +177,7 @@ impl ReplicationConnection {
             self.pending.clear();
             self.entities.clear();
             self.item_entities.clear();
+            self.non_player_entities.clear();
             self.healthy = false;
             exit.dropped_outputs = exit.dropped_outputs.saturating_add(1);
             let _ = self.endpoint.try_disconnect();
@@ -431,7 +445,7 @@ fn process_commands(
             }
             ReplicationCommand::Activate { uuid, reply } => {
                 let result = (|| -> Result<()> {
-                    let (self_state, snapshots, item_snapshots) = runtime
+                    let (self_state, snapshots, item_snapshots, non_player_snapshots) = runtime
                         .with_state(|state| -> Result<_> {
                             let self_state = match state.player(uuid) {
                                 Some(player) if player.connected => Some((
@@ -466,7 +480,19 @@ fn process_commands(
                                 .iter()
                                 .filter_map(|(_, entity)| item_snapshot_from_entity(entity))
                                 .collect::<Vec<_>>();
-                            Ok((self_state, snapshots, item_snapshots))
+                            let non_player_snapshots = state
+                                .entities()
+                                .iter()
+                                .filter_map(|(_, entity)| {
+                                    non_player_snapshot_from_entity(entity)
+                                })
+                                .collect::<Vec<_>>();
+                            Ok((
+                                self_state,
+                                snapshots,
+                                item_snapshots,
+                                non_player_snapshots,
+                            ))
                         })
                         .context("cannot read activation snapshot")??;
                     let connection = connections.get_mut(&uuid).with_context(|| {
@@ -491,6 +517,9 @@ fn process_commands(
                         for snapshot in item_snapshots {
                             queue_item_spawn(connection, snapshot, config, exit)?;
                         }
+                    }
+                    for snapshot in non_player_snapshots {
+                        queue_non_player_spawn(connection, snapshot, config, exit)?;
                     }
                     if !connection.healthy {
                         bail!("initial replication snapshot exceeded the bounded output queue");
@@ -1069,24 +1098,28 @@ fn dispatch_event(
             transform,
             velocity,
         } => {
-            let snapshot = runtime
-                .with_state(|state| {
-                    state
-                        .entities()
-                        .get(entity_id)
-                        .and_then(item_snapshot_from_entity)
-                })
-                .context("cannot read moving item entity snapshot")?;
-            if let Some(snapshot) = snapshot {
+            let entity = runtime
+                .with_state(|state| state.entities().get(entity_id).cloned())
+                .context("cannot read moving entity snapshot")?;
+            if let Some(snapshot) = entity.as_ref().and_then(item_snapshot_from_entity) {
                 debug_assert_eq!(snapshot.transform, transform);
                 debug_assert_eq!(snapshot.velocity, velocity);
                 for connection in connections.values_mut() {
                     queue_item_spawn(connection, snapshot.clone(), config, exit)?;
                 }
+            } else if let Some(snapshot) =
+                entity.as_ref().and_then(non_player_snapshot_from_entity)
+            {
+                debug_assert_eq!(snapshot.transform, transform);
+                debug_assert_eq!(snapshot.velocity, velocity);
+                for connection in connections.values_mut() {
+                    queue_non_player_spawn(connection, snapshot.clone(), config, exit)?;
+                }
             }
         }
         GameEvent::EntityRemoved { entity_id } => {
             queue_item_remove(connections, entity_id, exit)?;
+            queue_non_player_remove(connections, entity_id, exit)?;
         }
         GameEvent::ItemEntityChanged { entity_id, stack } => {
             queue_item_stack_update(connections, entity_id, &stack, config, exit)?;
@@ -1115,6 +1148,10 @@ fn dispatch_event(
                 for connection in connections.values_mut() {
                     queue_item_spawn(connection, snapshot.clone(), config, exit)?;
                 }
+            } else if let Some(snapshot) = non_player_snapshot_from_entity(&entity) {
+                for connection in connections.values_mut() {
+                    queue_non_player_spawn(connection, snapshot.clone(), config, exit)?;
+                }
             }
         }
         GameEvent::TimeChanged { .. } | GameEvent::SaveRequested | GameEvent::ShutdownRequested => {
@@ -1141,6 +1178,34 @@ fn item_snapshot_from_entity(entity: &Entity) -> Option<ItemEntitySnapshot> {
         transform: entity.transform,
         velocity: entity.velocity,
         stack: item.stack.clone(),
+    })
+}
+
+fn non_player_snapshot_from_entity(entity: &Entity) -> Option<NonPlayerEntitySnapshot> {
+    if entity.is_player()
+        || entity.entity_type.as_str() == "minecraft:item"
+        || matches!(
+            &entity.payload,
+            EntityPayload::Item(_) | EntityPayload::ExperienceOrb { .. }
+        )
+    {
+        return None;
+    }
+    let (attributes, status_effects) = match &entity.payload {
+        EntityPayload::Living(living) => (
+            Some(living.attributes.clone()),
+            Some(living.status_effects.clone()),
+        ),
+        _ => (None, None),
+    };
+    Some(NonPlayerEntitySnapshot {
+        entity_id: entity.id,
+        uuid: entity.uuid,
+        entity_type: entity.entity_type.as_str().to_owned(),
+        transform: entity.transform,
+        velocity: entity.velocity,
+        attributes,
+        status_effects,
     })
 }
 
@@ -1192,9 +1257,11 @@ fn queue_item_spawn(
                     exit,
                 );
             }
-            connection
-                .item_entities
-                .insert(snapshot.entity_id, snapshot);
+            if connection.healthy {
+                connection
+                    .item_entities
+                    .insert(snapshot.entity_id, snapshot);
+            }
             return Ok(());
         }
         queue_item_remove_for_connection(connection, snapshot.entity_id, exit)?;
@@ -1243,6 +1310,157 @@ fn queue_item_spawn(
         connection
             .item_entities
             .insert(snapshot.entity_id, snapshot);
+    }
+    Ok(())
+}
+
+fn queue_non_player_spawn(
+    connection: &mut ReplicationConnection,
+    snapshot: NonPlayerEntitySnapshot,
+    config: &GameReplicationConfig,
+    exit: &mut GameReplicationExit,
+) -> Result<()> {
+    if !connection.active || !connection.healthy {
+        return Ok(());
+    }
+    if config
+        .entity_protocol_ids
+        .protocol_id(&snapshot.entity_type)
+        .is_none()
+        || !connection_tracks_position(connection, snapshot.transform, config)
+    {
+        queue_non_player_remove_for_connection(connection, snapshot.entity_id, exit)?;
+        return Ok(());
+    }
+    if let Some(tracked) = connection
+        .non_player_entities
+        .get(&snapshot.entity_id)
+        .cloned()
+    {
+        if tracked.uuid == snapshot.uuid && tracked.entity_type == snapshot.entity_type {
+            if tracked.transform != snapshot.transform
+                && let Some(mut movement) = encode_entity_movement(
+                    snapshot.entity_id,
+                    tracked.transform,
+                    snapshot.transform,
+                )
+                .context("cannot encode non-player entity movement")?
+            {
+                if movement.kind == EntityMovementKind::Teleport {
+                    movement.payload = encode_teleport_entity(
+                        snapshot.entity_id,
+                        snapshot.transform,
+                        snapshot.velocity,
+                    )
+                    .context("cannot encode non-player entity teleport")?;
+                }
+                queue_encoded_movement(connection, movement, exit);
+            }
+            if tracked.transform.yaw.to_bits() != snapshot.transform.yaw.to_bits() {
+                connection.queue(
+                    PlayOutput::ProtocolPacket {
+                        kind: PacketKind::RotateHead,
+                        payload: encode_rotate_head(snapshot.entity_id, snapshot.transform.yaw)
+                            .context("cannot encode non-player entity head rotation")?,
+                    },
+                    exit,
+                );
+            }
+            if tracked.velocity != snapshot.velocity {
+                connection.queue(
+                    PlayOutput::ProtocolPacket {
+                        kind: PacketKind::SetEntityMotion,
+                        payload: encode_set_entity_motion(snapshot.entity_id, snapshot.velocity)
+                            .context("cannot encode non-player entity velocity")?,
+                    },
+                    exit,
+                );
+            }
+            if connection.healthy {
+                connection
+                    .non_player_entities
+                    .insert(snapshot.entity_id, snapshot);
+            }
+            return Ok(());
+        }
+        queue_non_player_remove_for_connection(connection, snapshot.entity_id, exit)?;
+    }
+    let Some(payload) = encode_add_entity_with_uuid(
+        snapshot.entity_id,
+        snapshot.uuid,
+        &snapshot.entity_type,
+        snapshot.transform,
+        snapshot.velocity,
+        &config.entity_protocol_ids,
+    )
+    .context("cannot encode non-player add-entity packet")?
+    else {
+        return Ok(());
+    };
+    connection.queue(
+        PlayOutput::ProtocolPacket {
+            kind: PacketKind::AddEntity,
+            payload,
+        },
+        exit,
+    );
+    connection.queue(
+        PlayOutput::ProtocolPacket {
+            kind: PacketKind::SetEntityData,
+            payload: encode_empty_entity_data(snapshot.entity_id)
+                .context("cannot encode empty non-player entity data")?,
+        },
+        exit,
+    );
+    queue_non_player_state_sync(connection, &snapshot, config, exit)?;
+    if connection.healthy {
+        connection
+            .non_player_entities
+            .insert(snapshot.entity_id, snapshot);
+    }
+    Ok(())
+}
+
+fn queue_non_player_state_sync(
+    connection: &mut ReplicationConnection,
+    snapshot: &NonPlayerEntitySnapshot,
+    config: &GameReplicationConfig,
+    exit: &mut GameReplicationExit,
+) -> Result<()> {
+    if let Some(attributes) = &snapshot.attributes
+        && let Some(payload) = encode_update_attributes(
+            snapshot.entity_id,
+            attributes,
+            &config.attribute_protocol_ids,
+        )
+        .context("cannot encode non-player attribute snapshot")?
+    {
+        connection.queue(
+            PlayOutput::ProtocolPacket {
+                kind: PacketKind::UpdateAttributes,
+                payload,
+            },
+            exit,
+        );
+    }
+    if let Some(status_effects) = &snapshot.status_effects {
+        for effect in status_effects.iter().map(|(_, effect)| effect) {
+            if let Some(payload) = encode_update_mob_effect(
+                snapshot.entity_id,
+                effect,
+                &config.mob_effect_protocol_ids,
+            )
+            .context("cannot encode non-player status-effect snapshot")?
+            {
+                connection.queue(
+                    PlayOutput::ProtocolPacket {
+                        kind: PacketKind::UpdateMobEffect,
+                        payload,
+                    },
+                    exit,
+                );
+            }
+        }
     }
     Ok(())
 }
@@ -1353,6 +1571,40 @@ fn queue_item_remove(
     Ok(())
 }
 
+fn queue_non_player_remove_for_connection(
+    connection: &mut ReplicationConnection,
+    entity_id: EntityId,
+    exit: &mut GameReplicationExit,
+) -> Result<()> {
+    if connection
+        .non_player_entities
+        .remove(&entity_id)
+        .is_none()
+    {
+        return Ok(());
+    }
+    connection.queue(
+        PlayOutput::ProtocolPacket {
+            kind: PacketKind::RemoveEntities,
+            payload: encode_remove_entities(&[entity_id])
+                .context("cannot encode non-player entity removal")?,
+        },
+        exit,
+    );
+    Ok(())
+}
+
+fn queue_non_player_remove(
+    connections: &mut BTreeMap<PlayerUuid, ReplicationConnection>,
+    entity_id: EntityId,
+    exit: &mut GameReplicationExit,
+) -> Result<()> {
+    for connection in connections.values_mut() {
+        queue_non_player_remove_for_connection(connection, entity_id, exit)?;
+    }
+    Ok(())
+}
+
 const fn protocol_game_mode(game_mode: GameMode) -> i8 {
     match game_mode {
         GameMode::Survival => 0,
@@ -1438,7 +1690,7 @@ fn reconcile_connection_visibility(
     config: &GameReplicationConfig,
     exit: &mut GameReplicationExit,
 ) -> Result<()> {
-    let (players, items) = runtime
+    let (players, items, non_players) = runtime
         .with_state(|state| -> Result<_> {
             let mut players = Vec::new();
             for player in state
@@ -1457,7 +1709,12 @@ fn reconcile_connection_visibility(
                 .iter()
                 .filter_map(|(_, entity)| item_snapshot_from_entity(entity))
                 .collect::<Vec<_>>();
-            Ok((players, items))
+            let non_players = state
+                .entities()
+                .iter()
+                .filter_map(|(_, entity)| non_player_snapshot_from_entity(entity))
+                .collect::<Vec<_>>();
+            Ok((players, items, non_players))
         })
         .context("cannot read entity visibility snapshot")??;
     if entity_replication_enabled(&config.entity_protocol_ids) {
@@ -1469,6 +1726,9 @@ fn reconcile_connection_visibility(
         for snapshot in items {
             queue_item_spawn(connection, snapshot, config, exit)?;
         }
+    }
+    for snapshot in non_players {
+        queue_non_player_spawn(connection, snapshot, config, exit)?;
     }
     Ok(())
 }
@@ -1874,6 +2134,7 @@ mod tests {
             entity_protocol_ids: EntityProtocolRegistry::new([
                 ("minecraft:item", 71),
                 ("minecraft:player", 148),
+                ("minecraft:zombie", 153),
             ])
             .unwrap(),
             item_protocol_ids: ItemProtocolRegistry::new([("minecraft:stone", 1)]).unwrap(),
@@ -2538,6 +2799,132 @@ mod tests {
         .unwrap();
         recv_protocol_until(
             &steve_writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::RemoveEntities,
+        );
+        service.shutdown().unwrap();
+    }
+
+    #[test]
+    fn replicates_non_player_entity_spawn_motion_teleport_and_remove() {
+        let game = SharedGameRuntime::vanilla_overworld();
+        let mut config = entity_config();
+        config.entity_tracking_range_blocks = 8;
+        let service = spawn_game_replication(&game, config).unwrap();
+        let player = PlayerUuid::new(253);
+        let (connector, mut workers) = worker_channel(NonZeroUsize::new(128).unwrap());
+        let (reader, writer) = register_play_connection(
+            &connector,
+            ConnectionId::new(253),
+            NonZeroUsize::new(64).unwrap(),
+        )
+        .unwrap();
+        let mut inputs = BoundedInputQueue::try_new(128).unwrap();
+        ingest(&mut workers, &mut inputs);
+        service.control().register(player, reader).unwrap();
+        service.control().activate(player).unwrap();
+        game.connect_player(player, "Steve", spawn()).unwrap();
+        recv_protocol_until(
+            &writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::PlayerInfoUpdate,
+        );
+
+        let spawned = game
+            .spawn_entity(
+                ferrum_game::EntityType::new("minecraft:zombie").unwrap(),
+                Transform::new([2.5, 65.0, 0.5], 0.0, 0.0, true).unwrap(),
+                Velocity::default(),
+                EntityPayload::Living(ferrum_game::LivingEntityData::new(20.0).unwrap()),
+            )
+            .unwrap();
+        let entity_id = match &spawned[0] {
+            GameEvent::EntitySpawned { entity } => entity.id,
+            event => panic!("unexpected event: {event:?}"),
+        };
+        let add = recv_protocol_until(&writer, &mut workers, &mut inputs, PacketKind::AddEntity);
+        let (encoded_entity_id, entity_id_bytes) = read_varint(&add);
+        assert_eq!(encoded_entity_id, i32::try_from(entity_id.get()).unwrap());
+        assert_eq!(read_varint(&add[entity_id_bytes + 16..]).0, 153);
+        recv_protocol_until(
+            &writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::SetEntityData,
+        );
+
+        game.move_entity(
+            entity_id,
+            Transform::new([3.5, 65.0, 0.5], 45.0, 0.0, true).unwrap(),
+        )
+        .unwrap();
+        recv_protocol_until(
+            &writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::MoveEntityPositionRotation,
+        );
+        recv_protocol_until(
+            &writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::RotateHead,
+        );
+
+        game.move_entity(
+            entity_id,
+            Transform::new([-7.0, 65.0, 0.5], 45.0, 0.0, true).unwrap(),
+        )
+        .unwrap();
+        let teleport = recv_protocol_until(
+            &writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::TeleportEntity,
+        );
+        assert_eq!(
+            read_varint(&teleport).0,
+            i32::try_from(entity_id.get()).unwrap()
+        );
+
+        game.set_entity_velocity(entity_id, Velocity::new([0.2, 0.0, -0.1]).unwrap())
+            .unwrap();
+        let motion = recv_protocol_until(
+            &writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::SetEntityMotion,
+        );
+        assert_eq!(read_varint(&motion).0, i32::try_from(entity_id.get()).unwrap());
+
+        game.move_entity(
+            entity_id,
+            Transform::new([32.5, 65.0, 0.5], 45.0, 0.0, true).unwrap(),
+        )
+        .unwrap();
+        recv_protocol_until(
+            &writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::RemoveEntities,
+        );
+        game.move_entity(
+            entity_id,
+            Transform::new([4.5, 65.0, 0.5], 45.0, 0.0, true).unwrap(),
+        )
+        .unwrap();
+        recv_protocol_until(&writer, &mut workers, &mut inputs, PacketKind::AddEntity);
+        recv_protocol_until(
+            &writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::SetEntityData,
+        );
+        game.despawn_entity(entity_id).unwrap();
+        recv_protocol_until(
+            &writer,
             &mut workers,
             &mut inputs,
             PacketKind::RemoveEntities,
@@ -3266,6 +3653,8 @@ mod tests {
         assert!(!connection.healthy);
         assert!(connection.pending.is_empty());
         assert!(connection.entities.is_empty());
+        assert!(connection.item_entities.is_empty());
+        assert!(connection.non_player_entities.is_empty());
         assert_eq!(exit.dropped_outputs, 1);
     }
 }
