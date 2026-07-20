@@ -144,6 +144,11 @@ pub const DEFAULT_ITEM_PICKUP_DELAY_TICKS: u32 = 10;
 pub const DEFAULT_ITEM_DESPAWN_TICKS: u64 = 20 * 60 * 5;
 pub const MAX_EXPERIENCE_ORB_VALUE: u32 = 32_767;
 pub const MAX_LIVING_ENTITY_DROPS: usize = 64;
+pub const MAX_MOB_FOLLOW_RANGE: f64 = 128.0;
+pub const MAX_MOB_MOVEMENT_SPEED: f64 = 1.0;
+pub const MAX_MOB_ATTACK_RANGE: f64 = 16.0;
+pub const MAX_MOB_ATTACK_DAMAGE: f32 = 2_048.0;
+pub const MAX_MOB_ATTACK_INTERVAL_TICKS: u32 = 20 * 60;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ItemEntityData {
@@ -151,6 +156,45 @@ pub struct ItemEntityData {
     pub pickup_delay_ticks: u32,
     pub despawn_after_ticks: u64,
     pub owner: Option<PlayerUuid>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MobAi {
+    pub target: Option<PlayerUuid>,
+    pub follow_range: f64,
+    pub movement_speed: f64,
+    pub attack_range: f64,
+    pub attack_damage: f32,
+    pub attack_interval_ticks: u32,
+    pub attack_cooldown_ticks: u32,
+}
+
+impl MobAi {
+    pub fn new(
+        follow_range: f64,
+        movement_speed: f64,
+        attack_range: f64,
+        attack_damage: f32,
+        attack_interval_ticks: u32,
+    ) -> Result<Self, EntityError> {
+        let ai = Self {
+            target: None,
+            follow_range,
+            movement_speed,
+            attack_range,
+            attack_damage,
+            attack_interval_ticks,
+            attack_cooldown_ticks: 0,
+        };
+        validate_mob_ai(&ai)?;
+        Ok(ai)
+    }
+
+    #[must_use]
+    pub fn hostile_default() -> Self {
+        Self::new(32.0, 0.1, 1.5, 3.0, 20)
+            .expect("built-in hostile mob AI values are valid")
+    }
 }
 
 impl ItemEntityData {
@@ -180,6 +224,8 @@ pub struct LivingEntityData {
     pub status_effects: StatusEffectSet,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub drops: Vec<ItemStack>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai: Option<MobAi>,
 }
 
 impl LivingEntityData {
@@ -193,6 +239,7 @@ impl LivingEntityData {
             attributes: AttributeSet::default(),
             status_effects: StatusEffectSet::default(),
             drops: Vec::new(),
+            ai: None,
         })
     }
 
@@ -204,6 +251,18 @@ impl LivingEntityData {
             });
         }
         self.drops = drops;
+        Ok(self)
+    }
+
+    #[must_use]
+    pub fn with_hostile_ai(mut self) -> Self {
+        self.ai = Some(MobAi::hostile_default());
+        self
+    }
+
+    pub fn with_ai(mut self, ai: MobAi) -> Result<Self, EntityError> {
+        validate_mob_ai(&ai)?;
+        self.ai = Some(ai);
         Ok(self)
     }
 }
@@ -533,6 +592,9 @@ fn validate_payload(payload: &EntityPayload) -> Result<(), EntityError> {
                     limit: MAX_LIVING_ENTITY_DROPS,
                 });
             }
+            if let Some(ai) = &living.ai {
+                validate_mob_ai(ai)?;
+            }
         }
         EntityPayload::ExperienceOrb { value } if *value > MAX_EXPERIENCE_ORB_VALUE => {
             return Err(EntityError::ExperienceOrbValueOutOfRange { value: *value });
@@ -543,6 +605,54 @@ fn validate_payload(payload: &EntityPayload) -> Result<(), EntityError> {
             return Err(EntityError::InvalidProjectileGravity { gravity: *gravity });
         }
         _ => {}
+    }
+    Ok(())
+}
+
+fn validate_mob_ai(ai: &MobAi) -> Result<(), EntityError> {
+    for (field, value, minimum, maximum) in [
+        ("follow_range", ai.follow_range, f64::EPSILON, MAX_MOB_FOLLOW_RANGE),
+        (
+            "movement_speed",
+            ai.movement_speed,
+            0.0,
+            MAX_MOB_MOVEMENT_SPEED,
+        ),
+        (
+            "attack_range",
+            ai.attack_range,
+            f64::EPSILON,
+            MAX_MOB_ATTACK_RANGE,
+        ),
+        (
+            "attack_damage",
+            f64::from(ai.attack_damage),
+            0.0,
+            f64::from(MAX_MOB_ATTACK_DAMAGE),
+        ),
+    ] {
+        if !value.is_finite() || !(minimum..=maximum).contains(&value) {
+            return Err(EntityError::InvalidMobAiValue {
+                field,
+                value,
+                minimum,
+                maximum,
+            });
+        }
+    }
+    if ai.attack_interval_ticks == 0
+        || ai.attack_interval_ticks > MAX_MOB_ATTACK_INTERVAL_TICKS
+    {
+        return Err(EntityError::InvalidMobAttackInterval {
+            ticks: ai.attack_interval_ticks,
+            maximum: MAX_MOB_ATTACK_INTERVAL_TICKS,
+        });
+    }
+    if ai.attack_cooldown_ticks > ai.attack_interval_ticks {
+        return Err(EntityError::InvalidMobAttackCooldown {
+            cooldown: ai.attack_cooldown_ticks,
+            interval: ai.attack_interval_ticks,
+        });
     }
     Ok(())
 }
@@ -591,6 +701,17 @@ pub enum EntityError {
     InvalidLivingHealth { health: f32 },
     #[error("living entity has {actual} drop stacks; limit is {limit}")]
     TooManyLivingEntityDrops { actual: usize, limit: usize },
+    #[error("mob AI {field} value {value} must be finite and between {minimum} and {maximum}")]
+    InvalidMobAiValue {
+        field: &'static str,
+        value: f64,
+        minimum: f64,
+        maximum: f64,
+    },
+    #[error("mob attack interval {ticks} must be between 1 and {maximum} ticks")]
+    InvalidMobAttackInterval { ticks: u32, maximum: u32 },
+    #[error("mob attack cooldown {cooldown} exceeds interval {interval}")]
+    InvalidMobAttackCooldown { cooldown: u32, interval: u32 },
     #[error("experience orb value {value} exceeds {MAX_EXPERIENCE_ORB_VALUE}")]
     ExperienceOrbValueOutOfRange { value: u32 },
     #[error("projectile gravity {gravity} must be finite and between 0 and 1")]
@@ -671,6 +792,22 @@ mod tests {
                 actual,
                 limit: MAX_LIVING_ENTITY_DROPS,
             } if actual == MAX_LIVING_ENTITY_DROPS + 1
+        ));
+    }
+
+    #[test]
+    fn validates_bounded_mob_ai_configuration() {
+        assert_eq!(MobAi::hostile_default().attack_interval_ticks, 20);
+        assert!(matches!(
+            MobAi::new(MAX_MOB_FOLLOW_RANGE + 1.0, 0.1, 1.5, 3.0, 20),
+            Err(EntityError::InvalidMobAiValue {
+                field: "follow_range",
+                ..
+            })
+        ));
+        assert!(matches!(
+            MobAi::new(32.0, 0.1, 1.5, 3.0, 0),
+            Err(EntityError::InvalidMobAttackInterval { ticks: 0, .. })
         ));
     }
 

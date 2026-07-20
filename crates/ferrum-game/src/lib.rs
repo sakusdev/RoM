@@ -40,7 +40,8 @@ pub use effects::{
 pub use entity::{
     DEFAULT_ITEM_DESPAWN_TICKS, DEFAULT_ITEM_PICKUP_DELAY_TICKS, Entity, EntityError, EntityId,
     EntityPayload, EntityStore, EntityType, EntityUuid, ItemEntityData, LivingEntityData,
-    MAX_LIVING_ENTITY_DROPS, Transform, Velocity,
+    MAX_LIVING_ENTITY_DROPS, MAX_MOB_ATTACK_DAMAGE, MAX_MOB_ATTACK_INTERVAL_TICKS,
+    MAX_MOB_ATTACK_RANGE, MAX_MOB_FOLLOW_RANGE, MAX_MOB_MOVEMENT_SPEED, MobAi, Transform, Velocity,
 };
 pub use inventory::{
     EquipmentSlot, HOTBAR_END, HOTBAR_SLOTS, HOTBAR_START, Inventory, InventoryError, ItemStack,
@@ -59,7 +60,10 @@ pub use recipe::{
     MAX_RECIPE_INGREDIENT_ALTERNATIVES, MAX_RECIPES, Recipe, RecipeError, RecipeRegistry,
     ShapedRecipe, ShapelessRecipe, consume_crafting_match,
 };
-pub use state::{GameEvent, GameRuleValue, GameState, GameStateError, GameTime};
+pub use state::{
+    GameEvent, GameRuleValue, GameState, GameStateError, GameTime, MAX_HOSTILE_MOBS,
+    MAX_HOSTILE_MOB_SPAWN_DISTANCE, MIN_HOSTILE_MOB_SPAWN_DISTANCE,
+};
 
 pub const GAME_SNAPSHOT_SCHEMA_VERSION: u32 = 1;
 

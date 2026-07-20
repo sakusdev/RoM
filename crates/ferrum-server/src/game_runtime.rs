@@ -237,6 +237,20 @@ impl SharedGameRuntime {
         Ok(events)
     }
 
+    pub fn spawn_hostile_mob(
+        &self,
+        entity_type: EntityType,
+        transform: Transform,
+        max_health: f32,
+        drops: Vec<ItemStack>,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self
+            .write()?
+            .spawn_hostile_mob(entity_type, transform, max_health, drops)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
     pub fn move_entity(
         &self,
         entity_id: EntityId,

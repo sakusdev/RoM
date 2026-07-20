@@ -7,10 +7,14 @@ use crate::{
     AttributeError, CombatError, ContainerClick, ContainerError, ContainerMutation,
     ContainerSnapshot, DamageContext, DamageKind, DamageSource, Difficulty, Entity, EntityError,
     EntityId, EntityPayload, EntityStore, EntityType, EntityUuid, EquipmentSlot, GameMode,
-    InventoryError, ItemEntityData, ItemStack, PlayerError, PlayerState, PlayerUuid,
-    StatusEffectError, StatusEffectInstance, Transform, Velocity, Vitals, calculate_damage,
-    fall_damage, knockback_velocity,
+    InventoryError, ItemEntityData, ItemStack, LivingEntityData, PlayerError, PlayerState,
+    PlayerUuid, StatusEffectError, StatusEffectInstance, Transform, Velocity, Vitals,
+    calculate_damage, fall_damage, knockback_velocity,
 };
+
+pub const MAX_HOSTILE_MOBS: usize = 70;
+pub const MIN_HOSTILE_MOB_SPAWN_DISTANCE: f64 = 24.0;
+pub const MAX_HOSTILE_MOB_SPAWN_DISTANCE: f64 = 128.0;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -498,6 +502,77 @@ impl GameState {
             .expect("newly spawned entity exists")
             .clone();
         Ok(vec![GameEvent::EntitySpawned { entity }])
+    }
+
+    pub fn spawn_hostile_mob(
+        &mut self,
+        entity_type: EntityType,
+        transform: Transform,
+        max_health: f32,
+        drops: Vec<ItemStack>,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
+        if entity_type.as_str() == "minecraft:player" {
+            return Err(GameStateError::PlayerEntityRequiresConnection);
+        }
+        Transform::new(
+            transform.position,
+            transform.yaw,
+            transform.pitch,
+            transform.on_ground,
+        )?;
+        let living = LivingEntityData::new(max_health)?
+            .with_drops(drops)?
+            .with_hostile_ai();
+        if !self.can_spawn_hostile_mob(transform) {
+            return Ok(Vec::new());
+        }
+        self.spawn_entity(
+            entity_type,
+            transform,
+            Velocity::default(),
+            EntityPayload::Living(living),
+        )
+    }
+
+    #[must_use]
+    pub fn can_spawn_hostile_mob(&self, transform: Transform) -> bool {
+        if self.difficulty == Difficulty::Peaceful
+            || !matches!(
+                self.game_rules.get("doMobSpawning"),
+                Some(GameRuleValue::Boolean(true))
+            )
+            || self
+                .entities
+                .iter()
+                .filter(|(_, entity)| {
+                    entity
+                        .living()
+                        .and_then(|living| living.ai.as_ref())
+                        .is_some()
+                })
+                .count()
+                >= MAX_HOSTILE_MOBS
+        {
+            return false;
+        }
+        let minimum_squared = MIN_HOSTILE_MOB_SPAWN_DISTANCE.powi(2);
+        let maximum_squared = MAX_HOSTILE_MOB_SPAWN_DISTANCE.powi(2);
+        self.players.values().any(|player| {
+            if !player.connected
+                || player.vitals.is_dead()
+                || !matches!(player.game_mode, GameMode::Survival | GameMode::Adventure)
+            {
+                return false;
+            }
+            let Some(entity_id) = player.entity_id else {
+                return false;
+            };
+            let Some(entity) = self.entities.get(entity_id) else {
+                return false;
+            };
+            let distance_squared = squared_distance(entity.transform.position, transform.position);
+            (minimum_squared..=maximum_squared).contains(&distance_squared)
+        })
     }
 
     pub fn move_entity(
@@ -1515,6 +1590,119 @@ impl GameState {
         entity_ids.len()
     }
 
+    fn tick_mob_ai(&mut self) -> Vec<GameEvent> {
+        let targets = self
+            .players
+            .values()
+            .filter(|player| {
+                player.connected
+                    && !player.vitals.is_dead()
+                    && matches!(player.game_mode, GameMode::Survival | GameMode::Adventure)
+            })
+            .filter_map(|player| {
+                let entity = self.entities.get(player.entity_id?)?;
+                Some((player.uuid, entity.transform.position))
+            })
+            .collect::<Vec<_>>();
+        let mobs = self
+            .entities
+            .iter()
+            .filter_map(|(&entity_id, entity)| {
+                entity
+                    .living()
+                    .and_then(|living| living.ai.as_ref())
+                    .map(|ai| (entity_id, entity.transform, entity.velocity, ai.clone()))
+            })
+            .collect::<Vec<_>>();
+        let mut events = Vec::new();
+        for (entity_id, previous_transform, previous_velocity, ai) in mobs {
+            let target = targets
+                .iter()
+                .filter_map(|(uuid, position)| {
+                    let distance_squared =
+                        squared_distance(previous_transform.position, *position);
+                    (distance_squared <= ai.follow_range.powi(2)).then_some((
+                        *uuid,
+                        *position,
+                        distance_squared,
+                    ))
+                })
+                .min_by(|left, right| {
+                    left.2
+                        .total_cmp(&right.2)
+                        .then_with(|| left.0.cmp(&right.0))
+                });
+            let mut transform = previous_transform;
+            let mut velocity = previous_velocity;
+            let mut cooldown = ai.attack_cooldown_ticks.saturating_sub(1);
+            let mut attack = None;
+            if let Some((target_uuid, target_position, distance_squared)) = target {
+                let delta_x = target_position[0] - transform.position[0];
+                let delta_z = target_position[2] - transform.position[2];
+                let horizontal_distance = delta_x.hypot(delta_z);
+                if distance_squared <= ai.attack_range.powi(2) {
+                    velocity.0[0] = 0.0;
+                    velocity.0[2] = 0.0;
+                    if cooldown == 0 {
+                        cooldown = ai.attack_interval_ticks;
+                        attack = Some((target_uuid, [delta_x, delta_z], ai.attack_damage));
+                    }
+                } else if horizontal_distance > f64::EPSILON {
+                    let step = ai.movement_speed.min(horizontal_distance);
+                    velocity.0[0] = delta_x / horizontal_distance * step;
+                    velocity.0[2] = delta_z / horizontal_distance * step;
+                    transform.position[0] += velocity.0[0];
+                    transform.position[2] += velocity.0[2];
+                    transform.yaw = (-delta_x).atan2(delta_z).to_degrees() as f32;
+                }
+            } else {
+                velocity.0[0] = 0.0;
+                velocity.0[2] = 0.0;
+            }
+
+            if let Some(entity) = self.entities.get_mut(entity_id) {
+                if let Some(current_ai) = entity.living_mut().and_then(|living| living.ai.as_mut())
+                {
+                    current_ai.target = target.map(|(uuid, _, _)| uuid);
+                    current_ai.attack_cooldown_ticks = cooldown;
+                }
+                entity.transform = transform;
+                entity.velocity = velocity;
+            }
+            if transform != previous_transform || velocity != previous_velocity {
+                events.push(GameEvent::EntityMoved {
+                    entity_id,
+                    transform,
+                    velocity,
+                });
+            }
+            if let Some((target_uuid, direction_xz, damage)) = attack {
+                let source = DamageSource {
+                    kind: DamageKind::MobAttack,
+                    attacker: Some(entity_id),
+                    direct_entity: Some(entity_id),
+                    bypasses_armor: false,
+                    bypasses_invulnerability: false,
+                };
+                if let Ok(mut attack_events) =
+                    self.damage_player_with_source(target_uuid, damage, source)
+                {
+                    let damaged = attack_events
+                        .iter()
+                        .any(|event| matches!(event, GameEvent::PlayerDamaged { .. }));
+                    events.append(&mut attack_events);
+                    if damaged
+                        && let Ok(mut knockback_events) =
+                            self.apply_knockback(target_uuid, direction_xz, 0.4)
+                    {
+                        events.append(&mut knockback_events);
+                    }
+                }
+            }
+        }
+        events
+    }
+
     pub fn tick(&mut self) -> Vec<GameEvent> {
         self.time.game_time = self.time.game_time.saturating_add(1);
         if self.time.daylight_cycle {
@@ -1549,6 +1737,7 @@ impl GameState {
                 });
             }
         }
+        events.extend(self.tick_mob_ai());
         events.extend(
             removed
                 .into_iter()
@@ -1652,6 +1841,13 @@ fn slot_diff_events(
 
 fn normalize_player_name(name: &str) -> String {
     name.to_ascii_lowercase()
+}
+
+fn squared_distance(left: [f64; 3], right: [f64; 3]) -> f64 {
+    left.into_iter()
+        .zip(right)
+        .map(|(left, right)| (left - right).powi(2))
+        .sum()
 }
 
 #[derive(Debug, Error)]
@@ -2451,5 +2647,110 @@ mod tests {
                 })
         ));
         assert!(state.entities().get(entity_id).is_none());
+    }
+
+    #[test]
+    fn hostile_spawn_conditions_respect_players_gamerule_and_difficulty() {
+        let uuid = PlayerUuid::new(50);
+        let mut state = GameState::default();
+        state.connect_player(uuid, "Steve", spawn()).unwrap();
+        let too_close = Transform::new([10.5, 65.0, 0.5], 0.0, 0.0, true).unwrap();
+        assert!(
+            state
+                .spawn_hostile_mob(
+                    EntityType::new("minecraft:zombie").unwrap(),
+                    too_close,
+                    20.0,
+                    Vec::new(),
+                )
+                .unwrap()
+                .is_empty()
+        );
+        let valid = Transform::new([30.5, 65.0, 0.5], 0.0, 0.0, true).unwrap();
+        assert!(matches!(
+            state
+                .spawn_hostile_mob(
+                    EntityType::new("minecraft:zombie").unwrap(),
+                    valid,
+                    20.0,
+                    Vec::new(),
+                )
+                .unwrap()
+                .as_slice(),
+            [GameEvent::EntitySpawned { entity }] if entity.living().unwrap().ai.is_some()
+        ));
+        state.set_game_rule("doMobSpawning", GameRuleValue::Boolean(false));
+        assert!(!state.can_spawn_hostile_mob(valid));
+        state.set_game_rule("doMobSpawning", GameRuleValue::Boolean(true));
+        state.set_difficulty(Difficulty::Peaceful);
+        assert!(!state.can_spawn_hostile_mob(valid));
+    }
+
+    #[test]
+    fn hostile_ai_selects_pursues_and_attacks_survival_players() {
+        let uuid = PlayerUuid::new(51);
+        let mut state = GameState::default();
+        state.connect_player(uuid, "Alex", spawn()).unwrap();
+        let living = LivingEntityData::new(20.0)
+            .unwrap()
+            .with_ai(crate::MobAi::new(32.0, 0.1, 1.5, 4.0, 20).unwrap())
+            .unwrap();
+        let spawned = state
+            .spawn_entity(
+                EntityType::new("minecraft:zombie").unwrap(),
+                Transform::new([4.5, 65.0, 0.5], 0.0, 0.0, true).unwrap(),
+                Velocity::default(),
+                EntityPayload::Living(living),
+            )
+            .unwrap();
+        let entity_id = match &spawned[0] {
+            GameEvent::EntitySpawned { entity } => entity.id,
+            event => panic!("unexpected event: {event:?}"),
+        };
+        let movement = state.tick();
+        assert!(movement.iter().any(|event| matches!(
+            event,
+            GameEvent::EntityMoved {
+                entity_id: moved,
+                transform,
+                ..
+            } if *moved == entity_id && transform.position[0] < 4.5
+        )));
+        assert_eq!(
+            state
+                .entities()
+                .get(entity_id)
+                .unwrap()
+                .living()
+                .unwrap()
+                .ai
+                .as_ref()
+                .unwrap()
+                .target,
+            Some(uuid)
+        );
+
+        state
+            .move_entity(
+                entity_id,
+                Transform::new([2.0, 65.0, 0.5], 0.0, 0.0, true).unwrap(),
+            )
+            .unwrap();
+        let attack = state.tick();
+        assert!(attack.iter().any(|event| matches!(
+            event,
+            GameEvent::PlayerDamaged {
+                uuid: damaged,
+                source: DamageSource {
+                    kind: DamageKind::MobAttack,
+                    attacker: Some(attacker),
+                    ..
+                },
+                ..
+            } if *damaged == uuid && *attacker == entity_id
+        )));
+        assert_eq!(state.player(uuid).unwrap().vitals.health, 16.0);
+        state.tick();
+        assert_eq!(state.player(uuid).unwrap().vitals.health, 16.0);
     }
 }
