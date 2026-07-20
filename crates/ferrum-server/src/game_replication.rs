@@ -476,7 +476,9 @@ fn process_commands(
                     if let Some((vitals, snapshot)) = self_state {
                         connection.viewer_transform = Some(snapshot.transform);
                         queue_set_health(connection, vitals, exit)?;
-                        queue_player_info_update(connection, &snapshot, exit)?;
+                        if entity_replication_enabled(&config.entity_protocol_ids) {
+                            queue_player_info_update(connection, &snapshot, exit)?;
+                        }
                         queue_player_state_sync(connection, &snapshot, config, exit)?;
                         connection.self_initialized = true;
                     }
@@ -585,7 +587,9 @@ fn dispatch_event(
                     queue_set_health(connection, vitals, exit)?;
                 }
                 connection.viewer_transform = Some(snapshot.transform);
-                queue_player_info_update(connection, &snapshot, exit)?;
+                if entity_replication_enabled(&config.entity_protocol_ids) {
+                    queue_player_info_update(connection, &snapshot, exit)?;
+                }
                 queue_player_state_sync(connection, &snapshot, config, exit)?;
                 connection.self_initialized = true;
                 reconcile_connection_visibility(connection, uuid, runtime, config, exit)?;
