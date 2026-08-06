@@ -183,6 +183,18 @@ impl SharedGameRuntime {
         Ok(events)
     }
 
+    pub fn attack_entity(
+        &self,
+        attacker_uuid: PlayerUuid,
+        target_entity_id: EntityId,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self
+            .write()?
+            .attack_entity(attacker_uuid, target_entity_id)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
     pub fn heal_player(
         &self,
         uuid: PlayerUuid,

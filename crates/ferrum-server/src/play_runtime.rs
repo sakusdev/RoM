@@ -10,7 +10,7 @@ use ferrum_game::{
 };
 use ferrum_play::{
     BlockPosition, InteractionHand, ItemProtocolRegistry, PlayerAction, PlayerActionStatus,
-    PlayerMovement, PlayerState, block_position_to_world, decode_close_container,
+    PlayerMovement, PlayerState, block_position_to_world, decode_attack, decode_close_container,
     decode_container_click, decode_creative_slot_update, decode_player_action,
     decode_use_item_on_block, encode_block_changed_ack, encode_block_update,
     encode_chunk_batch_finished, encode_chunk_batch_start, encode_forget_level_chunk,
@@ -215,6 +215,11 @@ impl<'a> GameplaySync<'a> {
         let (slot, stack) = decode_creative_slot_update(payload, self.items)?;
         self.runtime
             .set_creative_inventory_slot(self.player_uuid, slot, stack)?;
+        Ok(())
+    }
+
+    fn attack_entity(self, entity_id: ferrum_game::EntityId) -> Result<()> {
+        self.runtime.attack_entity(self.player_uuid, entity_id)?;
         Ok(())
     }
 
@@ -1213,6 +1218,12 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
                 Some(PacketKind::SetCreativeModeSlot) => {
                     if let Some(gameplay) = gameplay {
                         gameplay.set_creative_slot(packet_reader.take_remaining())?;
+                    }
+                }
+                Some(PacketKind::Attack) => {
+                    let entity_id = decode_attack(packet_reader.take_remaining())?;
+                    if let Some(gameplay) = gameplay {
+                        gameplay.attack_entity(entity_id)?;
                     }
                 }
                 Some(PacketKind::PlayerAction) => {
@@ -2968,6 +2979,100 @@ mod tests {
                     .map(|item| (item.stack.item(), item.stack.count()))
                     .collect::<Vec<_>>();
                 assert_eq!(dropped, vec![("minecraft:stone", 1)]);
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn live_attack_packets_damage_and_kill_authoritative_entities() {
+        let mut packets = PacketTable::new();
+        packets.insert(PacketKind::KeepAliveRequest, 0x2c).unwrap();
+        packets.insert(PacketKind::KeepAliveResponse, 0x1c).unwrap();
+        packets.insert(PacketKind::Attack, 0x01).unwrap();
+        let profile = ProtocolProfile::new("Test", 1, packets).unwrap();
+        let world = SharedWorld::static_flat();
+        let connection = ConnectionId::new(503);
+        let _subscription = world.subscribe(connection).unwrap();
+        let runtime = SharedGameRuntime::vanilla_overworld();
+        let uuid = GamePlayerUuid::new(503);
+        runtime
+            .connect_player(
+                uuid,
+                "Steve",
+                Transform::new(player_spawn_position(world.world_profile()), 0.0, 0.0, true)
+                    .unwrap(),
+            )
+            .unwrap();
+        let mut target_position = player_spawn_position(world.world_profile());
+        target_position[0] += 2.0;
+        let target_transform = Transform::new(target_position, 0.0, 0.0, true).unwrap();
+        let target_events = runtime
+            .spawn_entity(
+                ferrum_game::EntityType::new("minecraft:zombie").unwrap(),
+                target_transform,
+                Velocity::default(),
+                ferrum_game::EntityPayload::Living(
+                    ferrum_game::LivingEntityData::new(2.0)
+                        .unwrap()
+                        .with_drops(vec![ItemStack::new("minecraft:rotten_flesh", 1).unwrap()])
+                        .unwrap(),
+                ),
+            )
+            .unwrap();
+        let target_entity_id = match &target_events[0] {
+            GameEvent::EntitySpawned { entity } => entity.id,
+            event => panic!("unexpected spawn event: {event:?}"),
+        };
+
+        let mut input = Vec::new();
+        for _ in 0..2 {
+            write_packet(
+                &mut input,
+                &build_packet(0x01, |body| {
+                    write_varint_vec(body, i32::try_from(target_entity_id.get()).unwrap());
+                    Ok(())
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        write_packet(
+            &mut input,
+            &build_packet(0x1c, |body| {
+                body.extend_from_slice(&1_i64.to_be_bytes());
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        let items = ItemProtocolRegistry::default();
+        let gameplay = GameplaySync::new(&runtime, uuid, &items);
+        let mut output = Vec::new();
+        let mut session = play_session();
+        run_play_loop_with_bridge(
+            &mut Cursor::new(input),
+            &mut output,
+            &profile,
+            &mut session,
+            &world,
+            connection,
+            None,
+            Some(gameplay),
+            Some(1),
+        )
+        .unwrap();
+
+        runtime
+            .with_state(|state| {
+                assert!(state.entities().get(target_entity_id).is_none());
+                let drops = state
+                    .entities()
+                    .iter()
+                    .filter_map(|(_, entity)| entity.item())
+                    .map(|item| (item.stack.item(), item.stack.count()))
+                    .collect::<Vec<_>>();
+                assert_eq!(drops, vec![("minecraft:rotten_flesh", 1)]);
             })
             .unwrap();
     }

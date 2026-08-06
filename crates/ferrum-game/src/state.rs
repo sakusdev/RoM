@@ -15,6 +15,7 @@ use crate::{
 pub const MAX_HOSTILE_MOBS: usize = 70;
 pub const MIN_HOSTILE_MOB_SPAWN_DISTANCE: f64 = 24.0;
 pub const MAX_HOSTILE_MOB_SPAWN_DISTANCE: f64 = 128.0;
+pub const BASE_PLAYER_ATTACK_KNOCKBACK: f64 = 0.4;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -650,6 +651,110 @@ impl GameState {
             amount,
             DamageSource::generic(DamageKind::Generic),
         )
+    }
+
+    pub fn attack_entity(
+        &mut self,
+        attacker_uuid: PlayerUuid,
+        target_entity_id: EntityId,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
+        let attacker_entity_id = self.connected_entity_id(attacker_uuid)?;
+        let (attack_damage, interaction_range, attacker_position, can_attack) = {
+            let attacker =
+                self.players
+                    .get(&attacker_uuid)
+                    .ok_or(GameStateError::UnknownPlayer {
+                        uuid: attacker_uuid,
+                    })?;
+            let attacker_entity = self.entities.get(attacker_entity_id).ok_or(
+                GameStateError::PlayerMissingEntity {
+                    uuid: attacker_uuid,
+                },
+            )?;
+            (
+                attacker
+                    .attribute_value("minecraft:attack_damage")
+                    .unwrap_or(1.0) as f32,
+                attacker
+                    .attribute_value("minecraft:entity_interaction_range")
+                    .unwrap_or(3.0),
+                attacker_entity.transform.position,
+                !attacker.vitals.is_dead() && attacker.game_mode != GameMode::Spectator,
+            )
+        };
+        if !can_attack {
+            return Ok(Vec::new());
+        }
+
+        let Some(target) = self.entities.get(target_entity_id) else {
+            // Entity removals and attacks may cross on the wire. Match Vanilla's
+            // stale-target behavior by ignoring an entity that no longer exists.
+            return Ok(Vec::new());
+        };
+        if target_entity_id == attacker_entity_id || !target.is_living() {
+            return Err(GameStateError::InvalidAttackTarget {
+                entity_id: target_entity_id,
+            });
+        }
+        let target_position = target.transform.position;
+        if squared_distance(attacker_position, target_position) > interaction_range.powi(2) {
+            return Ok(Vec::new());
+        }
+        let target_player = target.is_player().then(|| {
+            self.players
+                .values()
+                .find(|player| player.entity_id == Some(target_entity_id))
+                .map(|player| player.uuid)
+        });
+        let target_player = match target_player {
+            Some(Some(uuid)) => Some(uuid),
+            Some(None) => {
+                return Err(GameStateError::InvalidAttackTarget {
+                    entity_id: target_entity_id,
+                });
+            }
+            None => None,
+        };
+        let source = DamageSource {
+            kind: DamageKind::PlayerAttack,
+            attacker: Some(attacker_entity_id),
+            direct_entity: Some(attacker_entity_id),
+            bypasses_armor: false,
+            bypasses_invulnerability: false,
+        };
+        let mut events = if let Some(target_uuid) = target_player {
+            self.damage_player_with_source(target_uuid, attack_damage, source)?
+        } else {
+            self.damage_entity_with_source(target_entity_id, attack_damage, source)?
+        };
+        let survived = events.iter().any(|event| match event {
+            GameEvent::PlayerDamaged {
+                entity_id, current, ..
+            } => *entity_id == target_entity_id && !current.is_dead(),
+            GameEvent::LivingEntityDamaged {
+                entity_id,
+                current_health,
+                ..
+            } => *entity_id == target_entity_id && *current_health > 0.0,
+            _ => false,
+        });
+        let direction_xz = [
+            target_position[0] - attacker_position[0],
+            target_position[2] - attacker_position[2],
+        ];
+        if survived && direction_xz[0].hypot(direction_xz[1]) > f64::EPSILON {
+            let knockback = if let Some(target_uuid) = target_player {
+                self.apply_knockback(target_uuid, direction_xz, BASE_PLAYER_ATTACK_KNOCKBACK)?
+            } else {
+                self.apply_entity_knockback(
+                    target_entity_id,
+                    direction_xz,
+                    BASE_PLAYER_ATTACK_KNOCKBACK,
+                )?
+            };
+            events.extend(knockback);
+        }
+        Ok(events)
     }
 
     pub fn damage_entity_with_source(
@@ -1881,6 +1986,8 @@ pub enum GameStateError {
     PlayerEntityRequiresConnection,
     #[error("entity {entity_id:?} is not a living entity")]
     NotLivingEntity { entity_id: EntityId },
+    #[error("entity {entity_id:?} is not a valid player attack target")]
+    InvalidAttackTarget { entity_id: EntityId },
     #[error("player {uuid:?} is dead and must respawn before healing")]
     PlayerDead { uuid: PlayerUuid },
     #[error("player {uuid:?} is alive and cannot respawn")]
@@ -2646,6 +2753,86 @@ mod tests {
                 })
         ));
         assert!(state.entities().get(entity_id).is_none());
+    }
+
+    #[test]
+    fn player_attacks_enforce_reach_and_drive_living_entity_death() {
+        let uuid = PlayerUuid::new(49);
+        let mut state = GameState::default();
+        let connected = state.connect_player(uuid, "Steve", spawn()).unwrap();
+        let attacker_entity_id = match connected.as_slice() {
+            [GameEvent::PlayerConnected { entity_id, .. }, ..] => *entity_id,
+            events => panic!("unexpected connect events: {events:?}"),
+        };
+        let spawn_target = |state: &mut GameState, x| {
+            let living = LivingEntityData::new(2.0)
+                .unwrap()
+                .with_drops(vec![ItemStack::new("minecraft:rotten_flesh", 1).unwrap()])
+                .unwrap();
+            let events = state
+                .spawn_entity(
+                    EntityType::new("minecraft:zombie").unwrap(),
+                    Transform::new([x, 65.0, 0.5], 0.0, 0.0, true).unwrap(),
+                    Velocity::default(),
+                    EntityPayload::Living(living),
+                )
+                .unwrap();
+            match &events[0] {
+                GameEvent::EntitySpawned { entity } => entity.id,
+                event => panic!("unexpected spawn event: {event:?}"),
+            }
+        };
+
+        let distant = spawn_target(&mut state, 10.5);
+        assert!(state.attack_entity(uuid, distant).unwrap().is_empty());
+        assert_eq!(
+            state
+                .entities()
+                .get(distant)
+                .unwrap()
+                .living()
+                .unwrap()
+                .health,
+            2.0
+        );
+
+        let target = spawn_target(&mut state, 2.5);
+        let first = state.attack_entity(uuid, target).unwrap();
+        assert!(first.iter().any(|event| matches!(
+            event,
+            GameEvent::LivingEntityDamaged {
+                entity_id,
+                source: DamageSource {
+                    kind: DamageKind::PlayerAttack,
+                    attacker: Some(attacker),
+                    direct_entity: Some(direct),
+                    ..
+                },
+                current_health: 1.0,
+                ..
+            } if *entity_id == target
+                && *attacker == attacker_entity_id
+                && *direct == attacker_entity_id
+        )));
+        assert!(first.iter().any(|event| matches!(
+            event,
+            GameEvent::EntityMoved { entity_id, velocity, .. }
+                if *entity_id == target && velocity.0[0] > 0.0
+        )));
+
+        let fatal = state.attack_entity(uuid, target).unwrap();
+        assert!(fatal.iter().any(|event| matches!(
+            event,
+            GameEvent::LivingEntityKilled { entity_id, .. } if *entity_id == target
+        )));
+        assert!(fatal.iter().any(|event| matches!(
+            event,
+            GameEvent::EntitySpawned { entity }
+                if entity.item().is_some_and(|item| {
+                    item.stack.item() == "minecraft:rotten_flesh" && item.stack.count() == 1
+                })
+        )));
+        assert!(state.entities().get(target).is_none());
     }
 
     #[test]

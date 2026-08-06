@@ -80,6 +80,7 @@ pub enum PacketKind {
     MovePlayerPositionRotation,
     MovePlayerRotation,
     MovePlayerStatusOnly,
+    Attack,
     PlayerAction,
     UseItemOn,
     BlockChangedAck,
@@ -157,6 +158,7 @@ impl PacketKind {
         Self::MovePlayerPositionRotation,
         Self::MovePlayerRotation,
         Self::MovePlayerStatusOnly,
+        Self::Attack,
         Self::PlayerAction,
         Self::UseItemOn,
         Self::BlockChangedAck,
@@ -235,6 +237,7 @@ impl PacketKind {
         Self::MovePlayerPositionRotation,
         Self::MovePlayerRotation,
         Self::MovePlayerStatusOnly,
+        Self::Attack,
         Self::PlayerAction,
         Self::UseItemOn,
         Self::BlockChangedAck,
@@ -281,6 +284,7 @@ impl PacketKind {
             | Self::MovePlayerPositionRotation
             | Self::MovePlayerRotation
             | Self::MovePlayerStatusOnly
+            | Self::Attack
             | Self::PlayerAction
             | Self::UseItemOn
             | Self::BlockChangedAck
@@ -340,6 +344,7 @@ impl PacketKind {
             | Self::MovePlayerPositionRotation
             | Self::MovePlayerRotation
             | Self::MovePlayerStatusOnly
+            | Self::Attack
             | Self::PlayerAction
             | Self::UseItemOn
             | Self::ChatCommand

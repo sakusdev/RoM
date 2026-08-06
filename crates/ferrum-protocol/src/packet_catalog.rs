@@ -312,6 +312,7 @@ pub fn known_packet_kind(
         (ProtocolPhase::Play, PacketDirection::Serverbound, "move_player_status_only") => {
             Some(PacketKind::MovePlayerStatusOnly)
         }
+        (ProtocolPhase::Play, PacketDirection::Serverbound, "attack") => Some(PacketKind::Attack),
         (ProtocolPhase::Play, PacketDirection::Serverbound, "player_action") => {
             Some(PacketKind::PlayerAction)
         }
@@ -462,6 +463,7 @@ pub const fn canonical_packet_name(kind: PacketKind) -> &'static str {
         PacketKind::MovePlayerPositionRotation => "minecraft:move_player_pos_rot",
         PacketKind::MovePlayerRotation => "minecraft:move_player_rot",
         PacketKind::MovePlayerStatusOnly => "minecraft:move_player_status_only",
+        PacketKind::Attack => "minecraft:attack",
         PacketKind::PlayerAction => "minecraft:player_action",
         PacketKind::UseItemOn => "minecraft:use_item_on",
         PacketKind::BlockChangedAck => "minecraft:block_changed_ack",
@@ -674,5 +676,21 @@ mod tests {
             );
             assert_eq!(canonical_packet_name(kind), format!("minecraft:{name}"));
         }
+    }
+
+    #[test]
+    fn recognizes_the_serverbound_attack_packet() {
+        assert_eq!(
+            known_packet_kind(
+                ProtocolPhase::Play,
+                PacketDirection::Serverbound,
+                "minecraft:attack",
+            ),
+            Some(PacketKind::Attack)
+        );
+        assert_eq!(
+            canonical_packet_name(PacketKind::Attack),
+            "minecraft:attack"
+        );
     }
 }

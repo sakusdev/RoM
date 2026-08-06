@@ -2,6 +2,7 @@
 //!
 //! Packet IDs are version metadata and intentionally live outside this crate.
 
+mod attack;
 mod block_interaction;
 mod chunk_stream;
 mod entity;
@@ -10,6 +11,7 @@ mod health;
 mod inventory;
 mod movement;
 
+pub use attack::{AttackDecodeError, decode_attack};
 pub use block_interaction::{
     BlockFace, BlockInteractionDecodeError, InteractionHand, PlayerAction, PlayerActionStatus,
     UseItemOnBlock, block_position_to_world, decode_player_action, decode_use_item_on_block,
