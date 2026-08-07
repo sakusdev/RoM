@@ -20,12 +20,13 @@ use ferrum_game::{CommandSource, EntityId, GameState, PlayerUuid as GamePlayerUu
 use ferrum_nbt::{Tag, encode_anonymous};
 use ferrum_play::{
     BlockPosition, CommonPlayerSpawnInfo, DataComponentProtocolRegistry, DefaultSpawnPosition,
-    EntityProtocolRegistry, GlobalPosition, ItemEntityMetadataProtocol, ItemProtocolRegistry,
-    JoinGame, PlayerPosition, PositionMoveRotation, ProtocolIdRegistry,
-    encode_chunk_batch_finished, encode_chunk_batch_start, encode_default_spawn_position,
-    encode_join_game, encode_level_chunk_with_light, encode_play_disconnect,
-    encode_player_position, encode_set_chunk_cache_center, encode_set_container_content,
-    encode_set_container_slot, encode_set_player_inventory_with_components, encode_system_chat,
+    EntityProtocolRegistry, ExperienceOrbMetadataProtocol, GlobalPosition,
+    ItemEntityMetadataProtocol, ItemProtocolRegistry, JoinGame, PlayerPosition,
+    PositionMoveRotation, ProtocolIdRegistry, encode_chunk_batch_finished,
+    encode_chunk_batch_start, encode_default_spawn_position, encode_join_game,
+    encode_level_chunk_with_light, encode_play_disconnect, encode_player_position,
+    encode_set_chunk_cache_center, encode_set_container_content, encode_set_container_slot,
+    encode_set_player_inventory_with_components, encode_system_chat,
 };
 use ferrum_protocol::{HandshakeIntent, PacketKind, PacketTable, ProtocolProfile, ProtocolSession};
 use ferrum_rompack::{RomPack, RomPackPacket, RomPackRegistry, RomPackWorld, read_rompack};
@@ -333,6 +334,16 @@ impl ServerState {
             })
             .transpose()
             .context("cannot build item entity metadata protocol")?;
+        let experience_orb_metadata = entity_protocol_ids
+            .protocol_id("minecraft:experience_orb")
+            .map(|_| {
+                ExperienceOrbMetadataProtocol::new(
+                    version_26_1_2::EXPERIENCE_ORB_VALUE_METADATA_INDEX,
+                    version_26_1_2::INT_ENTITY_DATA_SERIALIZER_ID,
+                )
+            })
+            .transpose()
+            .context("cannot build experience orb metadata protocol")?;
         let game_runtime = SharedGameRuntime::new(game_state);
         let game_service = spawn_game_service(game_runtime.clone(), persistence.game)?;
         let shared_runtime_config = shared_play_runtime_config(&play_policy)?;
@@ -363,6 +374,7 @@ impl ServerState {
                 mob_effect_protocol_ids,
                 damage_type_protocol_ids,
                 item_entity_metadata,
+                experience_orb_metadata,
                 world: Some(replication_world),
                 ..GameReplicationConfig::default()
             },
@@ -1064,6 +1076,21 @@ fn validate_replication_packet_support(
                 .packets()
                 .require(kind)
                 .with_context(|| format!("item entity replication requires {kind:?}"))?;
+        }
+    }
+    if entity_protocol_ids
+        .protocol_id("minecraft:experience_orb")
+        .is_some()
+    {
+        for kind in [
+            PacketKind::AddEntity,
+            PacketKind::RemoveEntities,
+            PacketKind::SetEntityData,
+        ] {
+            profile
+                .packets()
+                .require(kind)
+                .with_context(|| format!("experience orb replication requires {kind:?}"))?;
         }
     }
     if !item_protocol_ids.is_empty() {

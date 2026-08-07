@@ -20,10 +20,11 @@ pub use block_interaction::{
 pub use chunk_stream::encode_forget_level_chunk;
 pub use entity::{
     EncodedEntityMovement, EntityEncodeError, EntityMovementKind, EntityProtocolRegistry,
-    ItemEntityMetadataProtocol, PlayerInfoEntry, encode_add_entity, encode_add_entity_with_uuid,
-    encode_empty_entity_data, encode_entity_movement, encode_item_entity_data,
-    encode_player_info_remove, encode_player_info_update, encode_remove_entities,
-    encode_rotate_head, encode_take_item_entity, encode_teleport_entity,
+    ExperienceOrbMetadataProtocol, ItemEntityMetadataProtocol, PlayerInfoEntry, encode_add_entity,
+    encode_add_entity_with_uuid, encode_empty_entity_data, encode_entity_movement,
+    encode_experience_orb_data, encode_item_entity_data, encode_player_info_remove,
+    encode_player_info_update, encode_remove_entities, encode_rotate_head, encode_take_item_entity,
+    encode_teleport_entity,
 };
 pub use entity_sync::{
     EntitySyncEncodeError, ProtocolIdRegistry, encode_damage_event, encode_remove_mob_effect,

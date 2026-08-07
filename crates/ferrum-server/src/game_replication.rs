@@ -14,15 +14,15 @@ use ferrum_game::{
 };
 use ferrum_play::{
     CommonPlayerSpawnInfo, DataComponentProtocolRegistry, EncodedEntityMovement,
-    EntityMovementKind, EntityProtocolRegistry, EquipmentEntry, ItemEntityMetadataProtocol,
-    ItemProtocolRegistry, PlayerInfoEntry, ProtocolIdRegistry, Respawn, RespawnDataToKeep,
-    encode_add_entity, encode_add_entity_with_uuid, encode_damage_event, encode_empty_entity_data,
-    encode_entity_movement, encode_hurt_animation, encode_item_entity_data,
-    encode_player_combat_kill, encode_player_info_remove, encode_player_info_update,
-    encode_remove_entities, encode_remove_mob_effect, encode_respawn, encode_rotate_head,
-    encode_set_entity_motion, encode_set_equipment, encode_set_health, encode_take_item_entity,
-    encode_teleport_entity, encode_update_attribute, encode_update_attributes,
-    encode_update_mob_effect,
+    EntityMovementKind, EntityProtocolRegistry, EquipmentEntry, ExperienceOrbMetadataProtocol,
+    ItemEntityMetadataProtocol, ItemProtocolRegistry, PlayerInfoEntry, ProtocolIdRegistry, Respawn,
+    RespawnDataToKeep, encode_add_entity, encode_add_entity_with_uuid, encode_damage_event,
+    encode_empty_entity_data, encode_entity_movement, encode_experience_orb_data,
+    encode_hurt_animation, encode_item_entity_data, encode_player_combat_kill,
+    encode_player_info_remove, encode_player_info_update, encode_remove_entities,
+    encode_remove_mob_effect, encode_respawn, encode_rotate_head, encode_set_entity_motion,
+    encode_set_equipment, encode_set_health, encode_take_item_entity, encode_teleport_entity,
+    encode_update_attribute, encode_update_attributes, encode_update_mob_effect,
 };
 use ferrum_protocol::PacketKind;
 use ferrum_rompack::RomPackWorld;
@@ -54,6 +54,7 @@ pub struct GameReplicationConfig {
     pub mob_effect_protocol_ids: ProtocolIdRegistry,
     pub damage_type_protocol_ids: ProtocolIdRegistry,
     pub item_entity_metadata: Option<ItemEntityMetadataProtocol>,
+    pub experience_orb_metadata: Option<ExperienceOrbMetadataProtocol>,
     pub world: Option<RomPackWorld>,
 }
 
@@ -73,6 +74,7 @@ impl Default for GameReplicationConfig {
             mob_effect_protocol_ids: ProtocolIdRegistry::default(),
             damage_type_protocol_ids: ProtocolIdRegistry::default(),
             item_entity_metadata: None,
+            experience_orb_metadata: None,
             world: None,
         }
     }
@@ -122,8 +124,15 @@ struct NonPlayerEntitySnapshot {
     entity_type: String,
     transform: Transform,
     velocity: Velocity,
+    metadata: NonPlayerEntityMetadata,
     attributes: Option<AttributeSet>,
     status_effects: Option<StatusEffectSet>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NonPlayerEntityMetadata {
+    Empty,
+    ExperienceOrb { value: u32 },
 }
 
 #[derive(Debug)]
@@ -1217,19 +1226,22 @@ fn item_snapshot_from_entity(entity: &Entity) -> Option<ItemEntitySnapshot> {
 fn non_player_snapshot_from_entity(entity: &Entity) -> Option<NonPlayerEntitySnapshot> {
     if entity.is_player()
         || entity.entity_type.as_str() == "minecraft:item"
-        || matches!(
-            &entity.payload,
-            EntityPayload::Item(_) | EntityPayload::ExperienceOrb { .. }
-        )
+        || matches!(&entity.payload, EntityPayload::Item(_))
     {
         return None;
     }
-    let (attributes, status_effects) = match &entity.payload {
+    let (metadata, attributes, status_effects) = match &entity.payload {
         EntityPayload::Living(living) => (
+            NonPlayerEntityMetadata::Empty,
             Some(living.attributes.clone()),
             Some(living.status_effects.clone()),
         ),
-        _ => (None, None),
+        EntityPayload::ExperienceOrb { value } => (
+            NonPlayerEntityMetadata::ExperienceOrb { value: *value },
+            None,
+            None,
+        ),
+        _ => (NonPlayerEntityMetadata::Empty, None, None),
     };
     Some(NonPlayerEntitySnapshot {
         entity_id: entity.id,
@@ -1237,6 +1249,7 @@ fn non_player_snapshot_from_entity(entity: &Entity) -> Option<NonPlayerEntitySna
         entity_type: entity.entity_type.as_str().to_owned(),
         transform: entity.transform,
         velocity: entity.velocity,
+        metadata,
         attributes,
         status_effects,
     })
@@ -1365,12 +1378,25 @@ fn queue_non_player_spawn(
         queue_non_player_remove_for_connection(connection, snapshot.entity_id, exit)?;
         return Ok(());
     }
+    let Some(data_payload) = encode_non_player_entity_data(&snapshot, config)? else {
+        queue_non_player_remove_for_connection(connection, snapshot.entity_id, exit)?;
+        return Ok(());
+    };
     if let Some(tracked) = connection
         .non_player_entities
         .get(&snapshot.entity_id)
         .cloned()
     {
         if tracked.uuid == snapshot.uuid && tracked.entity_type == snapshot.entity_type {
+            if tracked.metadata != snapshot.metadata {
+                connection.queue(
+                    PlayOutput::ProtocolPacket {
+                        kind: PacketKind::SetEntityData,
+                        payload: data_payload.clone(),
+                    },
+                    exit,
+                );
+            }
             if tracked.transform != snapshot.transform
                 && let Some(mut movement) = encode_entity_movement(
                     snapshot.entity_id,
@@ -1440,8 +1466,7 @@ fn queue_non_player_spawn(
     connection.queue(
         PlayOutput::ProtocolPacket {
             kind: PacketKind::SetEntityData,
-            payload: encode_empty_entity_data(snapshot.entity_id)
-                .context("cannot encode empty non-player entity data")?,
+            payload: data_payload,
         },
         exit,
     );
@@ -1452,6 +1477,27 @@ fn queue_non_player_spawn(
             .insert(snapshot.entity_id, snapshot);
     }
     Ok(())
+}
+
+fn encode_non_player_entity_data(
+    snapshot: &NonPlayerEntitySnapshot,
+    config: &GameReplicationConfig,
+) -> Result<Option<Vec<u8>>> {
+    match snapshot.metadata {
+        NonPlayerEntityMetadata::Empty => Ok(Some(
+            encode_empty_entity_data(snapshot.entity_id)
+                .context("cannot encode empty non-player entity data")?,
+        )),
+        NonPlayerEntityMetadata::ExperienceOrb { value } => {
+            let Some(metadata) = config.experience_orb_metadata else {
+                return Ok(None);
+            };
+            Ok(Some(
+                encode_experience_orb_data(snapshot.entity_id, value, metadata)
+                    .context("cannot encode experience orb entity data")?,
+            ))
+        }
+    }
 }
 
 fn queue_non_player_state_sync(
@@ -2161,6 +2207,7 @@ mod tests {
     fn entity_config() -> GameReplicationConfig {
         GameReplicationConfig {
             entity_protocol_ids: EntityProtocolRegistry::new([
+                ("minecraft:experience_orb", 49),
                 ("minecraft:item", 71),
                 ("minecraft:player", 148),
                 ("minecraft:zombie", 153),
@@ -2171,6 +2218,13 @@ mod tests {
                 ItemEntityMetadataProtocol::new(
                     ferrum_version_26_1_2::ITEM_ENTITY_STACK_METADATA_INDEX,
                     ferrum_version_26_1_2::ITEM_STACK_ENTITY_DATA_SERIALIZER_ID,
+                )
+                .unwrap(),
+            ),
+            experience_orb_metadata: Some(
+                ExperienceOrbMetadataProtocol::new(
+                    ferrum_version_26_1_2::EXPERIENCE_ORB_VALUE_METADATA_INDEX,
+                    ferrum_version_26_1_2::INT_ENTITY_DATA_SERIALIZER_ID,
                 )
                 .unwrap(),
             ),
@@ -3464,6 +3518,75 @@ mod tests {
                 0,
                 0xff,
             ]
+        );
+        service.shutdown().unwrap();
+    }
+
+    #[test]
+    fn activation_snapshots_and_removes_preexisting_experience_orbs() {
+        let game = SharedGameRuntime::vanilla_overworld();
+        let spawned = game
+            .spawn_entity(
+                ferrum_game::EntityType::new("minecraft:experience_orb").unwrap(),
+                spawn(),
+                Velocity::default(),
+                EntityPayload::ExperienceOrb { value: 300 },
+            )
+            .unwrap();
+        let orb_id = match &spawned[0] {
+            GameEvent::EntitySpawned { entity } => entity.id,
+            event => panic!("unexpected event: {event:?}"),
+        };
+        let service = spawn_game_replication(&game, entity_config()).unwrap();
+        let player = PlayerUuid::new(54);
+        let (connector, mut workers) = worker_channel(NonZeroUsize::new(32).unwrap());
+        let (reader, writer) = register_play_connection(
+            &connector,
+            ConnectionId::new(54),
+            NonZeroUsize::new(16).unwrap(),
+        )
+        .unwrap();
+        let mut inputs = BoundedInputQueue::try_new(32).unwrap();
+        ingest(&mut workers, &mut inputs);
+        service.control().register(player, reader).unwrap();
+        service.control().activate(player).unwrap();
+
+        let add = recv_protocol_until(&writer, &mut workers, &mut inputs, PacketKind::AddEntity);
+        let (encoded_entity_id, entity_id_bytes) = read_varint(&add);
+        assert_eq!(encoded_entity_id, i32::try_from(orb_id.get()).unwrap());
+        assert_eq!(read_varint(&add[entity_id_bytes + 16..]).0, 49);
+
+        let metadata = recv_protocol_until(
+            &writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::SetEntityData,
+        );
+        let (encoded_entity_id, entity_id_bytes) = read_varint(&metadata);
+        assert_eq!(encoded_entity_id, i32::try_from(orb_id.get()).unwrap());
+        assert_eq!(
+            &metadata[entity_id_bytes..],
+            &[
+                ferrum_version_26_1_2::EXPERIENCE_ORB_VALUE_METADATA_INDEX,
+                ferrum_version_26_1_2::INT_ENTITY_DATA_SERIALIZER_ID as u8,
+                0xac,
+                0x02,
+                0xff,
+            ]
+        );
+
+        game.despawn_entity(orb_id).unwrap();
+        let remove = recv_protocol_until(
+            &writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::RemoveEntities,
+        );
+        let (count, count_bytes) = read_varint(&remove);
+        assert_eq!(count, 1);
+        assert_eq!(
+            read_varint(&remove[count_bytes..]).0,
+            i32::try_from(orb_id.get()).unwrap()
         );
         service.shutdown().unwrap();
     }

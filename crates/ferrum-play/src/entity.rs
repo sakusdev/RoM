@@ -1,6 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use ferrum_game::{EntityId, EntityUuid, GameMode, ItemStack, PlayerUuid, Transform, Velocity};
+use ferrum_game::{
+    EntityId, EntityUuid, GameMode, ItemStack, MAX_EXPERIENCE_ORB_VALUE, PlayerUuid, Transform,
+    Velocity,
+};
 
 use crate::inventory::{
     DataComponentProtocolRegistry, InventoryEncodeError, ItemProtocolRegistry, encode_item_stack,
@@ -82,6 +85,29 @@ impl ItemEntityMetadataProtocol {
         Ok(Self {
             stack_index,
             stack_serializer_id,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExperienceOrbMetadataProtocol {
+    pub value_index: u8,
+    pub value_serializer_id: i32,
+}
+
+impl ExperienceOrbMetadataProtocol {
+    pub fn new(value_index: u8, value_serializer_id: i32) -> Result<Self, EntityEncodeError> {
+        if value_index == ENTITY_DATA_TERMINATOR {
+            return Err(EntityEncodeError::InvalidMetadataIndex { index: value_index });
+        }
+        if value_serializer_id < 0 {
+            return Err(EntityEncodeError::NegativeMetadataSerializerId {
+                serializer_id: value_serializer_id,
+            });
+        }
+        Ok(Self {
+            value_index,
+            value_serializer_id,
         })
     }
 }
@@ -293,6 +319,25 @@ pub fn encode_item_entity_data(
     output.extend_from_slice(&encoded_stack);
     output.push(ENTITY_DATA_TERMINATOR);
     Ok(Some(output))
+}
+
+pub fn encode_experience_orb_data(
+    entity_id: EntityId,
+    value: u32,
+    metadata: ExperienceOrbMetadataProtocol,
+) -> Result<Vec<u8>, EntityEncodeError> {
+    if value > MAX_EXPERIENCE_ORB_VALUE {
+        return Err(EntityEncodeError::ExperienceOrbValueOutOfRange { value });
+    }
+    let value = i32::try_from(value)
+        .map_err(|_| EntityEncodeError::ExperienceOrbValueOutOfRange { value })?;
+    let mut output = Vec::new();
+    write_entity_id(&mut output, entity_id)?;
+    output.push(metadata.value_index);
+    write_varint(&mut output, metadata.value_serializer_id);
+    write_varint(&mut output, value);
+    output.push(ENTITY_DATA_TERMINATOR);
+    Ok(output)
 }
 
 pub fn encode_take_item_entity(
@@ -546,6 +591,8 @@ pub enum EntityEncodeError {
     NegativeMetadataSerializerId { serializer_id: i32 },
     #[error("pickup amount {amount} exceeds the protocol VarInt range")]
     PickupAmountOutOfRange { amount: u32 },
+    #[error("experience orb value {value} exceeds the protocol range")]
+    ExperienceOrbValueOutOfRange { value: u32 },
     #[error(transparent)]
     Inventory(#[from] InventoryEncodeError),
     #[error("entity coordinate is not finite")]
@@ -627,6 +674,21 @@ mod tests {
             .unwrap()
             .unwrap(),
             vec![7, 8, 7, 3, 1, 0, 0, 0xff]
+        );
+    }
+
+    #[test]
+    fn experience_orb_metadata_uses_a_versioned_int_accessor() {
+        let metadata = ExperienceOrbMetadataProtocol::new(8, 1).unwrap();
+        assert_eq!(
+            encode_experience_orb_data(entity_id(), 300, metadata).unwrap(),
+            vec![7, 8, 1, 0xac, 0x02, 0xff]
+        );
+        assert_eq!(
+            encode_experience_orb_data(entity_id(), MAX_EXPERIENCE_ORB_VALUE + 1, metadata),
+            Err(EntityEncodeError::ExperienceOrbValueOutOfRange {
+                value: MAX_EXPERIENCE_ORB_VALUE + 1,
+            })
         );
     }
 

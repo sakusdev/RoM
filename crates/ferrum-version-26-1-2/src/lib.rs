@@ -39,6 +39,10 @@ pub const FLAT_WORLD_SPAWN_Z: i32 = 0;
 pub const ITEM_ENTITY_STACK_METADATA_INDEX: u8 = 8;
 /// EntityDataSerializers.ITEM_STACK ID derived from the official 26.1.2 serializer registration order.
 pub const ITEM_STACK_ENTITY_DATA_SERIALIZER_ID: i32 = 7;
+/// ExperienceOrb.DATA_VALUE accessor index derived from the SHA-1-verified official 26.1.2 server.
+pub const EXPERIENCE_ORB_VALUE_METADATA_INDEX: u8 = 8;
+/// EntityDataSerializers.INT ID derived from the official 26.1.2 serializer registration order.
+pub const INT_ENTITY_DATA_SERIALIZER_ID: i32 = 1;
 
 /// Number of tag registries that are valid in the client Configuration registry access.
 pub const NETWORK_TAG_REGISTRY_COUNT: usize = 16;
@@ -166,6 +170,8 @@ mod tests {
         assert_eq!(profile.protocol_number(), PROTOCOL_VERSION);
         assert!(profile.supports(775));
         assert!(!profile.supports(774));
+        assert_eq!(EXPERIENCE_ORB_VALUE_METADATA_INDEX, 8);
+        assert_eq!(INT_ENTITY_DATA_SERIALIZER_ID, 1);
     }
 
     #[test]
