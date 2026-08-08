@@ -20,11 +20,12 @@ use ferrum_game::{CommandSource, EntityId, GameState, PlayerUuid as GamePlayerUu
 use ferrum_nbt::{Tag, encode_anonymous};
 use ferrum_play::{
     BlockPosition, CommonPlayerSpawnInfo, DataComponentProtocolRegistry, DefaultSpawnPosition,
-    EntityProtocolRegistry, GlobalPosition, ItemProtocolRegistry, JoinGame, PlayerPosition,
-    PositionMoveRotation, encode_chunk_batch_finished, encode_chunk_batch_start,
-    encode_default_spawn_position, encode_join_game, encode_level_chunk_with_light,
-    encode_play_disconnect, encode_player_position, encode_set_chunk_cache_center,
-    encode_set_container_content, encode_set_container_slot,
+    EntityProtocolRegistry, ExperienceOrbMetadataProtocol, GlobalPosition,
+    ItemEntityMetadataProtocol, ItemProtocolRegistry, JoinGame, PlayerPosition,
+    PositionMoveRotation, ProtocolIdRegistry, encode_chunk_batch_finished,
+    encode_chunk_batch_start, encode_default_spawn_position, encode_join_game,
+    encode_level_chunk_with_light, encode_play_disconnect, encode_player_position,
+    encode_set_chunk_cache_center, encode_set_container_content, encode_set_container_slot,
     encode_set_player_inventory_with_components, encode_system_chat,
 };
 use ferrum_protocol::{HandshakeIntent, PacketKind, PacketTable, ProtocolProfile, ProtocolSession};
@@ -242,6 +243,9 @@ struct RuntimeRegistryData {
     entity_protocol_ids: EntityProtocolRegistry,
     item_protocol_ids: ItemProtocolRegistry,
     data_component_protocol_ids: DataComponentProtocolRegistry,
+    attribute_protocol_ids: ProtocolIdRegistry,
+    mob_effect_protocol_ids: ProtocolIdRegistry,
+    damage_type_protocol_ids: ProtocolIdRegistry,
 }
 
 #[derive(Debug)]
@@ -275,6 +279,9 @@ impl ServerState {
                 entity_protocol_ids: EntityProtocolRegistry::default(),
                 item_protocol_ids: ItemProtocolRegistry::default(),
                 data_component_protocol_ids: DataComponentProtocolRegistry::default(),
+                attribute_protocol_ids: ProtocolIdRegistry::default(),
+                mob_effect_protocol_ids: ProtocolIdRegistry::default(),
+                damage_type_protocol_ids: ProtocolIdRegistry::default(),
             },
             config.play_policy.clone(),
             None,
@@ -298,6 +305,9 @@ impl ServerState {
             entity_protocol_ids,
             item_protocol_ids,
             data_component_protocol_ids,
+            attribute_protocol_ids,
+            mob_effect_protocol_ids,
+            damage_type_protocol_ids,
         } = registries;
         let center = play_runtime::spawn_chunk(&world);
         let replication_world = world.clone();
@@ -314,9 +324,37 @@ impl ServerState {
             }
             None => GameState::new(world.dimension.clone())?,
         };
+        let item_entity_metadata = entity_protocol_ids
+            .protocol_id("minecraft:item")
+            .map(|_| {
+                ItemEntityMetadataProtocol::new(
+                    version_26_1_2::ITEM_ENTITY_STACK_METADATA_INDEX,
+                    version_26_1_2::ITEM_STACK_ENTITY_DATA_SERIALIZER_ID,
+                )
+            })
+            .transpose()
+            .context("cannot build item entity metadata protocol")?;
+        let experience_orb_metadata = entity_protocol_ids
+            .protocol_id("minecraft:experience_orb")
+            .map(|_| {
+                ExperienceOrbMetadataProtocol::new(
+                    version_26_1_2::EXPERIENCE_ORB_VALUE_METADATA_INDEX,
+                    version_26_1_2::INT_ENTITY_DATA_SERIALIZER_ID,
+                )
+            })
+            .transpose()
+            .context("cannot build experience orb metadata protocol")?;
         let game_runtime = SharedGameRuntime::new(game_state);
         let game_service = spawn_game_service(game_runtime.clone(), persistence.game)?;
         let shared_runtime_config = shared_play_runtime_config(&play_policy)?;
+        let entity_tracking_range_blocks = u32::try_from(
+            play_policy
+                .chunk_radius
+                .checked_add(1)
+                .and_then(|radius| radius.checked_mul(16))
+                .context("entity tracking range overflow")?,
+        )
+        .context("entity tracking range cannot be negative")?;
         let shared_world = Arc::new(match loaded_chunks {
             Some(store) => {
                 play_runtime::SharedWorld::from_store_with_policy(store, world, play_policy)?
@@ -328,9 +366,15 @@ impl ServerState {
         let game_replication = spawn_game_replication(
             &game_runtime,
             GameReplicationConfig {
+                entity_tracking_range_blocks,
                 entity_protocol_ids,
                 item_protocol_ids,
                 data_component_protocol_ids,
+                attribute_protocol_ids,
+                mob_effect_protocol_ids,
+                damage_type_protocol_ids,
+                item_entity_metadata,
+                experience_orb_metadata,
                 world: Some(replication_world),
                 ..GameReplicationConfig::default()
             },
@@ -365,6 +409,9 @@ impl ServerState {
                 entity_protocol_ids: EntityProtocolRegistry::default(),
                 item_protocol_ids: ItemProtocolRegistry::default(),
                 data_component_protocol_ids: DataComponentProtocolRegistry::default(),
+                attribute_protocol_ids: ProtocolIdRegistry::default(),
+                mob_effect_protocol_ids: ProtocolIdRegistry::default(),
+                damage_type_protocol_ids: ProtocolIdRegistry::default(),
             },
             play_policy,
             Some(store),
@@ -602,6 +649,9 @@ fn run(cli: Cli) -> Result<()> {
         entity_protocol_ids,
         item_protocol_ids,
         data_component_protocol_ids,
+        attribute_protocol_ids,
+        mob_effect_protocol_ids,
+        damage_type_protocol_ids,
     ) = if let Some(version_pack) = &cli.version_pack {
         let loaded = load_version_pack(version_pack, &config)?;
         (
@@ -611,6 +661,9 @@ fn run(cli: Cli) -> Result<()> {
             loaded.entity_protocol_ids,
             loaded.item_protocol_ids,
             loaded.data_component_protocol_ids,
+            loaded.attribute_protocol_ids,
+            loaded.mob_effect_protocol_ids,
+            loaded.damage_type_protocol_ids,
         )
     } else {
         let registry_payloads =
@@ -628,12 +681,18 @@ fn run(cli: Cli) -> Result<()> {
             EntityProtocolRegistry::default(),
             ItemProtocolRegistry::default(),
             DataComponentProtocolRegistry::default(),
+            ProtocolIdRegistry::default(),
+            ProtocolIdRegistry::default(),
+            ProtocolIdRegistry::default(),
         )
     };
     validate_replication_packet_support(
         &runtime_profile,
         &entity_protocol_ids,
         &item_protocol_ids,
+        &attribute_protocol_ids,
+        &mob_effect_protocol_ids,
+        &damage_type_protocol_ids,
     )?;
     config.runtime_profile = Some(runtime_profile);
     config.item_protocol_ids = item_protocol_ids.clone();
@@ -664,6 +723,9 @@ fn run(cli: Cli) -> Result<()> {
             entity_protocol_ids,
             item_protocol_ids,
             data_component_protocol_ids,
+            attribute_protocol_ids,
+            mob_effect_protocol_ids,
+            damage_type_protocol_ids,
         },
         config.play_policy.clone(),
         loaded_chunks,
@@ -838,6 +900,9 @@ struct LoadedVersionPack {
     entity_protocol_ids: EntityProtocolRegistry,
     item_protocol_ids: ItemProtocolRegistry,
     data_component_protocol_ids: DataComponentProtocolRegistry,
+    attribute_protocol_ids: ProtocolIdRegistry,
+    mob_effect_protocol_ids: ProtocolIdRegistry,
+    damage_type_protocol_ids: ProtocolIdRegistry,
 }
 
 fn load_version_pack(path: &Path, config: &ServerConfig) -> Result<LoadedVersionPack> {
@@ -888,6 +953,10 @@ fn load_version_pack(path: &Path, config: &ServerConfig) -> Result<LoadedVersion
             .map(|component| (component.component.clone(), component.protocol_id)),
     )
     .context("cannot build data component protocol registry from version pack")?;
+    let attribute_protocol_ids = protocol_registry_from_pack(&pack, "minecraft:attribute")?;
+    let mob_effect_protocol_ids = protocol_registry_from_pack(&pack, "minecraft:mob_effect")?;
+    let damage_type_protocol_ids =
+        synchronized_registry_protocol_ids(&pack.registries, "minecraft:damage_type")?;
     println!(
         "loaded RoM version pack {} (SHA-256 {}, {} typed packets / {} catalog entries, {} items, data version {}, {} sections, {} registries / {} entries)",
         canonical.display(),
@@ -907,19 +976,65 @@ fn load_version_pack(path: &Path, config: &ServerConfig) -> Result<LoadedVersion
         entity_protocol_ids,
         item_protocol_ids,
         data_component_protocol_ids,
+        attribute_protocol_ids,
+        mob_effect_protocol_ids,
+        damage_type_protocol_ids,
     })
+}
+
+fn protocol_registry_from_pack(pack: &RomPack, id: &str) -> Result<ProtocolIdRegistry> {
+    let entries = pack
+        .protocol_registries
+        .iter()
+        .find(|registry| registry.id == id)
+        .map(|registry| {
+            registry
+                .entries
+                .iter()
+                .map(|entry| (entry.id.clone(), entry.protocol_id))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    ProtocolIdRegistry::new(entries)
+        .with_context(|| format!("cannot build {id} protocol registry from version pack"))
+}
+
+fn synchronized_registry_protocol_ids(
+    registries: &[RomPackRegistry],
+    id: &str,
+) -> Result<ProtocolIdRegistry> {
+    let entries = registries
+        .iter()
+        .find(|registry| registry.id == id)
+        .with_context(|| format!("version pack is missing {id}"))?
+        .entries
+        .iter()
+        .enumerate()
+        .map(|(protocol_id, entry)| {
+            let protocol_id = i32::try_from(protocol_id)
+                .with_context(|| format!("{id} protocol ID exceeds i32"))?;
+            Ok((entry.clone(), protocol_id))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    ProtocolIdRegistry::new(entries)
+        .with_context(|| format!("cannot build {id} protocol registry from version pack"))
 }
 
 fn validate_replication_packet_support(
     profile: &ProtocolProfile,
     entity_protocol_ids: &EntityProtocolRegistry,
     item_protocol_ids: &ItemProtocolRegistry,
+    attribute_protocol_ids: &ProtocolIdRegistry,
+    mob_effect_protocol_ids: &ProtocolIdRegistry,
+    damage_type_protocol_ids: &ProtocolIdRegistry,
 ) -> Result<()> {
     for kind in [
+        PacketKind::SetExperience,
         PacketKind::SetHealth,
         PacketKind::HurtAnimation,
         PacketKind::PlayerCombatKill,
         PacketKind::Respawn,
+        PacketKind::SetEntityMotion,
     ] {
         profile
             .packets()
@@ -948,11 +1063,63 @@ fn validate_replication_packet_support(
                 .with_context(|| format!("player entity replication requires {kind:?}"))?;
         }
     }
+    if entity_protocol_ids.protocol_id("minecraft:item").is_some() {
+        if item_protocol_ids.is_empty() {
+            bail!("item entity replication requires a non-empty item protocol registry");
+        }
+        for kind in [
+            PacketKind::AddEntity,
+            PacketKind::RemoveEntities,
+            PacketKind::SetEntityData,
+            PacketKind::TakeItemEntity,
+        ] {
+            profile
+                .packets()
+                .require(kind)
+                .with_context(|| format!("item entity replication requires {kind:?}"))?;
+        }
+    }
+    if entity_protocol_ids
+        .protocol_id("minecraft:experience_orb")
+        .is_some()
+    {
+        for kind in [
+            PacketKind::AddEntity,
+            PacketKind::RemoveEntities,
+            PacketKind::SetEntityData,
+            PacketKind::TakeItemEntity,
+        ] {
+            profile
+                .packets()
+                .require(kind)
+                .with_context(|| format!("experience orb replication requires {kind:?}"))?;
+        }
+    }
     if !item_protocol_ids.is_empty() {
         profile
             .packets()
             .require(PacketKind::SetEquipment)
             .context("item-backed player replication requires SetEquipment")?;
+    }
+    if !attribute_protocol_ids.is_empty() {
+        profile
+            .packets()
+            .require(PacketKind::UpdateAttributes)
+            .context("attribute replication requires UpdateAttributes")?;
+    }
+    if !mob_effect_protocol_ids.is_empty() {
+        for kind in [PacketKind::UpdateMobEffect, PacketKind::RemoveMobEffect] {
+            profile
+                .packets()
+                .require(kind)
+                .with_context(|| format!("status-effect replication requires {kind:?}"))?;
+        }
+    }
+    if !damage_type_protocol_ids.is_empty() {
+        profile
+            .packets()
+            .require(PacketKind::DamageEvent)
+            .context("damage-source replication requires DamageEvent")?;
     }
     Ok(())
 }
@@ -4661,8 +4828,11 @@ mod tests {
             &profile,
             &EntityProtocolRegistry::default(),
             &ItemProtocolRegistry::default(),
+            &ProtocolIdRegistry::default(),
+            &ProtocolIdRegistry::default(),
+            &ProtocolIdRegistry::default(),
         )
         .unwrap_err();
-        assert!(error.to_string().contains("SetHealth"));
+        assert!(error.to_string().contains("SetExperience"));
     }
 }

@@ -65,6 +65,10 @@ pub struct RomPack {
     pub entity_types: Vec<RomPackEntityType>,
     /// Static data-component-type IDs used by version-aware ItemStack codecs.
     pub data_components: Vec<RomPackDataComponent>,
+    /// Complete generated static-registry protocol IDs. This is additive to the
+    /// legacy typed inventories above so schema-v8 packs remain readable.
+    #[serde(default)]
+    pub protocol_registries: Vec<RomPackProtocolRegistry>,
     pub registries: Vec<RomPackRegistry>,
     pub resources: Vec<RomPackResource>,
 }
@@ -141,6 +145,18 @@ pub struct RomPackDataComponent {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RomPackProtocolRegistry {
+    pub id: String,
+    pub entries: Vec<RomPackProtocolEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RomPackProtocolEntry {
+    pub id: String,
+    pub protocol_id: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RomPackRegistry {
     pub id: String,
     pub entries: Vec<String>,
@@ -162,6 +178,8 @@ pub struct RomPackSummary {
     pub packet_catalog_count: usize,
     pub item_count: usize,
     pub data_component_count: usize,
+    pub protocol_registry_count: usize,
+    pub protocol_registry_entry_count: usize,
     pub registry_count: usize,
     pub registry_entry_count: usize,
     pub resource_count: usize,
@@ -515,6 +533,58 @@ pub fn validate_rompack(pack: &RomPack, limits: RomPackLimits) -> Result<()> {
         }
     }
 
+    if pack.protocol_registries.len() > limits.max_registries {
+        bail!("version pack contains too many protocol registries");
+    }
+    let mut previous_protocol_registry: Option<&str> = None;
+    for registry in &pack.protocol_registries {
+        validate_resource_location(
+            "protocol registry ID",
+            &registry.id,
+            limits.max_identifier_bytes,
+        )?;
+        if previous_protocol_registry.is_some_and(|previous| previous >= registry.id.as_str()) {
+            bail!("version-pack protocol registries must be strictly sorted and unique");
+        }
+        previous_protocol_registry = Some(&registry.id);
+        if registry.entries.is_empty() || registry.entries.len() > limits.max_entries_per_registry {
+            bail!(
+                "protocol registry {} entry count is outside the configured range",
+                registry.id
+            );
+        }
+        let mut previous_entry: Option<&str> = None;
+        let mut protocol_ids = BTreeSet::new();
+        for entry in &registry.entries {
+            validate_resource_location(
+                "protocol registry entry",
+                &entry.id,
+                limits.max_identifier_bytes,
+            )?;
+            if previous_entry.is_some_and(|previous| previous >= entry.id.as_str()) {
+                bail!(
+                    "protocol registry {} entries must be strictly sorted and unique",
+                    registry.id
+                );
+            }
+            previous_entry = Some(&entry.id);
+            if entry.protocol_id < 0 {
+                bail!(
+                    "protocol registry {} entry {} ID cannot be negative",
+                    registry.id,
+                    entry.id
+                );
+            }
+            if !protocol_ids.insert(entry.protocol_id) {
+                bail!(
+                    "protocol registry {} contains duplicate protocol ID {}",
+                    registry.id,
+                    entry.protocol_id
+                );
+            }
+        }
+    }
+
     if pack.registries.len() > limits.max_registries {
         bail!("version pack contains too many registries");
     }
@@ -586,6 +656,12 @@ fn summary(path: PathBuf, bytes: &[u8], pack: &RomPack) -> RomPackSummary {
         packet_catalog_count: pack.packet_catalog.len(),
         item_count: pack.items.len(),
         data_component_count: pack.data_components.len(),
+        protocol_registry_count: pack.protocol_registries.len(),
+        protocol_registry_entry_count: pack
+            .protocol_registries
+            .iter()
+            .map(|registry| registry.entries.len())
+            .sum(),
         registry_count: pack.registries.len(),
         registry_entry_count: pack
             .registries
@@ -731,6 +807,7 @@ mod tests {
                 },
             ],
             data_components: Vec::new(),
+            protocol_registries: Vec::new(),
             packet_catalog: vec![
                 PacketDescriptor::new(
                     ferrum_protocol::ProtocolPhase::Handshake,

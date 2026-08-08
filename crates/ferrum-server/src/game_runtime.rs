@@ -10,8 +10,10 @@ use std::{
 };
 
 use ferrum_game::{
-    CommandError, CommandOutcome, CommandSource, ContainerClick, GameEvent, GameSnapshot,
-    GameState, GameStateError, ItemStack, PersistenceError, PlayerUuid, Transform, execute_command,
+    CommandError, CommandOutcome, CommandSource, ContainerClick, DamageSource, EntityId,
+    EntityPayload, EntityType, EquipmentSlot, GameEvent, GameSnapshot, GameState, GameStateError,
+    ItemStack, PersistenceError, PlayerUuid, StatusEffectInstance, Transform, Velocity,
+    execute_command,
 };
 use thiserror::Error;
 
@@ -120,12 +122,75 @@ impl SharedGameRuntime {
         Ok(events)
     }
 
+    pub fn consume_equipped_item(
+        &self,
+        uuid: PlayerUuid,
+        slot: EquipmentSlot,
+        expected_item: &str,
+        amount: u32,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self
+            .write()?
+            .consume_equipped_item(uuid, slot, expected_item, amount)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn damage_equipped_item(
+        &self,
+        uuid: PlayerUuid,
+        slot: EquipmentSlot,
+        expected_item: &str,
+        amount: u32,
+        max_damage: u32,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events =
+            self.write()?
+                .damage_equipped_item(uuid, slot, expected_item, amount, max_damage)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn drop_equipped_item(
+        &self,
+        uuid: PlayerUuid,
+        slot: EquipmentSlot,
+        whole_stack: bool,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self.write()?.drop_equipped_item(uuid, slot, whole_stack)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn swap_equipped_items(
+        &self,
+        uuid: PlayerUuid,
+        first: EquipmentSlot,
+        second: EquipmentSlot,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self.write()?.swap_equipped_items(uuid, first, second)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
     pub fn damage_player(
         &self,
         uuid: PlayerUuid,
         amount: f32,
     ) -> Result<Vec<GameEvent>, GameRuntimeError> {
         let events = self.write()?.damage_player(uuid, amount)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn attack_entity(
+        &self,
+        attacker_uuid: PlayerUuid,
+        target_entity_id: EntityId,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self
+            .write()?
+            .attack_entity(attacker_uuid, target_entity_id)?;
         self.publish(&events)?;
         Ok(events)
     }
@@ -152,6 +217,189 @@ impl SharedGameRuntime {
         transform: Transform,
     ) -> Result<Vec<GameEvent>, GameRuntimeError> {
         let events = self.write()?.respawn_player(uuid, transform)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn spawn_item_entity(
+        &self,
+        transform: Transform,
+        stack: ItemStack,
+        velocity: Velocity,
+        owner: Option<PlayerUuid>,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self
+            .write()?
+            .spawn_item_entity(transform, stack, velocity, owner)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn spawn_entity(
+        &self,
+        entity_type: EntityType,
+        transform: Transform,
+        velocity: Velocity,
+        payload: EntityPayload,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self
+            .write()?
+            .spawn_entity(entity_type, transform, velocity, payload)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn spawn_hostile_mob(
+        &self,
+        entity_type: EntityType,
+        transform: Transform,
+        max_health: f32,
+        drops: Vec<ItemStack>,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self
+            .write()?
+            .spawn_hostile_mob(entity_type, transform, max_health, drops)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn move_entity(
+        &self,
+        entity_id: EntityId,
+        transform: Transform,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self.write()?.move_entity(entity_id, transform)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn set_entity_velocity(
+        &self,
+        entity_id: EntityId,
+        velocity: Velocity,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self.write()?.set_entity_velocity(entity_id, velocity)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn despawn_entity(&self, entity_id: EntityId) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self.write()?.despawn_entity(entity_id)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn damage_entity(
+        &self,
+        entity_id: EntityId,
+        amount: f32,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self.write()?.damage_entity(entity_id, amount)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn damage_entity_with_source(
+        &self,
+        entity_id: EntityId,
+        amount: f32,
+        source: DamageSource,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self
+            .write()?
+            .damage_entity_with_source(entity_id, amount, source)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn apply_entity_knockback(
+        &self,
+        entity_id: EntityId,
+        direction_xz: [f64; 2],
+        strength: f64,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self
+            .write()?
+            .apply_entity_knockback(entity_id, direction_xz, strength)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn pickup_nearby_items(
+        &self,
+        uuid: PlayerUuid,
+        radius: f64,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self.write()?.pickup_nearby_items(uuid, radius)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn pickup_nearby_experience_orbs(
+        &self,
+        uuid: PlayerUuid,
+        radius: f64,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self.write()?.pickup_nearby_experience_orbs(uuid, radius)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn damage_player_with_source(
+        &self,
+        uuid: PlayerUuid,
+        amount: f32,
+        source: DamageSource,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self
+            .write()?
+            .damage_player_with_source(uuid, amount, source)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn apply_knockback(
+        &self,
+        uuid: PlayerUuid,
+        direction_xz: [f64; 2],
+        strength: f64,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self
+            .write()?
+            .apply_knockback(uuid, direction_xz, strength)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn set_player_attribute_base(
+        &self,
+        uuid: PlayerUuid,
+        attribute: &str,
+        value: f64,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self
+            .write()?
+            .set_player_attribute_base(uuid, attribute, value)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn add_status_effect(
+        &self,
+        uuid: PlayerUuid,
+        effect: StatusEffectInstance,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self.write()?.add_status_effect(uuid, effect)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
+    pub fn remove_status_effect(
+        &self,
+        uuid: PlayerUuid,
+        effect: &str,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self.write()?.remove_status_effect(uuid, effect)?;
         self.publish(&events)?;
         Ok(events)
     }
@@ -199,7 +447,8 @@ impl SharedGameRuntime {
     }
 
     pub fn tick(&self) -> Result<(), GameRuntimeError> {
-        self.write()?.tick();
+        let events = self.write()?.tick();
+        self.publish(&events)?;
         Ok(())
     }
 
@@ -417,5 +666,43 @@ mod tests {
             subscription.try_recv().unwrap(),
             GameEvent::PlayerKilled { .. }
         ));
+    }
+
+    #[test]
+    fn publishes_non_player_entity_lifecycle_events() {
+        let runtime = SharedGameRuntime::vanilla_overworld();
+        let subscription = runtime.subscribe(NonZeroUsize::new(4).unwrap()).unwrap();
+        let spawned = runtime
+            .spawn_entity(
+                EntityType::new("minecraft:zombie").unwrap(),
+                spawn(),
+                Velocity::default(),
+                EntityPayload::Living(ferrum_game::LivingEntityData::new(20.0).unwrap()),
+            )
+            .unwrap();
+        let entity_id = match &spawned[0] {
+            GameEvent::EntitySpawned { entity } => entity.id,
+            event => panic!("unexpected event: {event:?}"),
+        };
+        assert!(matches!(
+            subscription.try_recv().unwrap(),
+            GameEvent::EntitySpawned { entity } if entity.id == entity_id
+        ));
+
+        runtime
+            .move_entity(
+                entity_id,
+                Transform::new([2.5, 65.0, 0.5], 0.0, 0.0, true).unwrap(),
+            )
+            .unwrap();
+        assert!(matches!(
+            subscription.try_recv().unwrap(),
+            GameEvent::EntityMoved { entity_id: moved, .. } if moved == entity_id
+        ));
+        runtime.despawn_entity(entity_id).unwrap();
+        assert_eq!(
+            subscription.try_recv().unwrap(),
+            GameEvent::EntityRemoved { entity_id }
+        );
     }
 }

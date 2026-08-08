@@ -312,6 +312,7 @@ pub fn known_packet_kind(
         (ProtocolPhase::Play, PacketDirection::Serverbound, "move_player_status_only") => {
             Some(PacketKind::MovePlayerStatusOnly)
         }
+        (ProtocolPhase::Play, PacketDirection::Serverbound, "attack") => Some(PacketKind::Attack),
         (ProtocolPhase::Play, PacketDirection::Serverbound, "player_action") => {
             Some(PacketKind::PlayerAction)
         }
@@ -381,14 +382,35 @@ pub fn known_packet_kind(
         (ProtocolPhase::Play, PacketDirection::Clientbound, "set_entity_data") => {
             Some(PacketKind::SetEntityData)
         }
+        (ProtocolPhase::Play, PacketDirection::Clientbound, "take_item_entity") => {
+            Some(PacketKind::TakeItemEntity)
+        }
         (ProtocolPhase::Play, PacketDirection::Clientbound, "set_equipment") => {
             Some(PacketKind::SetEquipment)
+        }
+        (ProtocolPhase::Play, PacketDirection::Clientbound, "set_entity_motion") => {
+            Some(PacketKind::SetEntityMotion)
+        }
+        (ProtocolPhase::Play, PacketDirection::Clientbound, "damage_event") => {
+            Some(PacketKind::DamageEvent)
+        }
+        (ProtocolPhase::Play, PacketDirection::Clientbound, "set_experience") => {
+            Some(PacketKind::SetExperience)
         }
         (ProtocolPhase::Play, PacketDirection::Clientbound, "set_health") => {
             Some(PacketKind::SetHealth)
         }
         (ProtocolPhase::Play, PacketDirection::Clientbound, "hurt_animation") => {
             Some(PacketKind::HurtAnimation)
+        }
+        (ProtocolPhase::Play, PacketDirection::Clientbound, "update_attributes") => {
+            Some(PacketKind::UpdateAttributes)
+        }
+        (ProtocolPhase::Play, PacketDirection::Clientbound, "update_mob_effect") => {
+            Some(PacketKind::UpdateMobEffect)
+        }
+        (ProtocolPhase::Play, PacketDirection::Clientbound, "remove_mob_effect") => {
+            Some(PacketKind::RemoveMobEffect)
         }
         (ProtocolPhase::Play, PacketDirection::Clientbound, "player_combat_kill") => {
             Some(PacketKind::PlayerCombatKill)
@@ -444,6 +466,7 @@ pub const fn canonical_packet_name(kind: PacketKind) -> &'static str {
         PacketKind::MovePlayerPositionRotation => "minecraft:move_player_pos_rot",
         PacketKind::MovePlayerRotation => "minecraft:move_player_rot",
         PacketKind::MovePlayerStatusOnly => "minecraft:move_player_status_only",
+        PacketKind::Attack => "minecraft:attack",
         PacketKind::PlayerAction => "minecraft:player_action",
         PacketKind::UseItemOn => "minecraft:use_item_on",
         PacketKind::BlockChangedAck => "minecraft:block_changed_ack",
@@ -467,9 +490,16 @@ pub const fn canonical_packet_name(kind: PacketKind) -> &'static str {
         PacketKind::TeleportEntity => "minecraft:teleport_entity",
         PacketKind::RotateHead => "minecraft:rotate_head",
         PacketKind::SetEntityData => "minecraft:set_entity_data",
+        PacketKind::TakeItemEntity => "minecraft:take_item_entity",
         PacketKind::SetEquipment => "minecraft:set_equipment",
+        PacketKind::SetEntityMotion => "minecraft:set_entity_motion",
+        PacketKind::DamageEvent => "minecraft:damage_event",
+        PacketKind::SetExperience => "minecraft:set_experience",
         PacketKind::SetHealth => "minecraft:set_health",
         PacketKind::HurtAnimation => "minecraft:hurt_animation",
+        PacketKind::UpdateAttributes => "minecraft:update_attributes",
+        PacketKind::UpdateMobEffect => "minecraft:update_mob_effect",
+        PacketKind::RemoveMobEffect => "minecraft:remove_mob_effect",
         PacketKind::PlayerCombatKill => "minecraft:player_combat_kill",
         PacketKind::Respawn => "minecraft:respawn",
         PacketKind::PlayerInfoUpdate => "minecraft:player_info_update",
@@ -625,6 +655,22 @@ mod tests {
     }
 
     #[test]
+    fn recognizes_set_experience_as_optional_typed_packet() {
+        assert_eq!(
+            known_packet_kind(
+                ProtocolPhase::Play,
+                PacketDirection::Clientbound,
+                "set_experience",
+            ),
+            Some(PacketKind::SetExperience)
+        );
+        assert_eq!(
+            canonical_packet_name(PacketKind::SetExperience),
+            "minecraft:set_experience"
+        );
+    }
+
+    #[test]
     fn recognizes_respawn_combat_and_client_command_packets() {
         for (direction, name, kind) in [
             (
@@ -650,5 +696,21 @@ mod tests {
             );
             assert_eq!(canonical_packet_name(kind), format!("minecraft:{name}"));
         }
+    }
+
+    #[test]
+    fn recognizes_the_serverbound_attack_packet() {
+        assert_eq!(
+            known_packet_kind(
+                ProtocolPhase::Play,
+                PacketDirection::Serverbound,
+                "minecraft:attack",
+            ),
+            Some(PacketKind::Attack)
+        );
+        assert_eq!(
+            canonical_packet_name(PacketKind::Attack),
+            "minecraft:attack"
+        );
     }
 }

@@ -87,6 +87,8 @@ pub struct GenerateReport {
     pub packet_count: usize,
     pub packet_catalog_count: usize,
     pub item_count: usize,
+    pub protocol_registry_count: usize,
+    pub protocol_registry_entry_count: usize,
     pub world_data_version: i32,
     pub overworld_min_section_y: i32,
     pub overworld_section_count: usize,
@@ -113,6 +115,10 @@ pub(super) struct PackRecord {
     pub packet_catalog_count: usize,
     #[serde(default)]
     pub item_count: usize,
+    #[serde(default)]
+    pub protocol_registry_count: usize,
+    #[serde(default)]
+    pub protocol_registry_entry_count: usize,
     pub registry_count: usize,
     pub registry_entry_count: usize,
     pub resource_count: usize,
@@ -174,6 +180,7 @@ pub fn generate_version_pack(options: &GenerateOptions) -> Result<GenerateReport
     let items = protocol_registries.items;
     let entity_types = protocol_registries.entity_types;
     let data_components = protocol_registries.data_components;
+    let protocol_registries = protocol_registries.protocol_registries;
     let packets = typed_packet_inventory(&packet_catalog)?;
     let world = builtin_world_metadata();
     validate_against_builtin_profile(
@@ -205,6 +212,7 @@ pub fn generate_version_pack(options: &GenerateOptions) -> Result<GenerateReport
         items,
         entity_types,
         data_components,
+        protocol_registries,
         registries,
         resources,
     };
@@ -216,6 +224,8 @@ pub fn generate_version_pack(options: &GenerateOptions) -> Result<GenerateReport
         packet_count: summary.packet_count,
         packet_catalog_count: summary.packet_catalog_count,
         item_count: summary.item_count,
+        protocol_registry_count: summary.protocol_registry_count,
+        protocol_registry_entry_count: summary.protocol_registry_entry_count,
         registry_count: summary.registry_count,
         registry_entry_count: summary.registry_entry_count,
         resource_count: summary.resource_count,
@@ -243,6 +253,8 @@ pub fn generate_version_pack(options: &GenerateOptions) -> Result<GenerateReport
         packet_count: summary.packet_count,
         packet_catalog_count: summary.packet_catalog_count,
         item_count: summary.item_count,
+        protocol_registry_count: summary.protocol_registry_count,
+        protocol_registry_entry_count: summary.protocol_registry_entry_count,
         world_data_version: pack.world.data_version,
         overworld_min_section_y: pack.world.overworld_min_section_y,
         overworld_section_count: pack.world.overworld_section_count,
@@ -289,6 +301,8 @@ pub(super) fn verify_version_pack_record(
         && summary.packet_count == record.packet_count
         && summary.packet_catalog_count == record.packet_catalog_count
         && summary.item_count == record.item_count
+        && summary.protocol_registry_count == record.protocol_registry_count
+        && summary.protocol_registry_entry_count == record.protocol_registry_entry_count
         && summary.registry_count == record.registry_count
         && summary.registry_entry_count == record.registry_entry_count
         && summary.resource_count == record.resource_count
@@ -332,6 +346,8 @@ fn report_from_existing(
         packet_count: summary.packet_count,
         packet_catalog_count: summary.packet_catalog_count,
         item_count: summary.item_count,
+        protocol_registry_count: summary.protocol_registry_count,
+        protocol_registry_entry_count: summary.protocol_registry_entry_count,
         world_data_version: pack.world.data_version,
         overworld_min_section_y: pack.world.overworld_min_section_y,
         overworld_section_count: pack.world.overworld_section_count,
@@ -642,6 +658,7 @@ fn resolve_protocol_registries(
         items: Vec::new(),
         entity_types: Vec::new(),
         data_components: Vec::new(),
+        protocol_registries: Vec::new(),
     })
 }
 

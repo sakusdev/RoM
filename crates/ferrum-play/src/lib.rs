@@ -2,13 +2,17 @@
 //!
 //! Packet IDs are version metadata and intentionally live outside this crate.
 
+mod attack;
 mod block_interaction;
 mod chunk_stream;
 mod entity;
+mod entity_sync;
+mod experience;
 mod health;
 mod inventory;
 mod movement;
 
+pub use attack::{AttackDecodeError, decode_attack};
 pub use block_interaction::{
     BlockFace, BlockInteractionDecodeError, InteractionHand, PlayerAction, PlayerActionStatus,
     UseItemOnBlock, block_position_to_world, decode_player_action, decode_use_item_on_block,
@@ -17,10 +21,18 @@ pub use block_interaction::{
 pub use chunk_stream::encode_forget_level_chunk;
 pub use entity::{
     EncodedEntityMovement, EntityEncodeError, EntityMovementKind, EntityProtocolRegistry,
-    PlayerInfoEntry, encode_add_entity, encode_empty_entity_data, encode_entity_movement,
-    encode_player_info_remove, encode_player_info_update, encode_remove_entities,
-    encode_rotate_head, encode_teleport_entity,
+    ExperienceOrbMetadataProtocol, ItemEntityMetadataProtocol, PlayerInfoEntry, encode_add_entity,
+    encode_add_entity_with_uuid, encode_empty_entity_data, encode_entity_movement,
+    encode_experience_orb_data, encode_item_entity_data, encode_player_info_remove,
+    encode_player_info_update, encode_remove_entities, encode_rotate_head, encode_take_item_entity,
+    encode_teleport_entity,
 };
+pub use entity_sync::{
+    EntitySyncEncodeError, ProtocolIdRegistry, encode_damage_event, encode_remove_mob_effect,
+    encode_set_entity_motion, encode_update_attribute, encode_update_attributes,
+    encode_update_mob_effect,
+};
+pub use experience::{ExperienceEncodeError, encode_set_experience};
 pub use health::{HealthEncodeError, encode_set_health};
 pub use inventory::{
     DataComponentProtocolRegistry, EquipmentEntry, InventoryDecodeError, InventoryEncodeError,

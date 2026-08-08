@@ -1,6 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use ferrum_game::{EntityId, GameMode, PlayerUuid, Transform, Velocity};
+use ferrum_game::{
+    EntityId, EntityUuid, GameMode, ItemStack, MAX_EXPERIENCE_ORB_VALUE, PlayerUuid, Transform,
+    Velocity,
+};
+
+use crate::inventory::{
+    DataComponentProtocolRegistry, InventoryEncodeError, ItemProtocolRegistry, encode_item_stack,
+};
 use thiserror::Error;
 
 const POSITION_SCALE: f64 = 4096.0;
@@ -56,6 +63,52 @@ impl EntityProtocolRegistry {
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.ids.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ItemEntityMetadataProtocol {
+    pub stack_index: u8,
+    pub stack_serializer_id: i32,
+}
+
+impl ItemEntityMetadataProtocol {
+    pub fn new(stack_index: u8, stack_serializer_id: i32) -> Result<Self, EntityEncodeError> {
+        if stack_index == ENTITY_DATA_TERMINATOR {
+            return Err(EntityEncodeError::InvalidMetadataIndex { index: stack_index });
+        }
+        if stack_serializer_id < 0 {
+            return Err(EntityEncodeError::NegativeMetadataSerializerId {
+                serializer_id: stack_serializer_id,
+            });
+        }
+        Ok(Self {
+            stack_index,
+            stack_serializer_id,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExperienceOrbMetadataProtocol {
+    pub value_index: u8,
+    pub value_serializer_id: i32,
+}
+
+impl ExperienceOrbMetadataProtocol {
+    pub fn new(value_index: u8, value_serializer_id: i32) -> Result<Self, EntityEncodeError> {
+        if value_index == ENTITY_DATA_TERMINATOR {
+            return Err(EntityEncodeError::InvalidMetadataIndex { index: value_index });
+        }
+        if value_serializer_id < 0 {
+            return Err(EntityEncodeError::NegativeMetadataSerializerId {
+                serializer_id: value_serializer_id,
+            });
+        }
+        Ok(Self {
+            value_index,
+            value_serializer_id,
+        })
     }
 }
 
@@ -160,12 +213,48 @@ pub fn encode_add_entity(
     velocity: Velocity,
     registry: &EntityProtocolRegistry,
 ) -> Result<Option<Vec<u8>>, EntityEncodeError> {
+    encode_add_entity_bytes(
+        entity_id,
+        uuid.as_bytes(),
+        entity_type,
+        transform,
+        velocity,
+        registry,
+    )
+}
+
+pub fn encode_add_entity_with_uuid(
+    entity_id: EntityId,
+    uuid: EntityUuid,
+    entity_type: &str,
+    transform: Transform,
+    velocity: Velocity,
+    registry: &EntityProtocolRegistry,
+) -> Result<Option<Vec<u8>>, EntityEncodeError> {
+    encode_add_entity_bytes(
+        entity_id,
+        uuid.as_bytes(),
+        entity_type,
+        transform,
+        velocity,
+        registry,
+    )
+}
+
+fn encode_add_entity_bytes(
+    entity_id: EntityId,
+    uuid: &[u8; 16],
+    entity_type: &str,
+    transform: Transform,
+    velocity: Velocity,
+    registry: &EntityProtocolRegistry,
+) -> Result<Option<Vec<u8>>, EntityEncodeError> {
     let Some(protocol_id) = registry.protocol_id(entity_type) else {
         return Ok(None);
     };
     let mut output = Vec::new();
     write_entity_id(&mut output, entity_id)?;
-    output.extend_from_slice(uuid.as_bytes());
+    output.extend_from_slice(uuid);
     write_varint(&mut output, protocol_id);
     for coordinate in transform.position {
         if !coordinate.is_finite() {
@@ -210,6 +299,58 @@ pub fn encode_empty_entity_data(entity_id: EntityId) -> Result<Vec<u8>, EntityEn
     let mut output = Vec::new();
     write_entity_id(&mut output, entity_id)?;
     output.push(ENTITY_DATA_TERMINATOR);
+    Ok(output)
+}
+
+pub fn encode_item_entity_data(
+    entity_id: EntityId,
+    stack: &ItemStack,
+    items: &ItemProtocolRegistry,
+    components: &DataComponentProtocolRegistry,
+    metadata: ItemEntityMetadataProtocol,
+) -> Result<Option<Vec<u8>>, EntityEncodeError> {
+    let Some(encoded_stack) = encode_item_stack(Some(stack), items, components)? else {
+        return Ok(None);
+    };
+    let mut output = Vec::new();
+    write_entity_id(&mut output, entity_id)?;
+    output.push(metadata.stack_index);
+    write_varint(&mut output, metadata.stack_serializer_id);
+    output.extend_from_slice(&encoded_stack);
+    output.push(ENTITY_DATA_TERMINATOR);
+    Ok(Some(output))
+}
+
+pub fn encode_experience_orb_data(
+    entity_id: EntityId,
+    value: u32,
+    metadata: ExperienceOrbMetadataProtocol,
+) -> Result<Vec<u8>, EntityEncodeError> {
+    if value > MAX_EXPERIENCE_ORB_VALUE {
+        return Err(EntityEncodeError::ExperienceOrbValueOutOfRange { value });
+    }
+    let value = i32::try_from(value)
+        .map_err(|_| EntityEncodeError::ExperienceOrbValueOutOfRange { value })?;
+    let mut output = Vec::new();
+    write_entity_id(&mut output, entity_id)?;
+    output.push(metadata.value_index);
+    write_varint(&mut output, metadata.value_serializer_id);
+    write_varint(&mut output, value);
+    output.push(ENTITY_DATA_TERMINATOR);
+    Ok(output)
+}
+
+pub fn encode_take_item_entity(
+    item_entity_id: EntityId,
+    collector_entity_id: EntityId,
+    amount: u32,
+) -> Result<Vec<u8>, EntityEncodeError> {
+    let amount =
+        i32::try_from(amount).map_err(|_| EntityEncodeError::PickupAmountOutOfRange { amount })?;
+    let mut output = Vec::new();
+    write_entity_id(&mut output, item_entity_id)?;
+    write_entity_id(&mut output, collector_entity_id)?;
+    write_varint(&mut output, amount);
     Ok(output)
 }
 
@@ -444,6 +585,16 @@ pub enum EntityEncodeError {
     EntityIdOutOfRange { entity_id: u32 },
     #[error("entity ID {entity_id} is duplicated")]
     DuplicateEntityId { entity_id: u32 },
+    #[error("metadata index {index} conflicts with the entity-data terminator")]
+    InvalidMetadataIndex { index: u8 },
+    #[error("metadata serializer ID {serializer_id} cannot be negative")]
+    NegativeMetadataSerializerId { serializer_id: i32 },
+    #[error("pickup amount {amount} exceeds the protocol VarInt range")]
+    PickupAmountOutOfRange { amount: u32 },
+    #[error("experience orb value {value} exceeds the protocol range")]
+    ExperienceOrbValueOutOfRange { value: u32 },
+    #[error(transparent)]
+    Inventory(#[from] InventoryEncodeError),
     #[error("entity coordinate is not finite")]
     NonFiniteCoordinate,
     #[error("entity rotation is not finite")]
@@ -505,6 +656,66 @@ mod tests {
         assert_eq!(&payload[1..17], uuid().as_bytes());
         assert_eq!(&payload[17..19], &[0x9b, 0x01]);
         assert_eq!(payload[payload.len() - 4..], [32, 64, 64, 0]);
+    }
+
+    #[test]
+    fn item_entity_metadata_uses_versioned_accessor_and_serializer_ids() {
+        let items = ItemProtocolRegistry::new([("minecraft:stone", 1)]).unwrap();
+        let stack = ItemStack::new("minecraft:stone", 3).unwrap();
+        let metadata = ItemEntityMetadataProtocol::new(8, 7).unwrap();
+        assert_eq!(
+            encode_item_entity_data(
+                entity_id(),
+                &stack,
+                &items,
+                &DataComponentProtocolRegistry::default(),
+                metadata,
+            )
+            .unwrap()
+            .unwrap(),
+            vec![7, 8, 7, 3, 1, 0, 0, 0xff]
+        );
+    }
+
+    #[test]
+    fn experience_orb_metadata_uses_a_versioned_int_accessor() {
+        let metadata = ExperienceOrbMetadataProtocol::new(8, 1).unwrap();
+        assert_eq!(
+            encode_experience_orb_data(entity_id(), 300, metadata).unwrap(),
+            vec![7, 8, 1, 0xac, 0x02, 0xff]
+        );
+        assert_eq!(
+            encode_experience_orb_data(entity_id(), MAX_EXPERIENCE_ORB_VALUE + 1, metadata),
+            Err(EntityEncodeError::ExperienceOrbValueOutOfRange {
+                value: MAX_EXPERIENCE_ORB_VALUE + 1,
+            })
+        );
+    }
+
+    #[test]
+    fn take_item_entity_uses_three_varints() {
+        assert_eq!(
+            encode_take_item_entity(entity_id(), EntityId::new(9).unwrap(), 3).unwrap(),
+            vec![7, 9, 3]
+        );
+    }
+
+    #[test]
+    fn non_player_add_entity_uses_entity_uuid() {
+        let registry = EntityProtocolRegistry::new([("minecraft:item", 71)]).unwrap();
+        let uuid = EntityUuid::from_bytes([0x42; 16]);
+        let payload = encode_add_entity_with_uuid(
+            entity_id(),
+            uuid,
+            "minecraft:item",
+            Transform::default(),
+            Velocity::default(),
+            &registry,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(&payload[1..17], uuid.as_bytes());
+        assert_eq!(payload[17], 71);
     }
 
     #[test]

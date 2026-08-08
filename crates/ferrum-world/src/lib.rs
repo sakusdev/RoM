@@ -5,15 +5,39 @@
 //! numeric IDs remain in version crates.
 
 pub mod anvil;
+pub mod block;
+pub mod block_entity;
 mod chunk_view;
+pub mod fluid;
+pub mod geometry;
 pub mod persistence;
+pub mod redstone;
+pub mod tick;
 
+pub use block::{
+    BlockBehavior, BlockBehaviorError, BlockBehaviorRegistry, BlockDrop, ToolKind, ToolProfile,
+    ToolTier,
+};
+pub use block_entity::{
+    BlockEntity, BlockEntityError, BlockEntityStore, MAX_BLOCK_ENTITIES,
+    MAX_BLOCK_ENTITY_DATA_BYTES,
+};
 pub use chunk_view::{ChunkView, ChunkViewDelta, ChunkViewError};
+pub use fluid::{FluidError, FluidFlowPlan, FluidKind, FluidState};
+pub use geometry::{Aabb, GeometryError, RayHit, VoxelShape, normalized_direction};
 pub use persistence::{
     ChunkSectionSnapshot, ChunkSnapshot, WORLD_SNAPSHOT_SCHEMA_VERSION, WorldPersistenceError,
     WorldSnapshot,
 };
+pub use redstone::{
+    DEFAULT_MAX_REDSTONE_NODES, MAX_REDSTONE_POWER, RedstoneError, RedstoneNetwork,
+};
+pub use tick::{
+    DEFAULT_MAX_SCHEDULED_TICKS, MAX_TICKS_PER_DRAIN, RandomTickSelector, ScheduledTick,
+    ScheduledTickKey, TickKind, TickPriority, TickScheduler, TickSchedulerError,
+};
 
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use thiserror::Error;
 
@@ -22,7 +46,7 @@ pub const BIOME_EDGE: usize = 4;
 pub const BLOCKS_PER_SECTION: usize = SECTION_EDGE * SECTION_EDGE * SECTION_EDGE;
 pub const BIOMES_PER_SECTION: usize = BIOME_EDGE * BIOME_EDGE * BIOME_EDGE;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct BlockStateId(u32);
 
 impl BlockStateId {
@@ -37,7 +61,7 @@ impl BlockStateId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct BiomeId(u32);
 
 impl BiomeId {
@@ -52,13 +76,13 @@ impl BiomeId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ChunkPos {
     pub x: i32,
     pub z: i32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct BlockPos {
     pub x: i32,
     pub y: i32,

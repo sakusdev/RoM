@@ -1,8 +1,8 @@
 use thiserror::Error;
 
 use crate::{
-    Difficulty, GameEvent, GameMode, GameRuleValue, GameState, GameStateError, ItemStack,
-    PlayerError, PlayerUuid, Transform,
+    Difficulty, EntityPayload, EntityType, GameEvent, GameMode, GameRuleValue, GameState,
+    GameStateError, ItemStack, LivingEntityData, PlayerError, PlayerUuid, Transform, Velocity,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,6 +64,10 @@ pub enum GameCommand {
     },
     Kill {
         target: Option<String>,
+    },
+    Summon {
+        entity_type: String,
+        position: [f64; 3],
     },
     SaveAll,
     Stop,
@@ -129,6 +133,10 @@ pub fn parse_command(input: &str) -> Result<GameCommand, CommandError> {
         ["kill", target] => Ok(GameCommand::Kill {
             target: Some((*target).to_owned()),
         }),
+        ["summon", entity_type, x, y, z] => Ok(GameCommand::Summon {
+            entity_type: (*entity_type).to_owned(),
+            position: [parse_f64(x)?, parse_f64(y)?, parse_f64(z)?],
+        }),
         ["save-all"] | ["save-all", "flush"] => Ok(GameCommand::SaveAll),
         ["stop"] | ["exit"] | ["quit"] => Ok(GameCommand::Stop),
         _ => Err(CommandError::InvalidSyntax {
@@ -155,7 +163,7 @@ pub fn execute_parsed_command(
         GameCommand::Help => {
             require_permission(source, 0)?;
             Ok(CommandOutcome {
-        feedback: "Commands: help, list, say <message>, gamemode <mode> [player], tp [player] <x> <y> <z>, give <player> <item> [count], time set <value>, difficulty <value>, gamerule <name> <value>, kill [player], save-all [flush], stop (aliases: exit, quit)".to_owned(),
+        feedback: "Commands: help, list, say <message>, gamemode <mode> [player], tp [player] <x> <y> <z>, give <player> <item> [count], time set <value>, difficulty <value>, gamerule <name> <value>, kill [player], summon zombie <x> <y> <z>, save-all [flush], stop (aliases: exit, quit)".to_owned(),
         events: Vec::new(),
         save_requested: false,
         shutdown_requested: false,
@@ -311,6 +319,40 @@ pub fn execute_parsed_command(
                 shutdown_requested: false,
             })
         }
+        GameCommand::Summon {
+            entity_type,
+            position,
+        } => {
+            require_permission(source, 2)?;
+            let entity_type = if entity_type.contains(':') {
+                entity_type
+            } else {
+                format!("minecraft:{entity_type}")
+            };
+            if entity_type != "minecraft:zombie" {
+                return Err(CommandError::UnsupportedSummonEntity { entity_type });
+            }
+            let entity_type = EntityType::new(entity_type)?;
+            let transform = Transform::new(position, 0.0, 0.0, true)?;
+            let living = LivingEntityData::new(20.0)?
+                .with_drops(vec![ItemStack::new("minecraft:rotten_flesh", 1)?])?
+                .with_hostile_ai();
+            let events = state.spawn_entity(
+                entity_type,
+                transform,
+                Velocity::default(),
+                EntityPayload::Living(living),
+            )?;
+            Ok(CommandOutcome {
+                feedback: format!(
+                    "Summoned minecraft:zombie at {:.3} {:.3} {:.3}",
+                    position[0], position[1], position[2]
+                ),
+                events,
+                save_requested: false,
+                shutdown_requested: false,
+            })
+        }
         GameCommand::SaveAll => {
             require_permission(source, 4)?;
             Ok(CommandOutcome {
@@ -448,6 +490,8 @@ pub enum CommandError {
     UnknownDifficulty { value: String },
     #[error("invalid game rule value {value}")]
     InvalidGameRuleValue { value: String },
+    #[error("summoning entity type {entity_type} is not implemented")]
+    UnsupportedSummonEntity { entity_type: String },
 }
 
 #[cfg(test)]
@@ -480,6 +524,13 @@ mod tests {
             parse_command("time set night").unwrap(),
             GameCommand::TimeSet { day_time: 13_000 }
         );
+        assert_eq!(
+            parse_command("summon zombie 4 65 -2").unwrap(),
+            GameCommand::Summon {
+                entity_type: "zombie".to_owned(),
+                position: [4.0, 65.0, -2.0],
+            }
+        );
         assert!(parse_command("unknown command").is_err());
     }
 
@@ -497,6 +548,27 @@ mod tests {
             .get(state.player(uuid).unwrap().entity_id.unwrap())
             .unwrap();
         assert_eq!(entity.transform.position, [10.0, 70.0, -4.0]);
+    }
+
+    #[test]
+    fn summons_the_first_supported_hostile_mob() {
+        let (mut state, _) = state_with_player();
+        let outcome = execute_command(
+            &mut state,
+            &CommandSource::console(),
+            "/summon zombie 8 65 0",
+        )
+        .unwrap();
+        let entity = match &outcome.events[0] {
+            GameEvent::EntitySpawned { entity } => entity,
+            event => panic!("unexpected event: {event:?}"),
+        };
+        assert_eq!(entity.entity_type.as_str(), "minecraft:zombie");
+        assert!(entity.living().unwrap().ai.is_some());
+        assert!(matches!(
+            execute_command(&mut state, &CommandSource::console(), "/summon cow 8 65 0",),
+            Err(CommandError::UnsupportedSummonEntity { .. })
+        ));
     }
 
     #[test]

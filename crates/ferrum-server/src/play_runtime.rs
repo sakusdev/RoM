@@ -4,9 +4,13 @@ use super::{
 };
 use crate::codec::{PacketReader, build_packet, read_packet};
 use anyhow::{Context, Result, bail};
-use ferrum_game::{CommandSource, GameEvent, PlayerUuid as GamePlayerUuid, Transform};
+use ferrum_game::{
+    CommandSource, EquipmentSlot, GameEvent, GameMode, ItemStack, PlayerUuid as GamePlayerUuid,
+    Transform, Velocity,
+};
 use ferrum_play::{
-    BlockPosition, ItemProtocolRegistry, PlayerMovement, PlayerState, decode_close_container,
+    BlockPosition, InteractionHand, ItemProtocolRegistry, PlayerAction, PlayerActionStatus,
+    PlayerMovement, PlayerState, block_position_to_world, decode_attack, decode_close_container,
     decode_container_click, decode_creative_slot_update, decode_player_action,
     decode_use_item_on_block, encode_block_changed_ack, encode_block_update,
     encode_chunk_batch_finished, encode_chunk_batch_start, encode_forget_level_chunk,
@@ -20,13 +24,14 @@ use ferrum_rompack::{RomPackBiomes, RomPackBlockStates, RomPackWorld};
 use ferrum_runtime::{ConnectionId, DeterministicRuntime, Tick};
 use ferrum_server::{
     authoritative_runtime::{PlayInput, PlayOutput},
-    game_runtime::SharedGameRuntime,
+    game_runtime::{GameRuntimeError, SharedGameRuntime},
     play_connection::PlayReaderEndpoint,
     play_input::decode_play_input,
 };
 use ferrum_world::{
-    AppliedWorldEvent, BiomeId, BlockPos, BlockStateId, ChunkPos, ChunkStore, ChunkView,
-    ChunkViewDelta, FlatWorldSpec, StaticChunk, WorldError, WorldEvent,
+    Aabb, AppliedWorldEvent, BiomeId, BlockBehavior, BlockBehaviorRegistry, BlockDrop, BlockPos,
+    BlockStateId, ChunkPos, ChunkStore, ChunkView, ChunkViewDelta, FlatWorldSpec, StaticChunk,
+    ToolKind, ToolProfile, ToolTier, VoxelShape, WorldError, WorldEvent, normalized_direction,
 };
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -45,6 +50,16 @@ const MAX_WORLD_UPDATES_PER_DRAIN: usize = 64;
 const MAX_PLAYER_MOVE_DELTA: f64 = 100.0;
 const MAX_PLAYER_MOVE_DELTA_SQUARED: f64 = MAX_PLAYER_MOVE_DELTA * MAX_PLAYER_MOVE_DELTA;
 const PLAYER_EYE_HEIGHT: f64 = 1.62;
+const PLAYER_WIDTH: f64 = 0.6;
+const PLAYER_HEIGHT: f64 = 1.8;
+const COLLISION_EPSILON: f64 = 1.0e-7;
+const COLLISION_STEP: f64 = 0.25;
+// Keep the swept-collision budget aligned with the largest movement packet that
+// `validate_movement_delta` accepts. At a quarter-block sampling interval a
+// legal 100-block correction needs at most 400 samples.
+const MAX_COLLISION_STEPS: usize = 400;
+const MAX_COLLISION_BLOCK_CANDIDATES: usize = 64;
+const MAX_RAYCAST_BLOCK_CANDIDATES: usize = 4_096;
 const MAX_BLOCK_INTERACTION_REACH: f64 = 6.0;
 const MAX_BLOCK_INTERACTION_REACH_SQUARED: f64 =
     MAX_BLOCK_INTERACTION_REACH * MAX_BLOCK_INTERACTION_REACH;
@@ -55,6 +70,39 @@ const MESSAGE_SIGNATURE_BYTES: usize = 256;
 const LAST_SEEN_ACKNOWLEDGED_BYTES: usize = 3;
 
 type LocalWorldRuntime = DeterministicRuntime<ChunkStore, WorldEvent>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BlockPlacementPlan {
+    state: BlockStateId,
+    slot: EquipmentSlot,
+    item: String,
+    consume: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct BlockBreakPlan {
+    drops: Vec<ItemStack>,
+    instant: bool,
+    required_ticks: u32,
+    held_item: Option<String>,
+    tool_use: Option<ToolUsePlan>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ToolUsePlan {
+    item: String,
+    damage: u32,
+    max_damage: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ActiveBlockBreak {
+    position: BlockPos,
+    state: BlockStateId,
+    started_at_tick: u64,
+    required_ticks: u32,
+    held_item: Option<String>,
+}
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct GameplaySync<'a> {
@@ -169,11 +217,221 @@ impl<'a> GameplaySync<'a> {
             .set_creative_inventory_slot(self.player_uuid, slot, stack)?;
         Ok(())
     }
+
+    fn attack_entity(self, entity_id: ferrum_game::EntityId) -> Result<()> {
+        self.runtime.attack_entity(self.player_uuid, entity_id)?;
+        Ok(())
+    }
+
+    fn placement_plan(
+        self,
+        hand: InteractionHand,
+        shared_world: &SharedWorld,
+    ) -> Result<Option<BlockPlacementPlan>> {
+        let slot = equipment_slot_for_hand(hand);
+        let player = self
+            .runtime
+            .with_state(|state| {
+                state.player(self.player_uuid).map(|player| {
+                    (
+                        player.game_mode,
+                        player.vitals.is_dead(),
+                        player.inventory.equipment(slot).cloned(),
+                    )
+                })
+            })?
+            .context("authoritative player is missing while placing a block")?;
+        if player.1 {
+            return Ok(None);
+        }
+        let consume = match player.0 {
+            GameMode::Survival => true,
+            GameMode::Creative => false,
+            GameMode::Adventure | GameMode::Spectator => return Ok(None),
+        };
+        let Some(stack) = player.2 else {
+            return Ok(None);
+        };
+        let Some(behavior) = shared_world.block_behavior_by_name(stack.item()) else {
+            return Ok(None);
+        };
+        if behavior.replaceable || behavior.fluid {
+            return Ok(None);
+        }
+        Ok(Some(BlockPlacementPlan {
+            state: behavior.state,
+            slot,
+            item: stack.item().to_owned(),
+            consume,
+        }))
+    }
+
+    fn consume_placement(self, plan: &BlockPlacementPlan) -> Result<()> {
+        if plan.consume {
+            self.runtime
+                .consume_equipped_item(self.player_uuid, plan.slot, &plan.item, 1)?;
+        }
+        Ok(())
+    }
+
+    fn apply_tool_use(self, plan: &BlockBreakPlan) -> Result<()> {
+        if let Some(tool) = &plan.tool_use {
+            self.runtime.damage_equipped_item(
+                self.player_uuid,
+                EquipmentSlot::MainHand,
+                &tool.item,
+                tool.damage,
+                tool.max_damage,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn drop_held_item(self, whole_stack: bool) -> Result<()> {
+        if !self.can_modify_held_items()? {
+            return Ok(());
+        }
+        match self.runtime.drop_equipped_item(
+            self.player_uuid,
+            EquipmentSlot::MainHand,
+            whole_stack,
+        ) {
+            Ok(_)
+            | Err(GameRuntimeError::State(ferrum_game::GameStateError::MissingEquippedItem {
+                ..
+            })) => Ok(()),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    fn swap_hands(self) -> Result<()> {
+        if self.can_modify_held_items()? {
+            self.runtime.swap_equipped_items(
+                self.player_uuid,
+                EquipmentSlot::MainHand,
+                EquipmentSlot::OffHand,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn can_modify_held_items(self) -> Result<bool> {
+        self.runtime
+            .with_state(|state| {
+                state.player(self.player_uuid).map(|player| {
+                    !player.vitals.is_dead() && player.game_mode != GameMode::Spectator
+                })
+            })?
+            .context("authoritative player is missing while mutating held items")
+    }
+
+    fn break_plan(
+        self,
+        shared_world: &SharedWorld,
+        state: BlockStateId,
+    ) -> Result<Option<BlockBreakPlan>> {
+        let (game_mode, dead, held_item, haste_level, fatigue_level) = self
+            .runtime
+            .with_state(|state| {
+                state.player(self.player_uuid).map(|player| {
+                    (
+                        player.game_mode,
+                        player.vitals.is_dead(),
+                        player
+                            .inventory
+                            .equipment(EquipmentSlot::MainHand)
+                            .map(|stack| stack.item().to_owned()),
+                        player.status_effects.haste_level(),
+                        player.status_effects.mining_fatigue_level(),
+                    )
+                })
+            })?
+            .context("authoritative player is missing while breaking a block")?;
+        if dead {
+            return Ok(None);
+        }
+        let Some(behavior) = shared_world.block_behavior(state) else {
+            return Ok(None);
+        };
+        if behavior.replaceable || behavior.hardness < 0.0 {
+            return Ok(None);
+        }
+        match game_mode {
+            GameMode::Adventure | GameMode::Spectator => Ok(None),
+            GameMode::Creative => Ok(Some(BlockBreakPlan {
+                drops: Vec::new(),
+                instant: true,
+                required_ticks: 0,
+                held_item,
+                tool_use: None,
+            })),
+            GameMode::Survival => {
+                let tool = held_item
+                    .as_deref()
+                    .map_or_else(ToolProfile::hand, tool_profile_for_item);
+                let required_ticks = behavior.break_time_ticks(tool, haste_level, fatigue_level);
+                let mut drops = Vec::new();
+                for drop in &behavior.drops {
+                    if drop.requires_correct_tool && !behavior.can_harvest(tool) {
+                        continue;
+                    }
+                    if drop.minimum != drop.maximum {
+                        bail!(
+                            "block {} requires a deterministic loot context for drop range {}..={}",
+                            behavior.name,
+                            drop.minimum,
+                            drop.maximum
+                        );
+                    }
+                    drops.push(ItemStack::new(drop.item.as_str(), drop.minimum)?);
+                }
+                let tool_use = held_item.as_deref().and_then(|item| {
+                    tool_max_durability(item).and_then(|max_damage| {
+                        (tool.durability_cost > 0).then(|| ToolUsePlan {
+                            item: item.to_owned(),
+                            damage: tool.durability_cost,
+                            max_damage,
+                        })
+                    })
+                });
+                Ok(Some(BlockBreakPlan {
+                    drops,
+                    instant: required_ticks == 0,
+                    required_ticks,
+                    held_item,
+                    tool_use,
+                }))
+            }
+        }
+    }
+
+    fn spawn_block_drops(self, position: BlockPos, drops: Vec<ItemStack>) -> Result<()> {
+        let transform = Transform::new(
+            [
+                f64::from(position.x) + 0.5,
+                f64::from(position.y) + 0.5,
+                f64::from(position.z) + 0.5,
+            ],
+            0.0,
+            0.0,
+            false,
+        )?;
+        for stack in drops {
+            self.runtime.spawn_item_entity(
+                transform,
+                stack,
+                Velocity::default(),
+                Some(self.player_uuid),
+            )?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
 pub(super) struct SharedWorld {
     profile: RomPackWorld,
+    block_behaviors: BlockBehaviorRegistry,
     play_policy: PlayPolicy,
     inner: Mutex<SharedWorldInner>,
 }
@@ -255,6 +513,226 @@ pub(super) fn builtin_world_profile() -> RomPackWorld {
     }
 }
 
+fn known_block_behaviors(profile: &RomPackWorld) -> Result<BlockBehaviorRegistry> {
+    let mut registry = BlockBehaviorRegistry::default();
+    registry.insert(BlockBehavior {
+        name: "minecraft:air".to_owned(),
+        state: BlockStateId::new(profile.block_states.air),
+        hardness: 0.0,
+        replaceable: true,
+        solid: false,
+        fluid: false,
+        required_tool: ToolKind::None,
+        minimum_tier: ToolTier::Hand,
+        collision: VoxelShape::empty(),
+        drops: Vec::new(),
+    })?;
+
+    let mut cobblestone = BlockDrop::new("minecraft:cobblestone", 1, 1)?;
+    cobblestone.requires_correct_tool = true;
+    registry.insert(BlockBehavior {
+        name: "minecraft:stone".to_owned(),
+        state: BlockStateId::new(profile.block_states.stone),
+        hardness: 1.5,
+        replaceable: false,
+        solid: true,
+        fluid: false,
+        required_tool: ToolKind::Pickaxe,
+        minimum_tier: ToolTier::Wood,
+        collision: VoxelShape::full_cube(),
+        drops: vec![cobblestone],
+    })?;
+    registry.insert(BlockBehavior {
+        name: "minecraft:grass_block".to_owned(),
+        state: BlockStateId::new(profile.block_states.grass),
+        hardness: 0.6,
+        replaceable: false,
+        solid: true,
+        fluid: false,
+        required_tool: ToolKind::None,
+        minimum_tier: ToolTier::Hand,
+        collision: VoxelShape::full_cube(),
+        drops: vec![BlockDrop::new("minecraft:dirt", 1, 1)?],
+    })?;
+    registry.insert(BlockBehavior {
+        name: "minecraft:dirt".to_owned(),
+        state: BlockStateId::new(profile.block_states.dirt),
+        hardness: 0.5,
+        replaceable: false,
+        solid: true,
+        fluid: false,
+        required_tool: ToolKind::None,
+        minimum_tier: ToolTier::Hand,
+        collision: VoxelShape::full_cube(),
+        drops: vec![BlockDrop::new("minecraft:dirt", 1, 1)?],
+    })?;
+    registry.insert(BlockBehavior {
+        name: "minecraft:bedrock".to_owned(),
+        state: BlockStateId::new(profile.block_states.bedrock),
+        hardness: -1.0,
+        replaceable: false,
+        solid: true,
+        fluid: false,
+        required_tool: ToolKind::None,
+        minimum_tier: ToolTier::Hand,
+        collision: VoxelShape::full_cube(),
+        drops: Vec::new(),
+    })?;
+    Ok(registry)
+}
+
+const fn equipment_slot_for_hand(hand: InteractionHand) -> EquipmentSlot {
+    match hand {
+        InteractionHand::Main => EquipmentSlot::MainHand,
+        InteractionHand::Off => EquipmentSlot::OffHand,
+    }
+}
+
+fn tool_profile_for_item(item: &str) -> ToolProfile {
+    if item == "minecraft:shears" {
+        return ToolProfile {
+            kind: ToolKind::Shears,
+            tier: ToolTier::Iron,
+            mining_speed: 5.0,
+            durability_cost: 1,
+        };
+    }
+    let (tier, mining_speed) = if item.starts_with("minecraft:wooden_") {
+        (ToolTier::Wood, 2.0)
+    } else if item.starts_with("minecraft:stone_") {
+        (ToolTier::Stone, 4.0)
+    } else if item.starts_with("minecraft:iron_") {
+        (ToolTier::Iron, 6.0)
+    } else if item.starts_with("minecraft:diamond_") {
+        (ToolTier::Diamond, 8.0)
+    } else if item.starts_with("minecraft:netherite_") {
+        (ToolTier::Netherite, 9.0)
+    } else if item.starts_with("minecraft:golden_") {
+        (ToolTier::Wood, 12.0)
+    } else {
+        return ToolProfile::hand();
+    };
+    let kind = if item.ends_with("_pickaxe") {
+        ToolKind::Pickaxe
+    } else if item.ends_with("_axe") {
+        ToolKind::Axe
+    } else if item.ends_with("_shovel") {
+        ToolKind::Shovel
+    } else if item.ends_with("_hoe") {
+        ToolKind::Hoe
+    } else if item.ends_with("_sword") {
+        ToolKind::Sword
+    } else {
+        return ToolProfile::hand();
+    };
+    ToolProfile {
+        kind,
+        tier,
+        mining_speed,
+        durability_cost: if kind == ToolKind::Sword { 2 } else { 1 },
+    }
+}
+
+fn tool_max_durability(item: &str) -> Option<u32> {
+    if item == "minecraft:shears" {
+        return Some(238);
+    }
+    if !matches!(
+        tool_profile_for_item(item).kind,
+        ToolKind::Pickaxe | ToolKind::Axe | ToolKind::Shovel | ToolKind::Hoe | ToolKind::Sword
+    ) {
+        return None;
+    }
+    if item.starts_with("minecraft:wooden_") {
+        Some(59)
+    } else if item.starts_with("minecraft:stone_") {
+        Some(131)
+    } else if item.starts_with("minecraft:iron_") {
+        Some(250)
+    } else if item.starts_with("minecraft:diamond_") {
+        Some(1_561)
+    } else if item.starts_with("minecraft:netherite_") {
+        Some(2_031)
+    } else if item.starts_with("minecraft:golden_") {
+        Some(32)
+    } else {
+        None
+    }
+}
+
+fn plan_live_block_break(
+    gameplay: GameplaySync<'_>,
+    shared_world: &SharedWorld,
+    action: PlayerAction,
+    client_tick: u64,
+    active: &mut Option<ActiveBlockBreak>,
+) -> Result<Option<(WorldEvent, BlockBreakPlan)>> {
+    let position = block_position_to_world(action.position);
+    match action.status {
+        PlayerActionStatus::AbortDestroyBlock => {
+            *active = None;
+            Ok(None)
+        }
+        PlayerActionStatus::StartDestroyBlock => {
+            let Some(state) = shared_world.interaction_block_state(position)? else {
+                *active = None;
+                return Ok(None);
+            };
+            let Some(plan) = gameplay.break_plan(shared_world, state)? else {
+                *active = None;
+                return Ok(None);
+            };
+            if plan.instant {
+                *active = None;
+                return Ok(Some((block_break_event(position, shared_world), plan)));
+            }
+            *active = Some(ActiveBlockBreak {
+                position,
+                state,
+                started_at_tick: client_tick,
+                required_ticks: plan.required_ticks,
+                held_item: plan.held_item,
+            });
+            Ok(None)
+        }
+        PlayerActionStatus::StopDestroyBlock => {
+            let Some(started) = active.take() else {
+                return Ok(None);
+            };
+            let Some(state) = shared_world.interaction_block_state(position)? else {
+                return Ok(None);
+            };
+            if started.position != position || started.state != state {
+                return Ok(None);
+            }
+            let Some(plan) = gameplay.break_plan(shared_world, state)? else {
+                return Ok(None);
+            };
+            if plan.instant
+                || plan.required_ticks != started.required_ticks
+                || plan.held_item != started.held_item
+                || client_tick.saturating_sub(started.started_at_tick)
+                    < u64::from(started.required_ticks)
+            {
+                return Ok(None);
+            }
+            Ok(Some((block_break_event(position, shared_world), plan)))
+        }
+        PlayerActionStatus::DropAllItems
+        | PlayerActionStatus::DropItem
+        | PlayerActionStatus::ReleaseUseItem
+        | PlayerActionStatus::SwapItemWithOffhand
+        | PlayerActionStatus::Stab => Ok(None),
+    }
+}
+
+fn block_break_event(position: BlockPos, shared_world: &SharedWorld) -> WorldEvent {
+    WorldEvent::BlockMutation(ferrum_world::BlockMutation {
+        position,
+        state: BlockStateId::new(shared_world.world_profile().block_states.air),
+    })
+}
+
 impl SharedWorld {
     #[cfg(test)]
     pub(super) fn new(center: ChunkPos, profile: RomPackWorld) -> Result<Self> {
@@ -268,8 +746,10 @@ impl SharedWorld {
     ) -> Result<Self> {
         let runtime =
             new_local_world_runtime_with_radius(center, &profile, play_policy.chunk_radius)?;
+        let block_behaviors = known_block_behaviors(&profile)?;
         Ok(Self {
             profile,
+            block_behaviors,
             play_policy,
             inner: Mutex::new(SharedWorldInner {
                 runtime,
@@ -285,8 +765,10 @@ impl SharedWorld {
         play_policy: PlayPolicy,
     ) -> Result<Self> {
         let runtime = local_world_runtime_from_store(store);
+        let block_behaviors = known_block_behaviors(&profile)?;
         Ok(Self {
             profile,
+            block_behaviors,
             play_policy,
             inner: Mutex::new(SharedWorldInner {
                 runtime,
@@ -366,6 +848,14 @@ impl SharedWorld {
 
     pub(super) fn play_policy(&self) -> &PlayPolicy {
         &self.play_policy
+    }
+
+    fn block_behavior(&self, state: BlockStateId) -> Option<&BlockBehavior> {
+        self.block_behaviors.by_state(state)
+    }
+
+    fn block_behavior_by_name(&self, name: &str) -> Option<&BlockBehavior> {
+        self.block_behaviors.by_name(name)
     }
 
     pub(super) fn chunk_snapshot(&self, pos: ChunkPos) -> Result<StaticChunk> {
@@ -532,6 +1022,8 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
     let mut keep_alive_id = 1_i64;
     let mut completed_rounds = 0_usize;
     let mut ignored_packets = 0_usize;
+    let mut client_tick = 0_u64;
+    let mut active_block_break = None;
 
     loop {
         write_or_route_play_payload(
@@ -606,6 +1098,7 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
                         }
                         PlayInput::ClientTickEnd => {
                             ticks_since_request = ticks_since_request.saturating_add(1);
+                            client_tick = client_tick.saturating_add(1);
                         }
                         PlayInput::ChunkBatchReceived(_) => {}
                         PlayInput::Movement(movement) => {
@@ -627,6 +1120,7 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
                             }
                             validate_movement_delta(&player, movement)?;
                             validate_movement_floor(movement, world_profile.floor_y)?;
+                            validate_movement_collision(shared_world, &player, movement)?;
                             let previous_chunk = player.chunk_pos();
                             player.apply(movement);
                             if let Some(gameplay) = gameplay {
@@ -708,6 +1202,7 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
                     let selected_hotbar = decode_hotbar_selection(&mut packet_reader)?;
                     if let Some(gameplay) = gameplay {
                         gameplay.select_hotbar(selected_hotbar)?;
+                        active_block_break = None;
                     }
                 }
                 Some(PacketKind::ContainerClick) => {
@@ -725,33 +1220,127 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
                         gameplay.set_creative_slot(packet_reader.take_remaining())?;
                     }
                 }
+                Some(PacketKind::Attack) => {
+                    let entity_id = decode_attack(packet_reader.take_remaining())?;
+                    if let Some(gameplay) = gameplay {
+                        gameplay.attack_entity(entity_id)?;
+                    }
+                }
                 Some(PacketKind::PlayerAction) => {
                     let action = decode_player_action(packet_reader.take_remaining())?;
                     let sequence = action.sequence;
-                    if is_block_interaction_within_reach(&player, action.position)
-                        && let Some(event) = player_action_to_world_event(
-                            action,
-                            BlockStateId::new(shared_world.world_profile().block_states.air),
-                        )
-                        && is_break_target_mutable(shared_world, event)?
-                    {
+                    let block_interaction_allowed = if gameplay.is_some() {
+                        is_block_interaction_visible(shared_world, &player, action.position)?
+                    } else {
+                        is_block_interaction_within_reach(&player, action.position)
+                    };
+                    let planned = match action.status {
+                        PlayerActionStatus::DropAllItems => {
+                            active_block_break = None;
+                            if let Some(gameplay) = gameplay {
+                                gameplay.drop_held_item(true)?;
+                            }
+                            None
+                        }
+                        PlayerActionStatus::DropItem => {
+                            active_block_break = None;
+                            if let Some(gameplay) = gameplay {
+                                gameplay.drop_held_item(false)?;
+                            }
+                            None
+                        }
+                        PlayerActionStatus::SwapItemWithOffhand => {
+                            active_block_break = None;
+                            if let Some(gameplay) = gameplay {
+                                gameplay.swap_hands()?;
+                            }
+                            None
+                        }
+                        PlayerActionStatus::ReleaseUseItem | PlayerActionStatus::Stab => None,
+                        PlayerActionStatus::StartDestroyBlock
+                        | PlayerActionStatus::AbortDestroyBlock
+                        | PlayerActionStatus::StopDestroyBlock
+                            if block_interaction_allowed =>
+                        {
+                            if let Some(gameplay) = gameplay {
+                                plan_live_block_break(
+                                    gameplay,
+                                    shared_world,
+                                    action,
+                                    client_tick,
+                                    &mut active_block_break,
+                                )?
+                            } else {
+                                let air = BlockStateId::new(
+                                    shared_world.world_profile().block_states.air,
+                                );
+                                if let Some(event) = player_action_to_world_event(action, air) {
+                                    is_break_target_mutable(shared_world, event)?.then_some((
+                                        event,
+                                        BlockBreakPlan {
+                                            drops: Vec::new(),
+                                            instant: false,
+                                            required_ticks: 0,
+                                            held_item: None,
+                                            tool_use: None,
+                                        },
+                                    ))
+                                } else {
+                                    None
+                                }
+                            }
+                        }
+                        PlayerActionStatus::StartDestroyBlock
+                        | PlayerActionStatus::AbortDestroyBlock
+                        | PlayerActionStatus::StopDestroyBlock => {
+                            active_block_break = None;
+                            None
+                        }
+                    };
+                    if let Some((event, plan)) = planned {
+                        let WorldEvent::BlockMutation(mutation) = event;
                         let applied = shared_world.apply_event(connection, event)?;
                         send_world_updates(writer, profile, &applied, play_reader)?;
+                        if let Some(gameplay) = gameplay {
+                            gameplay.apply_tool_use(&plan)?;
+                            gameplay.spawn_block_drops(mutation.position, plan.drops)?;
+                        }
                     }
                     send_block_changed_ack(writer, profile, sequence, play_reader)?;
                 }
                 Some(PacketKind::UseItemOn) => {
                     let interaction = decode_use_item_on_block(packet_reader.take_remaining())?;
                     let sequence = interaction.sequence;
-                    if is_block_interaction_within_reach(&player, interaction.position)
-                        && let Some(event) = use_item_on_block_to_world_event(
-                            interaction,
-                            BlockStateId::new(shared_world.world_profile().block_states.stone),
-                        )
-                        && is_placement_target_air(shared_world, event)?
-                    {
-                        let applied = shared_world.apply_event(connection, event)?;
-                        send_world_updates(writer, profile, &applied, play_reader)?;
+                    let block_interaction_allowed = if gameplay.is_some() {
+                        is_block_interaction_visible(shared_world, &player, interaction.position)?
+                    } else {
+                        is_block_interaction_within_reach(&player, interaction.position)
+                    };
+                    if block_interaction_allowed {
+                        let placement = match gameplay {
+                            Some(gameplay) => {
+                                gameplay.placement_plan(interaction.hand, shared_world)?
+                            }
+                            None => Some(BlockPlacementPlan {
+                                state: BlockStateId::new(
+                                    shared_world.world_profile().block_states.stone,
+                                ),
+                                slot: equipment_slot_for_hand(interaction.hand),
+                                item: "minecraft:stone".to_owned(),
+                                consume: false,
+                            }),
+                        };
+                        if let Some(placement) = placement
+                            && let Some(event) =
+                                use_item_on_block_to_world_event(interaction, placement.state)
+                            && is_placement_target_air(shared_world, event)?
+                        {
+                            let applied = shared_world.apply_event(connection, event)?;
+                            send_world_updates(writer, profile, &applied, play_reader)?;
+                            if let Some(gameplay) = gameplay {
+                                gameplay.consume_placement(&placement)?;
+                            }
+                        }
                     }
                     send_block_changed_ack(writer, profile, sequence, play_reader)?;
                 }
@@ -1141,6 +1730,80 @@ fn validate_movement_floor(movement: PlayerMovement, floor_y: i32) -> Result<()>
     Ok(())
 }
 
+fn validate_movement_collision(
+    shared_world: &SharedWorld,
+    player: &PlayerState,
+    movement: PlayerMovement,
+) -> Result<()> {
+    let Some(next) = movement_position(movement) else {
+        return Ok(());
+    };
+    let delta: [f64; 3] = std::array::from_fn(|axis| next[axis] - player.position[axis]);
+    let distance = delta.into_iter().map(f64::abs).fold(0.0_f64, f64::max);
+    let steps = (distance / COLLISION_STEP).ceil().max(1.0) as usize;
+    if steps > MAX_COLLISION_STEPS {
+        bail!("player collision path exceeds {MAX_COLLISION_STEPS} bounded steps");
+    }
+    for step in 1..=steps {
+        let progress = step as f64 / steps as f64;
+        let position = std::array::from_fn(|axis| player.position[axis] + delta[axis] * progress);
+        validate_player_bounds_collision(shared_world, position)?;
+    }
+    Ok(())
+}
+
+fn validate_player_bounds_collision(shared_world: &SharedWorld, position: [f64; 3]) -> Result<()> {
+    let half_width = PLAYER_WIDTH / 2.0;
+    let bounds = Aabb::new(
+        [
+            position[0] - half_width,
+            position[1],
+            position[2] - half_width,
+        ],
+        [
+            position[0] + half_width,
+            position[1] + PLAYER_HEIGHT,
+            position[2] + half_width,
+        ],
+    )?;
+    let minimum = bounds.min.map(|value| value.floor() as i32);
+    let maximum = bounds
+        .max
+        .map(|value| (value - COLLISION_EPSILON).floor() as i32);
+    let mut candidates = 0_usize;
+    for y in minimum[1]..=maximum[1] {
+        for z in minimum[2]..=maximum[2] {
+            for x in minimum[0]..=maximum[0] {
+                candidates = candidates.saturating_add(1);
+                if candidates > MAX_COLLISION_BLOCK_CANDIDATES {
+                    bail!("player collision query exceeds {MAX_COLLISION_BLOCK_CANDIDATES} blocks");
+                }
+                let position = BlockPos { x, y, z };
+                let Some(state) = shared_world.interaction_block_state(position)? else {
+                    continue;
+                };
+                let intersects = shared_world.block_behavior(state).map_or_else(
+                    || {
+                        state != BlockStateId::new(shared_world.world_profile().block_states.air)
+                            && Aabb::unit_cube()
+                                .translated([f64::from(x), f64::from(y), f64::from(z)])
+                                .intersects(bounds)
+                    },
+                    |behavior| {
+                        behavior
+                            .collision
+                            .intersects(bounds, [f64::from(x), f64::from(y), f64::from(z)])
+                    },
+                );
+                if intersects {
+                    bail!("player movement intersects block {x},{y},{z}");
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn movement_position(movement: PlayerMovement) -> Option<[f64; 3]> {
     match movement {
         PlayerMovement::Position { position, .. }
@@ -1169,6 +1832,84 @@ fn is_block_interaction_within_reach(player: &PlayerState, position: BlockPositi
         })
         .sum::<f64>();
     distance_squared <= MAX_BLOCK_INTERACTION_REACH_SQUARED
+}
+
+fn is_block_interaction_visible(
+    shared_world: &SharedWorld,
+    player: &PlayerState,
+    position: BlockPosition,
+) -> Result<bool> {
+    if !is_block_interaction_within_reach(player, position) {
+        return Ok(false);
+    }
+    let eye = [
+        player.position[0],
+        player.position[1] + PLAYER_EYE_HEIGHT,
+        player.position[2],
+    ];
+    let target = [
+        f64::from(position.x) + 0.5,
+        f64::from(position.y) + 0.5,
+        f64::from(position.z) + 0.5,
+    ];
+    let distance = eye
+        .into_iter()
+        .zip(target)
+        .map(|(from, to)| (to - from).powi(2))
+        .sum::<f64>()
+        .sqrt();
+    if distance <= COLLISION_EPSILON {
+        return Ok(false);
+    }
+    let direction = normalized_direction(eye, target)?;
+    let max_distance = distance + COLLISION_EPSILON;
+    let minimum: [i32; 3] = std::array::from_fn(|axis| eye[axis].min(target[axis]).floor() as i32);
+    let maximum: [i32; 3] = std::array::from_fn(|axis| eye[axis].max(target[axis]).floor() as i32);
+    let mut candidates = 0_usize;
+    let mut nearest: Option<(f64, BlockPos)> = None;
+    for y in minimum[1]..=maximum[1] {
+        for z in minimum[2]..=maximum[2] {
+            for x in minimum[0]..=maximum[0] {
+                candidates = candidates.saturating_add(1);
+                if candidates > MAX_RAYCAST_BLOCK_CANDIDATES {
+                    bail!("block raycast exceeds {MAX_RAYCAST_BLOCK_CANDIDATES} candidates");
+                }
+                let block = BlockPos { x, y, z };
+                let Some(state) = shared_world.interaction_block_state(block)? else {
+                    continue;
+                };
+                let offset = [f64::from(x), f64::from(y), f64::from(z)];
+                let hit = if let Some(behavior) = shared_world.block_behavior(state) {
+                    behavior
+                        .collision
+                        .raycast(eye, direction, max_distance, offset)?
+                } else if state != BlockStateId::new(shared_world.world_profile().block_states.air)
+                {
+                    Aabb::unit_cube().translated(offset).ray_intersection(
+                        eye,
+                        direction,
+                        max_distance,
+                    )?
+                } else {
+                    None
+                };
+                let Some(hit) = hit else {
+                    continue;
+                };
+                if nearest.is_none_or(|(distance, _)| hit.distance < distance) {
+                    nearest = Some((hit.distance, block));
+                }
+            }
+        }
+    }
+    Ok(nearest.is_some_and(|(_, block)| {
+        block
+            == BlockPos {
+                x: position.x,
+                y: position.y,
+                z: position.z,
+            }
+    }))
 }
 
 fn is_placement_target_air(shared_world: &SharedWorld, event: WorldEvent) -> Result<bool> {
@@ -1666,6 +2407,674 @@ mod tests {
             &player,
             BlockPosition { x: 7, y: 65, z: 0 }
         ));
+    }
+
+    #[test]
+    fn movement_collision_rejects_entering_solid_block_shapes() {
+        let world = SharedWorld::static_flat();
+        let player = PlayerState::new([0.5, 64.0, 0.5], 0.0, 0.0, true, false).unwrap();
+        assert!(
+            validate_movement_collision(
+                &world,
+                &player,
+                PlayerMovement::Position {
+                    position: [0.5, 64.0, 0.5],
+                    flags: ferrum_play::MovementFlags {
+                        on_ground: true,
+                        horizontal_collision: false,
+                    },
+                },
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_movement_collision(
+                &world,
+                &player,
+                PlayerMovement::Position {
+                    position: [0.5, 63.5, 0.5],
+                    flags: ferrum_play::MovementFlags {
+                        on_ground: false,
+                        horizontal_collision: true,
+                    },
+                },
+            )
+            .is_err()
+        );
+
+        world
+            .apply_event(
+                ConnectionId::new(98),
+                WorldEvent::BlockMutation(ferrum_world::BlockMutation {
+                    position: BlockPos { x: 1, y: 64, z: 0 },
+                    state: BlockStateId::new(world.world_profile().block_states.stone),
+                }),
+            )
+            .unwrap();
+        assert!(
+            validate_movement_collision(
+                &world,
+                &player,
+                PlayerMovement::Position {
+                    position: [2.5, 64.0, 0.5],
+                    flags: ferrum_play::MovementFlags {
+                        on_ground: true,
+                        horizontal_collision: true,
+                    },
+                },
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn block_raycast_rejects_occluded_targets_and_accepts_the_first_shape() {
+        let world = SharedWorld::static_flat();
+        let player = PlayerState::new([0.5, 65.0, 0.5], 0.0, 0.0, true, false).unwrap();
+        let grass = BlockPosition { x: 0, y: 63, z: 0 };
+        let stone = BlockPosition { x: 0, y: 61, z: 0 };
+        assert!(is_block_interaction_visible(&world, &player, grass).unwrap());
+        assert!(!is_block_interaction_visible(&world, &player, stone).unwrap());
+
+        let air = BlockStateId::new(world.world_profile().block_states.air);
+        for y in [62, 63] {
+            world
+                .apply_event(
+                    ConnectionId::new(99),
+                    WorldEvent::BlockMutation(ferrum_world::BlockMutation {
+                        position: BlockPos { x: 0, y, z: 0 },
+                        state: air,
+                    }),
+                )
+                .unwrap();
+        }
+        assert!(is_block_interaction_visible(&world, &player, stone).unwrap());
+    }
+
+    #[test]
+    fn gameplay_plans_enforce_modes_tools_and_generated_block_states() {
+        let world = SharedWorld::static_flat();
+        let runtime = SharedGameRuntime::vanilla_overworld();
+        let uuid = GamePlayerUuid::new(500);
+        runtime
+            .connect_player(
+                uuid,
+                "Steve",
+                Transform::new(player_spawn_position(world.world_profile()), 0.0, 0.0, true)
+                    .unwrap(),
+            )
+            .unwrap();
+        runtime
+            .with_state_mut(|state| {
+                let player = state
+                    .player_mut(uuid)
+                    .ok_or(ferrum_game::GameStateError::UnknownPlayer { uuid })?;
+                player
+                    .inventory
+                    .set_slot(
+                        ferrum_game::HOTBAR_START,
+                        Some(ItemStack::new("minecraft:stone", 2).unwrap()),
+                    )
+                    .map_err(ferrum_game::GameStateError::from)?;
+                Ok(())
+            })
+            .unwrap();
+        let items = ItemProtocolRegistry::default();
+        let gameplay = GameplaySync::new(&runtime, uuid, &items);
+
+        let survival = gameplay
+            .placement_plan(InteractionHand::Main, &world)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            survival.state,
+            BlockStateId::new(world.world_profile().block_states.stone)
+        );
+        assert!(survival.consume);
+        let survival_break = gameplay
+            .break_plan(
+                &world,
+                BlockStateId::new(world.world_profile().block_states.stone),
+            )
+            .unwrap()
+            .unwrap();
+        assert!(!survival_break.instant);
+        assert_eq!(survival_break.required_ticks, 150);
+        assert!(survival_break.drops.is_empty());
+
+        runtime
+            .with_state_mut(|state| {
+                state.set_game_mode(uuid, GameMode::Adventure)?;
+                Ok(())
+            })
+            .unwrap();
+        assert!(
+            gameplay
+                .placement_plan(InteractionHand::Main, &world)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            gameplay
+                .break_plan(
+                    &world,
+                    BlockStateId::new(world.world_profile().block_states.stone)
+                )
+                .unwrap()
+                .is_none()
+        );
+
+        runtime
+            .with_state_mut(|state| {
+                state.set_game_mode(uuid, GameMode::Creative)?;
+                Ok(())
+            })
+            .unwrap();
+        assert!(
+            !gameplay
+                .placement_plan(InteractionHand::Main, &world)
+                .unwrap()
+                .unwrap()
+                .consume
+        );
+        let creative_break = gameplay
+            .break_plan(
+                &world,
+                BlockStateId::new(world.world_profile().block_states.stone),
+            )
+            .unwrap()
+            .unwrap();
+        assert!(creative_break.instant);
+        assert!(creative_break.drops.is_empty());
+    }
+
+    #[test]
+    fn survival_break_session_rejects_early_completion() {
+        let world = SharedWorld::static_flat();
+        let runtime = SharedGameRuntime::vanilla_overworld();
+        let uuid = GamePlayerUuid::new(5001);
+        runtime
+            .connect_player(
+                uuid,
+                "Steve",
+                Transform::new(player_spawn_position(world.world_profile()), 0.0, 0.0, true)
+                    .unwrap(),
+            )
+            .unwrap();
+        runtime
+            .with_state_mut(|state| {
+                state
+                    .player_mut(uuid)
+                    .ok_or(ferrum_game::GameStateError::UnknownPlayer { uuid })?
+                    .inventory
+                    .set_slot(
+                        ferrum_game::HOTBAR_START,
+                        Some(ItemStack::with_max_count("minecraft:wooden_pickaxe", 1, 1).unwrap()),
+                    )
+                    .map_err(ferrum_game::GameStateError::from)?;
+                Ok(())
+            })
+            .unwrap();
+        let items = ItemProtocolRegistry::default();
+        let gameplay = GameplaySync::new(&runtime, uuid, &items);
+        let position = BlockPosition { x: 0, y: 61, z: 0 };
+        let action = |status, sequence| PlayerAction {
+            status,
+            position,
+            face: ferrum_play::BlockFace::Up,
+            sequence,
+        };
+        let mut active = None;
+
+        assert!(
+            plan_live_block_break(
+                gameplay,
+                &world,
+                action(PlayerActionStatus::StartDestroyBlock, 1),
+                0,
+                &mut active,
+            )
+            .unwrap()
+            .is_none()
+        );
+        assert_eq!(active.as_ref().unwrap().required_ticks, 23);
+        assert!(
+            plan_live_block_break(
+                gameplay,
+                &world,
+                action(PlayerActionStatus::StopDestroyBlock, 2),
+                22,
+                &mut active,
+            )
+            .unwrap()
+            .is_none()
+        );
+        assert!(active.is_none());
+
+        plan_live_block_break(
+            gameplay,
+            &world,
+            action(PlayerActionStatus::StartDestroyBlock, 3),
+            22,
+            &mut active,
+        )
+        .unwrap();
+        let (_, plan) = plan_live_block_break(
+            gameplay,
+            &world,
+            action(PlayerActionStatus::StopDestroyBlock, 4),
+            45,
+            &mut active,
+        )
+        .unwrap()
+        .expect("23 elapsed client ticks must complete a wooden-pickaxe stone break");
+        assert_eq!(plan.tool_use.unwrap().damage, 1);
+    }
+
+    #[test]
+    fn live_break_drop_and_consuming_placement_complete_the_basic_block_loop() {
+        let mut packets = PacketTable::new();
+        packets.insert(PacketKind::KeepAliveRequest, 0x2c).unwrap();
+        packets.insert(PacketKind::KeepAliveResponse, 0x1c).unwrap();
+        packets.insert(PacketKind::ClientTickEnd, 0x0b).unwrap();
+        packets.insert(PacketKind::PlayerAction, 0x29).unwrap();
+        packets.insert(PacketKind::SetCarriedItem, 0x34).unwrap();
+        packets.insert(PacketKind::UseItemOn, 0x42).unwrap();
+        packets.insert(PacketKind::BlockChangedAck, 0x04).unwrap();
+        packets.insert(PacketKind::BlockUpdate, 0x22).unwrap();
+        let profile = ProtocolProfile::new("Test", 1, packets).unwrap();
+        let world = SharedWorld::static_flat();
+        let connection = ConnectionId::new(501);
+        let _subscription = world.subscribe(connection).unwrap();
+        let runtime = SharedGameRuntime::vanilla_overworld();
+        let uuid = GamePlayerUuid::new(501);
+        runtime
+            .connect_player(
+                uuid,
+                "Steve",
+                Transform::new(player_spawn_position(world.world_profile()), 0.0, 0.0, true)
+                    .unwrap(),
+            )
+            .unwrap();
+        runtime
+            .with_state_mut(|state| {
+                let player = state
+                    .player_mut(uuid)
+                    .ok_or(ferrum_game::GameStateError::UnknownPlayer { uuid })?;
+                player
+                    .inventory
+                    .set_slot(
+                        ferrum_game::HOTBAR_START,
+                        Some(ItemStack::with_max_count("minecraft:wooden_pickaxe", 1, 1).unwrap()),
+                    )
+                    .map_err(ferrum_game::GameStateError::from)?;
+                player
+                    .inventory
+                    .set_slot(
+                        ferrum_game::HOTBAR_START + 1,
+                        Some(ItemStack::new("minecraft:stone", 2).unwrap()),
+                    )
+                    .map_err(ferrum_game::GameStateError::from)?;
+                Ok(())
+            })
+            .unwrap();
+
+        let broken = BlockPos { x: 0, y: 61, z: 0 };
+        let placed = BlockPos { x: 1, y: 64, z: 0 };
+        let air = BlockStateId::new(world.world_profile().block_states.air);
+        for y in [62, 63] {
+            world
+                .apply_event(
+                    connection,
+                    WorldEvent::BlockMutation(ferrum_world::BlockMutation {
+                        position: BlockPos { x: 0, y, z: 0 },
+                        state: air,
+                    }),
+                )
+                .unwrap();
+        }
+        let mut input = Vec::new();
+        write_packet(
+            &mut input,
+            &build_packet(0x29, |body| {
+                write_varint_vec(body, 0);
+                body.extend_from_slice(
+                    &BlockPosition {
+                        x: broken.x,
+                        y: broken.y,
+                        z: broken.z,
+                    }
+                    .pack_for_test()
+                    .to_be_bytes(),
+                );
+                body.push(1);
+                write_varint_vec(body, 19);
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        for _ in 0..23 {
+            write_packet(&mut input, &build_packet(0x0b, |_| Ok(())).unwrap()).unwrap();
+        }
+        write_packet(
+            &mut input,
+            &build_packet(0x29, |body| {
+                write_varint_vec(body, 2);
+                body.extend_from_slice(
+                    &BlockPosition {
+                        x: broken.x,
+                        y: broken.y,
+                        z: broken.z,
+                    }
+                    .pack_for_test()
+                    .to_be_bytes(),
+                );
+                body.push(1);
+                write_varint_vec(body, 20);
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        write_packet(
+            &mut input,
+            &build_packet(0x34, |body| {
+                body.extend_from_slice(&1_i16.to_be_bytes());
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        write_packet(
+            &mut input,
+            &build_packet(0x42, |body| {
+                write_varint_vec(body, 0);
+                body.extend_from_slice(
+                    &BlockPosition { x: 1, y: 63, z: 0 }
+                        .pack_for_test()
+                        .to_be_bytes(),
+                );
+                write_varint_vec(body, 1);
+                for value in [0.5_f32, 1.0, 0.5] {
+                    body.extend_from_slice(&value.to_be_bytes());
+                }
+                body.push(0);
+                body.push(0);
+                write_varint_vec(body, 21);
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        write_packet(
+            &mut input,
+            &build_packet(0x1c, |body| {
+                body.extend_from_slice(&1_i64.to_be_bytes());
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        let items = ItemProtocolRegistry::default();
+        let gameplay = GameplaySync::new(&runtime, uuid, &items);
+        let mut output = Vec::new();
+        let mut session = play_session();
+        run_play_loop_with_bridge(
+            &mut Cursor::new(input),
+            &mut output,
+            &profile,
+            &mut session,
+            &world,
+            connection,
+            None,
+            Some(gameplay),
+            Some(1),
+        )
+        .unwrap();
+
+        assert_eq!(
+            world.world_block(broken).unwrap(),
+            BlockStateId::new(world.world_profile().block_states.air)
+        );
+        assert_eq!(
+            world.world_block(placed).unwrap(),
+            BlockStateId::new(world.world_profile().block_states.stone)
+        );
+        runtime
+            .with_state(|state| {
+                let player = state.player(uuid).unwrap();
+                assert_eq!(player.inventory.selected_hotbar(), 1);
+                assert_eq!(
+                    player
+                        .inventory
+                        .slot(ferrum_game::HOTBAR_START)
+                        .unwrap()
+                        .as_ref()
+                        .unwrap()
+                        .damage()
+                        .unwrap(),
+                    1
+                );
+                assert_eq!(
+                    player
+                        .inventory
+                        .selected_stack()
+                        .expect("placed stack remains")
+                        .count(),
+                    1
+                );
+                let dropped = state
+                    .entities()
+                    .iter()
+                    .filter_map(|(_, entity)| entity.item())
+                    .map(|item| (item.stack.item(), item.stack.count()))
+                    .collect::<Vec<_>>();
+                assert_eq!(dropped, vec![("minecraft:cobblestone", 1)]);
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn live_player_actions_drop_items_and_swap_main_and_off_hands() {
+        let mut packets = PacketTable::new();
+        packets.insert(PacketKind::KeepAliveRequest, 0x2c).unwrap();
+        packets.insert(PacketKind::KeepAliveResponse, 0x1c).unwrap();
+        packets.insert(PacketKind::PlayerAction, 0x29).unwrap();
+        packets.insert(PacketKind::BlockChangedAck, 0x04).unwrap();
+        let profile = ProtocolProfile::new("Test", 1, packets).unwrap();
+        let world = SharedWorld::static_flat();
+        let connection = ConnectionId::new(502);
+        let _subscription = world.subscribe(connection).unwrap();
+        let runtime = SharedGameRuntime::vanilla_overworld();
+        let uuid = GamePlayerUuid::new(502);
+        runtime
+            .connect_player(
+                uuid,
+                "Steve",
+                Transform::new(player_spawn_position(world.world_profile()), 0.0, 0.0, true)
+                    .unwrap(),
+            )
+            .unwrap();
+        runtime
+            .with_state_mut(|state| {
+                let player = state
+                    .player_mut(uuid)
+                    .ok_or(ferrum_game::GameStateError::UnknownPlayer { uuid })?;
+                player
+                    .inventory
+                    .set_slot(
+                        ferrum_game::HOTBAR_START,
+                        Some(ItemStack::new("minecraft:stone", 2).unwrap()),
+                    )
+                    .map_err(ferrum_game::GameStateError::from)?;
+                player
+                    .inventory
+                    .set_slot(
+                        ferrum_game::OFFHAND_SLOT,
+                        Some(ItemStack::new("minecraft:dirt", 1).unwrap()),
+                    )
+                    .map_err(ferrum_game::GameStateError::from)?;
+                Ok(())
+            })
+            .unwrap();
+
+        let mut input = Vec::new();
+        for (status, sequence) in [(4, 30), (6, 31)] {
+            write_packet(
+                &mut input,
+                &build_packet(0x29, |body| {
+                    write_varint_vec(body, status);
+                    body.extend_from_slice(&0_i64.to_be_bytes());
+                    body.push(1);
+                    write_varint_vec(body, sequence);
+                    Ok(())
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        write_packet(
+            &mut input,
+            &build_packet(0x1c, |body| {
+                body.extend_from_slice(&1_i64.to_be_bytes());
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        let items = ItemProtocolRegistry::default();
+        let gameplay = GameplaySync::new(&runtime, uuid, &items);
+        let mut output = Vec::new();
+        let mut session = play_session();
+        run_play_loop_with_bridge(
+            &mut Cursor::new(input),
+            &mut output,
+            &profile,
+            &mut session,
+            &world,
+            connection,
+            None,
+            Some(gameplay),
+            Some(1),
+        )
+        .unwrap();
+
+        runtime
+            .with_state(|state| {
+                let player = state.player(uuid).unwrap();
+                assert_eq!(
+                    player.inventory.selected_stack().unwrap().item(),
+                    "minecraft:dirt"
+                );
+                let offhand = player.inventory.equipment(EquipmentSlot::OffHand).unwrap();
+                assert_eq!(offhand.item(), "minecraft:stone");
+                assert_eq!(offhand.count(), 1);
+                let dropped = state
+                    .entities()
+                    .iter()
+                    .filter_map(|(_, entity)| entity.item())
+                    .map(|item| (item.stack.item(), item.stack.count()))
+                    .collect::<Vec<_>>();
+                assert_eq!(dropped, vec![("minecraft:stone", 1)]);
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn live_attack_packets_damage_and_kill_authoritative_entities() {
+        let mut packets = PacketTable::new();
+        packets.insert(PacketKind::KeepAliveRequest, 0x2c).unwrap();
+        packets.insert(PacketKind::KeepAliveResponse, 0x1c).unwrap();
+        packets.insert(PacketKind::Attack, 0x01).unwrap();
+        let profile = ProtocolProfile::new("Test", 1, packets).unwrap();
+        let world = SharedWorld::static_flat();
+        let connection = ConnectionId::new(503);
+        let _subscription = world.subscribe(connection).unwrap();
+        let runtime = SharedGameRuntime::vanilla_overworld();
+        let uuid = GamePlayerUuid::new(503);
+        runtime
+            .connect_player(
+                uuid,
+                "Steve",
+                Transform::new(player_spawn_position(world.world_profile()), 0.0, 0.0, true)
+                    .unwrap(),
+            )
+            .unwrap();
+        let mut target_position = player_spawn_position(world.world_profile());
+        target_position[0] += 2.0;
+        let target_transform = Transform::new(target_position, 0.0, 0.0, true).unwrap();
+        let target_events = runtime
+            .spawn_entity(
+                ferrum_game::EntityType::new("minecraft:zombie").unwrap(),
+                target_transform,
+                Velocity::default(),
+                ferrum_game::EntityPayload::Living(
+                    ferrum_game::LivingEntityData::new(2.0)
+                        .unwrap()
+                        .with_drops(vec![ItemStack::new("minecraft:rotten_flesh", 1).unwrap()])
+                        .unwrap(),
+                ),
+            )
+            .unwrap();
+        let target_entity_id = match &target_events[0] {
+            GameEvent::EntitySpawned { entity } => entity.id,
+            event => panic!("unexpected spawn event: {event:?}"),
+        };
+
+        let mut input = Vec::new();
+        for _ in 0..2 {
+            write_packet(
+                &mut input,
+                &build_packet(0x01, |body| {
+                    write_varint_vec(body, i32::try_from(target_entity_id.get()).unwrap());
+                    Ok(())
+                })
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        write_packet(
+            &mut input,
+            &build_packet(0x1c, |body| {
+                body.extend_from_slice(&1_i64.to_be_bytes());
+                Ok(())
+            })
+            .unwrap(),
+        )
+        .unwrap();
+
+        let items = ItemProtocolRegistry::default();
+        let gameplay = GameplaySync::new(&runtime, uuid, &items);
+        let mut output = Vec::new();
+        let mut session = play_session();
+        run_play_loop_with_bridge(
+            &mut Cursor::new(input),
+            &mut output,
+            &profile,
+            &mut session,
+            &world,
+            connection,
+            None,
+            Some(gameplay),
+            Some(1),
+        )
+        .unwrap();
+
+        runtime
+            .with_state(|state| {
+                assert!(state.entities().get(target_entity_id).is_none());
+                let drops = state
+                    .entities()
+                    .iter()
+                    .filter_map(|(_, entity)| entity.item())
+                    .map(|item| (item.stack.item(), item.stack.count()))
+                    .collect::<Vec<_>>();
+                assert_eq!(drops, vec![("minecraft:rotten_flesh", 1)]);
+            })
+            .unwrap();
     }
 
     #[test]

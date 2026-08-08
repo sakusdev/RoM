@@ -80,6 +80,7 @@ pub enum PacketKind {
     MovePlayerPositionRotation,
     MovePlayerRotation,
     MovePlayerStatusOnly,
+    Attack,
     PlayerAction,
     UseItemOn,
     BlockChangedAck,
@@ -103,9 +104,16 @@ pub enum PacketKind {
     TeleportEntity,
     RotateHead,
     SetEntityData,
+    TakeItemEntity,
     SetEquipment,
+    SetEntityMotion,
+    DamageEvent,
+    SetExperience,
     SetHealth,
     HurtAnimation,
+    UpdateAttributes,
+    UpdateMobEffect,
+    RemoveMobEffect,
     PlayerCombatKill,
     Respawn,
     PlayerInfoUpdate,
@@ -151,6 +159,7 @@ impl PacketKind {
         Self::MovePlayerPositionRotation,
         Self::MovePlayerRotation,
         Self::MovePlayerStatusOnly,
+        Self::Attack,
         Self::PlayerAction,
         Self::UseItemOn,
         Self::BlockChangedAck,
@@ -174,9 +183,16 @@ impl PacketKind {
         Self::TeleportEntity,
         Self::RotateHead,
         Self::SetEntityData,
+        Self::TakeItemEntity,
         Self::SetEquipment,
+        Self::SetEntityMotion,
+        Self::DamageEvent,
+        Self::SetExperience,
         Self::SetHealth,
         Self::HurtAnimation,
+        Self::UpdateAttributes,
+        Self::UpdateMobEffect,
+        Self::RemoveMobEffect,
         Self::PlayerCombatKill,
         Self::Respawn,
         Self::PlayerInfoUpdate,
@@ -223,6 +239,7 @@ impl PacketKind {
         Self::MovePlayerPositionRotation,
         Self::MovePlayerRotation,
         Self::MovePlayerStatusOnly,
+        Self::Attack,
         Self::PlayerAction,
         Self::UseItemOn,
         Self::BlockChangedAck,
@@ -269,6 +286,7 @@ impl PacketKind {
             | Self::MovePlayerPositionRotation
             | Self::MovePlayerRotation
             | Self::MovePlayerStatusOnly
+            | Self::Attack
             | Self::PlayerAction
             | Self::UseItemOn
             | Self::BlockChangedAck
@@ -292,9 +310,16 @@ impl PacketKind {
             | Self::TeleportEntity
             | Self::RotateHead
             | Self::SetEntityData
+            | Self::TakeItemEntity
             | Self::SetEquipment
+            | Self::SetEntityMotion
+            | Self::DamageEvent
+            | Self::SetExperience
             | Self::SetHealth
             | Self::HurtAnimation
+            | Self::UpdateAttributes
+            | Self::UpdateMobEffect
+            | Self::RemoveMobEffect
             | Self::PlayerCombatKill
             | Self::Respawn
             | Self::PlayerInfoUpdate
@@ -322,6 +347,7 @@ impl PacketKind {
             | Self::MovePlayerPositionRotation
             | Self::MovePlayerRotation
             | Self::MovePlayerStatusOnly
+            | Self::Attack
             | Self::PlayerAction
             | Self::UseItemOn
             | Self::ChatCommand

@@ -35,6 +35,14 @@ pub const OVERWORLD_SEA_LEVEL: i32 = 63;
 pub const FLAT_WORLD_FLOOR_Y: i32 = 63;
 pub const FLAT_WORLD_SPAWN_X: i32 = 0;
 pub const FLAT_WORLD_SPAWN_Z: i32 = 0;
+/// ItemEntity.DATA_ITEM accessor index derived from the SHA-1-verified official 26.1.2 server.
+pub const ITEM_ENTITY_STACK_METADATA_INDEX: u8 = 8;
+/// EntityDataSerializers.ITEM_STACK ID derived from the official 26.1.2 serializer registration order.
+pub const ITEM_STACK_ENTITY_DATA_SERIALIZER_ID: i32 = 7;
+/// ExperienceOrb.DATA_VALUE accessor index derived from the SHA-1-verified official 26.1.2 server.
+pub const EXPERIENCE_ORB_VALUE_METADATA_INDEX: u8 = 8;
+/// EntityDataSerializers.INT ID derived from the official 26.1.2 serializer registration order.
+pub const INT_ENTITY_DATA_SERIALIZER_ID: i32 = 1;
 
 /// Number of tag registries that are valid in the client Configuration registry access.
 pub const NETWORK_TAG_REGISTRY_COUNT: usize = 16;
@@ -94,8 +102,18 @@ pub fn protocol_profile() -> Result<ProtocolProfile, ProfileError> {
         (PacketKind::DefaultSpawnPosition, 0x61),
         (PacketKind::PlayerPosition, 0x48),
         (PacketKind::SystemChat, 0x79),
+        (PacketKind::AddEntity, 0x01),
+        (PacketKind::RemoveEntities, 0x4d),
+        (PacketKind::SetEntityData, 0x63),
+        (PacketKind::TakeItemEntity, 0x7c),
+        (PacketKind::SetEntityMotion, 0x65),
+        (PacketKind::DamageEvent, 0x19),
+        (PacketKind::SetExperience, 0x67),
         (PacketKind::SetHealth, 0x68),
         (PacketKind::HurtAnimation, 0x2a),
+        (PacketKind::UpdateAttributes, 0x83),
+        (PacketKind::UpdateMobEffect, 0x84),
+        (PacketKind::RemoveMobEffect, 0x4e),
         (PacketKind::PlayerCombatKill, 0x44),
         (PacketKind::Respawn, 0x52),
         (PacketKind::AcceptTeleportation, 0x00),
@@ -108,6 +126,7 @@ pub fn protocol_profile() -> Result<ProtocolProfile, ProfileError> {
         (PacketKind::MovePlayerPositionRotation, 0x1f),
         (PacketKind::MovePlayerRotation, 0x20),
         (PacketKind::MovePlayerStatusOnly, 0x21),
+        (PacketKind::Attack, 0x01),
         (PacketKind::PlayerAction, 0x29),
         (PacketKind::UseItemOn, 0x42),
         (PacketKind::BlockChangedAck, 0x04),
@@ -152,6 +171,8 @@ mod tests {
         assert_eq!(profile.protocol_number(), PROTOCOL_VERSION);
         assert!(profile.supports(775));
         assert!(!profile.supports(774));
+        assert_eq!(EXPERIENCE_ORB_VALUE_METADATA_INDEX, 8);
+        assert_eq!(INT_ENTITY_DATA_SERIALIZER_ID, 1);
     }
 
     #[test]
@@ -198,6 +219,16 @@ mod tests {
             0x5e
         );
         assert_eq!(packets.require(PacketKind::SystemChat).unwrap(), 0x79);
+        assert_eq!(packets.require(PacketKind::AddEntity).unwrap(), 0x01);
+        assert_eq!(packets.require(PacketKind::RemoveEntities).unwrap(), 0x4d);
+        assert_eq!(packets.require(PacketKind::SetEntityData).unwrap(), 0x63);
+        assert_eq!(packets.require(PacketKind::TakeItemEntity).unwrap(), 0x7c);
+        assert_eq!(packets.require(PacketKind::SetEntityMotion).unwrap(), 0x65);
+        assert_eq!(packets.require(PacketKind::DamageEvent).unwrap(), 0x19);
+        assert_eq!(packets.require(PacketKind::SetExperience).unwrap(), 0x67);
+        assert_eq!(packets.require(PacketKind::UpdateAttributes).unwrap(), 0x83);
+        assert_eq!(packets.require(PacketKind::UpdateMobEffect).unwrap(), 0x84);
+        assert_eq!(packets.require(PacketKind::RemoveMobEffect).unwrap(), 0x4e);
         assert_eq!(
             packets
                 .require(PacketKind::SelectKnownPacksRequest)
@@ -244,6 +275,7 @@ mod tests {
             packets.require(PacketKind::MovePlayerStatusOnly).unwrap(),
             0x21
         );
+        assert_eq!(packets.require(PacketKind::Attack).unwrap(), 0x01);
         assert_eq!(packets.require(PacketKind::PlayerAction).unwrap(), 0x29);
         assert_eq!(packets.require(PacketKind::UseItemOn).unwrap(), 0x42);
         assert_eq!(packets.require(PacketKind::BlockChangedAck).unwrap(), 0x04);

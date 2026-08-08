@@ -56,6 +56,7 @@ impl GameSnapshot {
         let mut entity_bindings = BTreeSet::new();
         for player in self.players {
             crate::player::validate_username(&player.name)?;
+            player.experience.validate()?;
             if !crate::validate_resource_location(&player.dimension) {
                 return Err(PersistenceError::InvalidPlayerDimension {
                     player: player.name,
@@ -221,5 +222,20 @@ mod tests {
         let restored = state.snapshot().restore().unwrap();
         assert_eq!(restored.player(uuid).unwrap().entity_id, None);
         assert!(restored.entities().is_empty());
+    }
+
+    #[test]
+    fn rejects_invalid_persisted_experience() {
+        let mut state = GameState::default();
+        let uuid = PlayerUuid::new(3);
+        state.connect_player(uuid, "Steve", spawn()).unwrap();
+        let mut snapshot = state.snapshot();
+        snapshot.players[0].experience.progress = 1.0;
+        assert!(matches!(
+            snapshot.restore(),
+            Err(PersistenceError::Player(
+                PlayerError::InvalidExperienceProgress { .. }
+            ))
+        ));
     }
 }
