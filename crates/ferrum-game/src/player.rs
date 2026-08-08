@@ -6,6 +6,9 @@ use crate::{
     validate_resource_location,
 };
 
+pub const MAX_TOTAL_EXPERIENCE: u64 = i32::MAX as u64;
+pub const MAX_EXPERIENCE_LEVEL: u32 = i32::MAX as u32;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct PlayerUuid([u8; 16]);
@@ -181,6 +184,59 @@ impl Default for Experience {
     }
 }
 
+impl Experience {
+    pub fn add_points(&mut self, points: u32) -> Result<(), PlayerError> {
+        self.validate()?;
+        if points == 0 {
+            return Ok(());
+        }
+
+        self.total = self
+            .total
+            .saturating_add(u64::from(points))
+            .min(MAX_TOTAL_EXPERIENCE);
+        self.progress += points as f32 / self.points_to_next_level() as f32;
+        while self.progress >= 1.0 {
+            let previous_requirement = self.points_to_next_level() as f32;
+            let points_into_next_level = (self.progress - 1.0) * previous_requirement;
+            if self.level == MAX_EXPERIENCE_LEVEL {
+                self.progress = 0.0;
+                break;
+            }
+            self.level += 1;
+            self.progress = points_into_next_level / self.points_to_next_level() as f32;
+        }
+        Ok(())
+    }
+
+    pub fn validate(&self) -> Result<(), PlayerError> {
+        if self.level > MAX_EXPERIENCE_LEVEL {
+            return Err(PlayerError::ExperienceLevelOutOfRange { level: self.level });
+        }
+        if !self.progress.is_finite() || !(0.0..1.0).contains(&self.progress) {
+            return Err(PlayerError::InvalidExperienceProgress {
+                progress: self.progress,
+            });
+        }
+        if self.total > MAX_TOTAL_EXPERIENCE {
+            return Err(PlayerError::TotalExperienceOutOfRange { total: self.total });
+        }
+        Ok(())
+    }
+
+    #[must_use]
+    pub fn points_to_next_level(&self) -> u64 {
+        let level = u64::from(self.level);
+        if level >= 30 {
+            112 + (level - 30) * 9
+        } else if level >= 15 {
+            37 + (level - 15) * 5
+        } else {
+            7 + level * 2
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlayerState {
     pub uuid: PlayerUuid,
@@ -195,6 +251,8 @@ pub struct PlayerState {
     pub abilities: Abilities,
     pub vitals: Vitals,
     pub experience: Experience,
+    #[serde(skip, default)]
+    pub experience_pickup_delay_ticks: u8,
     #[serde(default)]
     pub attributes: AttributeSet,
     #[serde(default)]
@@ -230,6 +288,7 @@ impl PlayerState {
             abilities: Abilities::for_game_mode(GameMode::Survival),
             vitals: Vitals::default(),
             experience: Experience::default(),
+            experience_pickup_delay_ticks: 0,
             attributes: AttributeSet::player_defaults(),
             status_effects: StatusEffectSet::default(),
             fall_distance: 0.0,
@@ -265,6 +324,10 @@ impl PlayerState {
 
     pub fn tick_status_effects(&mut self) -> Vec<crate::StatusEffectInstance> {
         self.status_effects.tick()
+    }
+
+    pub fn tick_experience_pickup_delay(&mut self) {
+        self.experience_pickup_delay_ticks = self.experience_pickup_delay_ticks.saturating_sub(1);
     }
 
     pub fn set_permission_level(&mut self, level: u8) -> Result<(), PlayerError> {
@@ -317,6 +380,12 @@ pub enum PlayerError {
     InvalidHealing { amount: f32 },
     #[error("maximum health {max_health} must be finite and positive")]
     InvalidMaximumHealth { max_health: f32 },
+    #[error("experience progress {progress} must be finite and in 0..1")]
+    InvalidExperienceProgress { progress: f32 },
+    #[error("experience level {level} exceeds the protocol maximum")]
+    ExperienceLevelOutOfRange { level: u32 },
+    #[error("total experience {total} exceeds the protocol maximum")]
+    TotalExperienceOutOfRange { total: u64 },
 }
 
 #[cfg(test)]
@@ -386,5 +455,15 @@ mod tests {
         let decoded: PlayerUuid = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, uuid);
         assert_eq!(decoded.as_bytes(), &[0xff; 16]);
+    }
+
+    #[test]
+    fn experience_points_cross_vanilla_level_boundaries() {
+        let mut experience = Experience::default();
+        experience.add_points(50).unwrap();
+        assert_eq!(experience.level, 4);
+        assert_eq!(experience.total, 50);
+        assert!((experience.progress - (10.0 / 15.0)).abs() < f32::EPSILON);
+        assert_eq!(experience.points_to_next_level(), 15);
     }
 }

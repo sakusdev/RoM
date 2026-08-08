@@ -108,6 +108,7 @@ pub enum PacketKind {
     SetEquipment,
     SetEntityMotion,
     DamageEvent,
+    SetExperience,
     SetHealth,
     HurtAnimation,
     UpdateAttributes,
@@ -186,6 +187,7 @@ impl PacketKind {
         Self::SetEquipment,
         Self::SetEntityMotion,
         Self::DamageEvent,
+        Self::SetExperience,
         Self::SetHealth,
         Self::HurtAnimation,
         Self::UpdateAttributes,
@@ -312,6 +314,7 @@ impl PacketKind {
             | Self::SetEquipment
             | Self::SetEntityMotion
             | Self::DamageEvent
+            | Self::SetExperience
             | Self::SetHealth
             | Self::HurtAnimation
             | Self::UpdateAttributes

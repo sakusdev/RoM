@@ -6,9 +6,9 @@ use thiserror::Error;
 use crate::{
     AttributeError, CombatError, ContainerClick, ContainerError, ContainerMutation,
     ContainerSnapshot, DamageContext, DamageKind, DamageSource, Difficulty, Entity, EntityError,
-    EntityId, EntityPayload, EntityStore, EntityType, EntityUuid, EquipmentSlot, GameMode,
-    InventoryError, ItemEntityData, ItemStack, LivingEntityData, PlayerError, PlayerState,
-    PlayerUuid, StatusEffectError, StatusEffectInstance, Transform, Velocity, Vitals,
+    EntityId, EntityPayload, EntityStore, EntityType, EntityUuid, EquipmentSlot, Experience,
+    GameMode, InventoryError, ItemEntityData, ItemStack, LivingEntityData, PlayerError,
+    PlayerState, PlayerUuid, StatusEffectError, StatusEffectInstance, Transform, Velocity, Vitals,
     calculate_damage, fall_damage, knockback_velocity,
 };
 
@@ -125,6 +125,15 @@ pub enum GameEvent {
         entity_id: EntityId,
         item: String,
         inserted: u32,
+    },
+    ExperienceOrbPickedUp {
+        uuid: PlayerUuid,
+        entity_id: EntityId,
+        value: u32,
+    },
+    PlayerExperienceChanged {
+        uuid: PlayerUuid,
+        experience: Experience,
     },
     PlayerVelocityChanged {
         uuid: PlayerUuid,
@@ -389,6 +398,7 @@ impl GameState {
             }
         }
         events.extend(self.pickup_nearby_items(uuid, 1.5)?);
+        events.extend(self.pickup_nearby_experience_orbs(uuid, 1.5)?);
         Ok(events)
     }
 
@@ -993,6 +1003,74 @@ impl GameState {
             });
         }
         Ok(events)
+    }
+
+    pub fn pickup_nearby_experience_orbs(
+        &mut self,
+        uuid: PlayerUuid,
+        radius: f64,
+    ) -> Result<Vec<GameEvent>, GameStateError> {
+        if !radius.is_finite() || !(0.0..=16.0).contains(&radius) {
+            return Err(GameStateError::InvalidPickupRadius { radius });
+        }
+        let entity_id = self.connected_entity_id(uuid)?;
+        let position = self
+            .entities
+            .get(entity_id)
+            .ok_or(GameStateError::PlayerMissingEntity { uuid })?
+            .transform
+            .position;
+        let player = self
+            .players
+            .get(&uuid)
+            .ok_or(GameStateError::UnknownPlayer { uuid })?;
+        if player.vitals.is_dead()
+            || player.game_mode == GameMode::Spectator
+            || player.experience_pickup_delay_ticks > 0
+        {
+            return Ok(Vec::new());
+        }
+
+        let radius_squared = radius * radius;
+        let candidate = self.entities.iter().find_map(|(&candidate_id, entity)| {
+            let EntityPayload::ExperienceOrb { value } = &entity.payload else {
+                return None;
+            };
+            let distance_squared = squared_distance(entity.transform.position, position);
+            (distance_squared <= radius_squared).then_some((candidate_id, *value))
+        });
+        let Some((orb_entity_id, value)) = candidate else {
+            return Ok(Vec::new());
+        };
+
+        let mut experience = self
+            .players
+            .get(&uuid)
+            .ok_or(GameStateError::UnknownPlayer { uuid })?
+            .experience;
+        experience.add_points(value)?;
+        self.entities
+            .despawn(orb_entity_id)
+            .ok_or(GameStateError::MissingExperienceOrb {
+                entity_id: orb_entity_id,
+            })?;
+        let player = self
+            .players
+            .get_mut(&uuid)
+            .ok_or(GameStateError::UnknownPlayer { uuid })?;
+        player.experience_pickup_delay_ticks = 2;
+        player.experience = experience;
+        Ok(vec![
+            GameEvent::ExperienceOrbPickedUp {
+                uuid,
+                entity_id: orb_entity_id,
+                value,
+            },
+            GameEvent::PlayerExperienceChanged { uuid, experience },
+            GameEvent::EntityRemoved {
+                entity_id: orb_entity_id,
+            },
+        ])
     }
 
     pub fn apply_knockback(
@@ -1814,6 +1892,7 @@ impl GameState {
         }
         let mut events = Vec::new();
         for (&uuid, player) in &mut self.players {
+            player.tick_experience_pickup_delay();
             for effect in player.tick_status_effects() {
                 events.push(GameEvent::PlayerStatusEffectChanged {
                     uuid,
@@ -1998,6 +2077,8 @@ pub enum GameStateError {
     MissingItemEntity { entity_id: EntityId },
     #[error("entity {entity_id:?} is not an item entity")]
     NotItemEntity { entity_id: EntityId },
+    #[error("experience orb {entity_id:?} disappeared during pickup")]
+    MissingExperienceOrb { entity_id: EntityId },
     #[error("player {uuid:?} has no item equipped in {slot:?}")]
     MissingEquippedItem {
         uuid: PlayerUuid,
@@ -2445,6 +2526,69 @@ mod tests {
                 .count(),
             12
         );
+    }
+
+    #[test]
+    fn experience_orbs_are_picked_up_with_vanilla_delay_and_level_progress() {
+        let uuid = PlayerUuid::new(41);
+        let mut state = GameState::default();
+        state.connect_player(uuid, "Steve", spawn()).unwrap();
+        let spawn_orb = |state: &mut GameState, value| {
+            let events = state
+                .spawn_entity(
+                    EntityType::new("minecraft:experience_orb").unwrap(),
+                    spawn(),
+                    Velocity::default(),
+                    EntityPayload::ExperienceOrb { value },
+                )
+                .unwrap();
+            match &events[0] {
+                GameEvent::EntitySpawned { entity } => entity.id,
+                event => panic!("unexpected event: {event:?}"),
+            }
+        };
+
+        let first_orb = spawn_orb(&mut state, 10);
+        let second_orb = spawn_orb(&mut state, 5);
+        let picked_up = state.pickup_nearby_experience_orbs(uuid, 2.0).unwrap();
+        assert!(matches!(
+            picked_up.as_slice(),
+            [
+                GameEvent::ExperienceOrbPickedUp {
+                    entity_id,
+                    value: 10,
+                    ..
+                },
+                GameEvent::PlayerExperienceChanged { experience, .. },
+                GameEvent::EntityRemoved {
+                    entity_id: removed_id
+                }
+            ] if *entity_id == first_orb
+                && *removed_id == first_orb
+                && experience.level == 1
+                && experience.total == 10
+                && (experience.progress - (3.0 / 9.0)).abs() < f32::EPSILON
+        ));
+        assert!(state.entities().get(first_orb).is_none());
+        assert!(state.entities().get(second_orb).is_some());
+        assert!(
+            state
+                .pickup_nearby_experience_orbs(uuid, 2.0)
+                .unwrap()
+                .is_empty()
+        );
+
+        state.tick();
+        assert!(
+            state
+                .pickup_nearby_experience_orbs(uuid, 2.0)
+                .unwrap()
+                .is_empty()
+        );
+        state.tick();
+        state.pickup_nearby_experience_orbs(uuid, 2.0).unwrap();
+        assert_eq!(state.player(uuid).unwrap().experience.total, 15);
+        assert!(state.entities().get(second_orb).is_none());
     }
 
     #[test]

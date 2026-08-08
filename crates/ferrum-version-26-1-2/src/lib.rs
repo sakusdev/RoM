@@ -108,6 +108,7 @@ pub fn protocol_profile() -> Result<ProtocolProfile, ProfileError> {
         (PacketKind::TakeItemEntity, 0x7c),
         (PacketKind::SetEntityMotion, 0x65),
         (PacketKind::DamageEvent, 0x19),
+        (PacketKind::SetExperience, 0x67),
         (PacketKind::SetHealth, 0x68),
         (PacketKind::HurtAnimation, 0x2a),
         (PacketKind::UpdateAttributes, 0x83),
@@ -224,6 +225,7 @@ mod tests {
         assert_eq!(packets.require(PacketKind::TakeItemEntity).unwrap(), 0x7c);
         assert_eq!(packets.require(PacketKind::SetEntityMotion).unwrap(), 0x65);
         assert_eq!(packets.require(PacketKind::DamageEvent).unwrap(), 0x19);
+        assert_eq!(packets.require(PacketKind::SetExperience).unwrap(), 0x67);
         assert_eq!(packets.require(PacketKind::UpdateAttributes).unwrap(), 0x83);
         assert_eq!(packets.require(PacketKind::UpdateMobEffect).unwrap(), 0x84);
         assert_eq!(packets.require(PacketKind::RemoveMobEffect).unwrap(), 0x4e);

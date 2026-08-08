@@ -7,6 +7,7 @@ mod block_interaction;
 mod chunk_stream;
 mod entity;
 mod entity_sync;
+mod experience;
 mod health;
 mod inventory;
 mod movement;
@@ -31,6 +32,7 @@ pub use entity_sync::{
     encode_set_entity_motion, encode_update_attribute, encode_update_attributes,
     encode_update_mob_effect,
 };
+pub use experience::{ExperienceEncodeError, encode_set_experience};
 pub use health::{HealthEncodeError, encode_set_health};
 pub use inventory::{
     DataComponentProtocolRegistry, EquipmentEntry, InventoryDecodeError, InventoryEncodeError,

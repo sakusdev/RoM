@@ -1029,6 +1029,7 @@ fn validate_replication_packet_support(
     damage_type_protocol_ids: &ProtocolIdRegistry,
 ) -> Result<()> {
     for kind in [
+        PacketKind::SetExperience,
         PacketKind::SetHealth,
         PacketKind::HurtAnimation,
         PacketKind::PlayerCombatKill,
@@ -1086,6 +1087,7 @@ fn validate_replication_packet_support(
             PacketKind::AddEntity,
             PacketKind::RemoveEntities,
             PacketKind::SetEntityData,
+            PacketKind::TakeItemEntity,
         ] {
             profile
                 .packets()
@@ -4831,6 +4833,6 @@ mod tests {
             &ProtocolIdRegistry::default(),
         )
         .unwrap_err();
-        assert!(error.to_string().contains("SetHealth"));
+        assert!(error.to_string().contains("SetExperience"));
     }
 }

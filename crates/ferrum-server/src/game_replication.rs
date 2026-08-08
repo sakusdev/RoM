@@ -8,9 +8,9 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use ferrum_game::{
-    AttributeSet, Entity, EntityId, EntityPayload, EntityUuid, EquipmentSlot, GameEvent, GameMode,
-    GameState, ItemStack, PLAYER_INVENTORY_SLOTS, PlayerState, PlayerUuid, StatusEffectSet,
-    Transform, Velocity, Vitals,
+    AttributeSet, Entity, EntityId, EntityPayload, EntityUuid, EquipmentSlot, Experience,
+    GameEvent, GameMode, GameState, ItemStack, PLAYER_INVENTORY_SLOTS, PlayerState, PlayerUuid,
+    StatusEffectSet, Transform, Velocity, Vitals,
 };
 use ferrum_play::{
     CommonPlayerSpawnInfo, DataComponentProtocolRegistry, EncodedEntityMovement,
@@ -21,8 +21,9 @@ use ferrum_play::{
     encode_hurt_animation, encode_item_entity_data, encode_player_combat_kill,
     encode_player_info_remove, encode_player_info_update, encode_remove_entities,
     encode_remove_mob_effect, encode_respawn, encode_rotate_head, encode_set_entity_motion,
-    encode_set_equipment, encode_set_health, encode_take_item_entity, encode_teleport_entity,
-    encode_update_attribute, encode_update_attributes, encode_update_mob_effect,
+    encode_set_equipment, encode_set_experience, encode_set_health, encode_take_item_entity,
+    encode_teleport_entity, encode_update_attribute, encode_update_attributes,
+    encode_update_mob_effect,
 };
 use ferrum_protocol::PacketKind;
 use ferrum_rompack::RomPackWorld;
@@ -459,6 +460,7 @@ fn process_commands(
                             let self_state = match state.player(uuid) {
                                 Some(player) if player.connected => Some((
                                     player.vitals,
+                                    player.experience,
                                     player_snapshot_from_state(state, uuid)?.with_context(|| {
                                         format!(
                                             "active player {uuid:?} has no authoritative entity snapshot"
@@ -508,9 +510,10 @@ fn process_commands(
                         format!("player {uuid:?} is not registered for replication")
                     })?;
                     connection.activate()?;
-                    if let Some((vitals, snapshot)) = self_state {
+                    if let Some((vitals, experience, snapshot)) = self_state {
                         connection.viewer_transform = Some(snapshot.transform);
                         queue_set_health(connection, vitals, exit)?;
+                        queue_set_experience(connection, experience, exit)?;
                         if entity_replication_enabled(&config.entity_protocol_ids) {
                             queue_player_info_update(connection, &snapshot, exit)?;
                         }
@@ -614,15 +617,20 @@ fn dispatch_event(
             let snapshot = player_snapshot(runtime, uuid)?.with_context(|| {
                 format!("connected player {uuid:?} is missing from authoritative state")
             })?;
-            let vitals = runtime
-                .with_state(|state| state.player(uuid).map(|player| player.vitals))
-                .context("cannot read connected player vitals")?;
+            let player_state = runtime
+                .with_state(|state| {
+                    state
+                        .player(uuid)
+                        .map(|player| (player.vitals, player.experience))
+                })
+                .context("cannot read connected player vitals and experience")?;
             if let Some(connection) = connections.get_mut(&uuid)
                 && connection.active
                 && !connection.self_initialized
             {
-                if let Some(vitals) = vitals {
+                if let Some((vitals, experience)) = player_state {
                     queue_set_health(connection, vitals, exit)?;
+                    queue_set_experience(connection, experience, exit)?;
                 }
                 connection.viewer_transform = Some(snapshot.transform);
                 if entity_replication_enabled(&config.entity_protocol_ids) {
@@ -1183,6 +1191,20 @@ fn dispatch_event(
                 exit,
             );
         }
+        GameEvent::ExperienceOrbPickedUp {
+            uuid,
+            entity_id,
+            value: _,
+        } => {
+            if let Some(collector) = player_snapshot(runtime, uuid)? {
+                queue_experience_orb_pickup(connections, entity_id, collector.entity_id, exit)?;
+            }
+        }
+        GameEvent::PlayerExperienceChanged { uuid, experience } => {
+            if let Some(connection) = connections.get_mut(&uuid) {
+                queue_set_experience(connection, experience, exit)?;
+            }
+        }
         GameEvent::EntitySpawned { entity } => {
             if item_entity_replication_enabled(config)
                 && let Some(snapshot) = item_snapshot_from_entity(&entity)
@@ -1607,6 +1629,28 @@ fn queue_item_pickup(
         .context("cannot encode item pickup animation")?;
     for connection in connections.values_mut() {
         if connection.item_entities.contains_key(&item_entity_id) {
+            connection.queue(
+                PlayOutput::ProtocolPacket {
+                    kind: PacketKind::TakeItemEntity,
+                    payload: payload.clone(),
+                },
+                exit,
+            );
+        }
+    }
+    Ok(())
+}
+
+fn queue_experience_orb_pickup(
+    connections: &mut BTreeMap<PlayerUuid, ReplicationConnection>,
+    orb_entity_id: EntityId,
+    collector_entity_id: EntityId,
+    exit: &mut GameReplicationExit,
+) -> Result<()> {
+    let payload = encode_take_item_entity(orb_entity_id, collector_entity_id, 1)
+        .context("cannot encode experience orb pickup animation")?;
+    for connection in connections.values_mut() {
+        if connection.non_player_entities.contains_key(&orb_entity_id) {
             connection.queue(
                 PlayOutput::ProtocolPacket {
                     kind: PacketKind::TakeItemEntity,
@@ -2106,6 +2150,22 @@ fn queue_set_health(
     Ok(())
 }
 
+fn queue_set_experience(
+    connection: &mut ReplicationConnection,
+    experience: Experience,
+    exit: &mut GameReplicationExit,
+) -> Result<()> {
+    connection.queue(
+        PlayOutput::ProtocolPacket {
+            kind: PacketKind::SetExperience,
+            payload: encode_set_experience(experience)
+                .context("cannot encode player experience")?,
+        },
+        exit,
+    );
+    Ok(())
+}
+
 fn queue_player_state_sync(
     connection: &mut ReplicationConnection,
     snapshot: &PlayerEntitySnapshot,
@@ -2326,7 +2386,7 @@ mod tests {
             if matches!(
                 output,
                 PlayOutput::ProtocolPacket {
-                    kind: PacketKind::SetHealth,
+                    kind: PacketKind::SetHealth | PacketKind::SetExperience,
                     ..
                 }
             ) {
@@ -3198,6 +3258,13 @@ mod tests {
                 payload: vec![0x41, 0xa0, 0, 0, 0x14, 0x40, 0xa0, 0, 0],
             }
         );
+        assert!(matches!(
+            recv_raw_output(&steve_writer, &mut workers, &mut inputs),
+            PlayOutput::ProtocolPacket {
+                kind: PacketKind::SetExperience,
+                ..
+            }
+        ));
 
         service.control().register(alex, alex_reader).unwrap();
 
@@ -3207,6 +3274,13 @@ mod tests {
             recv_raw_output(&alex_writer, &mut workers, &mut inputs),
             PlayOutput::ProtocolPacket {
                 kind: PacketKind::SetHealth,
+                ..
+            }
+        ));
+        assert!(matches!(
+            recv_raw_output(&alex_writer, &mut workers, &mut inputs),
+            PlayOutput::ProtocolPacket {
+                kind: PacketKind::SetExperience,
                 ..
             }
         ));
@@ -3576,6 +3650,104 @@ mod tests {
         );
 
         game.despawn_entity(orb_id).unwrap();
+        let remove = recv_protocol_until(
+            &writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::RemoveEntities,
+        );
+        let (count, count_bytes) = read_varint(&remove);
+        assert_eq!(count, 1);
+        assert_eq!(
+            read_varint(&remove[count_bytes..]).0,
+            i32::try_from(orb_id.get()).unwrap()
+        );
+        service.shutdown().unwrap();
+    }
+
+    #[test]
+    fn experience_orb_pickup_animates_updates_experience_and_removes_the_orb() {
+        let game = SharedGameRuntime::vanilla_overworld();
+        let service = spawn_game_replication(&game, entity_config()).unwrap();
+        let player = PlayerUuid::new(55);
+        let (connector, mut workers) = worker_channel(NonZeroUsize::new(64).unwrap());
+        let (reader, writer) = register_play_connection(
+            &connector,
+            ConnectionId::new(55),
+            NonZeroUsize::new(32).unwrap(),
+        )
+        .unwrap();
+        let mut inputs = BoundedInputQueue::try_new(64).unwrap();
+        ingest(&mut workers, &mut inputs);
+        service.control().register(player, reader).unwrap();
+        service.control().activate(player).unwrap();
+        game.connect_player(player, "Steve", spawn()).unwrap();
+
+        let initial_experience = recv_protocol_until(
+            &writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::SetExperience,
+        );
+        assert_eq!(
+            initial_experience,
+            encode_set_experience(Experience::default()).unwrap()
+        );
+        let collector_entity_id = game
+            .with_state(|state| state.player(player).unwrap().entity_id.unwrap())
+            .unwrap();
+        let spawned = game
+            .spawn_entity(
+                ferrum_game::EntityType::new("minecraft:experience_orb").unwrap(),
+                spawn(),
+                Velocity::default(),
+                EntityPayload::ExperienceOrb { value: 10 },
+            )
+            .unwrap();
+        let orb_id = match &spawned[0] {
+            GameEvent::EntitySpawned { entity } => entity.id,
+            event => panic!("unexpected event: {event:?}"),
+        };
+        recv_protocol_until(&writer, &mut workers, &mut inputs, PacketKind::AddEntity);
+        recv_protocol_until(
+            &writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::SetEntityData,
+        );
+
+        game.pickup_nearby_experience_orbs(player, 2.0).unwrap();
+        let take = recv_protocol_until(
+            &writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::TakeItemEntity,
+        );
+        let (taken_id, taken_bytes) = read_varint(&take);
+        let (collector_id, collector_bytes) = read_varint(&take[taken_bytes..]);
+        let (amount, _) = read_varint(&take[taken_bytes + collector_bytes..]);
+        assert_eq!(taken_id, i32::try_from(orb_id.get()).unwrap());
+        assert_eq!(
+            collector_id,
+            i32::try_from(collector_entity_id.get()).unwrap()
+        );
+        assert_eq!(amount, 1);
+
+        let experience = recv_protocol_until(
+            &writer,
+            &mut workers,
+            &mut inputs,
+            PacketKind::SetExperience,
+        );
+        let authoritative_experience = game
+            .with_state(|state| state.player(player).unwrap().experience)
+            .unwrap();
+        assert_eq!(authoritative_experience.level, 1);
+        assert_eq!(authoritative_experience.total, 10);
+        assert_eq!(
+            experience,
+            encode_set_experience(authoritative_experience).unwrap()
+        );
         let remove = recv_protocol_until(
             &writer,
             &mut workers,

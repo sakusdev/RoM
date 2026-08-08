@@ -335,6 +335,16 @@ impl SharedGameRuntime {
         Ok(events)
     }
 
+    pub fn pickup_nearby_experience_orbs(
+        &self,
+        uuid: PlayerUuid,
+        radius: f64,
+    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+        let events = self.write()?.pickup_nearby_experience_orbs(uuid, radius)?;
+        self.publish(&events)?;
+        Ok(events)
+    }
+
     pub fn damage_player_with_source(
         &self,
         uuid: PlayerUuid,

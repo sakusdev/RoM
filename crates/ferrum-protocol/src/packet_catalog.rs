@@ -394,6 +394,9 @@ pub fn known_packet_kind(
         (ProtocolPhase::Play, PacketDirection::Clientbound, "damage_event") => {
             Some(PacketKind::DamageEvent)
         }
+        (ProtocolPhase::Play, PacketDirection::Clientbound, "set_experience") => {
+            Some(PacketKind::SetExperience)
+        }
         (ProtocolPhase::Play, PacketDirection::Clientbound, "set_health") => {
             Some(PacketKind::SetHealth)
         }
@@ -491,6 +494,7 @@ pub const fn canonical_packet_name(kind: PacketKind) -> &'static str {
         PacketKind::SetEquipment => "minecraft:set_equipment",
         PacketKind::SetEntityMotion => "minecraft:set_entity_motion",
         PacketKind::DamageEvent => "minecraft:damage_event",
+        PacketKind::SetExperience => "minecraft:set_experience",
         PacketKind::SetHealth => "minecraft:set_health",
         PacketKind::HurtAnimation => "minecraft:hurt_animation",
         PacketKind::UpdateAttributes => "minecraft:update_attributes",
@@ -647,6 +651,22 @@ mod tests {
         assert_eq!(
             canonical_packet_name(PacketKind::SetHealth),
             "minecraft:set_health"
+        );
+    }
+
+    #[test]
+    fn recognizes_set_experience_as_optional_typed_packet() {
+        assert_eq!(
+            known_packet_kind(
+                ProtocolPhase::Play,
+                PacketDirection::Clientbound,
+                "set_experience",
+            ),
+            Some(PacketKind::SetExperience)
+        );
+        assert_eq!(
+            canonical_packet_name(PacketKind::SetExperience),
+            "minecraft:set_experience"
         );
     }
 

@@ -54,7 +54,8 @@ pub use menu::{
 };
 pub use persistence::{GameSnapshot, PersistenceError};
 pub use player::{
-    Abilities, Difficulty, Experience, GameMode, PlayerError, PlayerState, PlayerUuid, Vitals,
+    Abilities, Difficulty, Experience, GameMode, MAX_EXPERIENCE_LEVEL, MAX_TOTAL_EXPERIENCE,
+    PlayerError, PlayerState, PlayerUuid, Vitals,
 };
 pub use recipe::{
     CookingKind, CookingRecipe, CraftingGrid, CraftingMatch, Ingredient, MAX_CRAFTING_GRID_SLOTS,
