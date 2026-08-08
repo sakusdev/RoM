@@ -1,4 +1,4 @@
-# RoM
+# RoM — Reimplementation of Minecraft
 
 **RoM is an experimental, native Minecraft Java Edition-compatible server written in Rust.**
 
