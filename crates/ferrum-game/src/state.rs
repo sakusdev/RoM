@@ -16,6 +16,10 @@ pub const MAX_HOSTILE_MOBS: usize = 70;
 pub const MIN_HOSTILE_MOB_SPAWN_DISTANCE: f64 = 24.0;
 pub const MAX_HOSTILE_MOB_SPAWN_DISTANCE: f64 = 128.0;
 pub const BASE_PLAYER_ATTACK_KNOCKBACK: f64 = 0.4;
+const EXPERIENCE_ORB_FOLLOW_DISTANCE: f64 = 8.0;
+const EXPERIENCE_ORB_FOLLOW_ACCELERATION: f64 = 0.1;
+const EXPERIENCE_ORB_PICKUP_RADIUS: f64 = 1.5;
+const PLAYER_EYE_HEIGHT: f64 = 1.62;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -1885,6 +1889,83 @@ impl GameState {
         events
     }
 
+    fn tick_experience_orb_attraction(&mut self) {
+        let targets = self
+            .players
+            .values()
+            .filter(|player| {
+                player.connected
+                    && !player.vitals.is_dead()
+                    && player.game_mode != GameMode::Spectator
+            })
+            .filter_map(|player| {
+                let entity = self.entities.get(player.entity_id?)?;
+                Some((player.uuid, entity.transform.position))
+            })
+            .collect::<Vec<_>>();
+        let orbs = self
+            .entities
+            .iter()
+            .filter_map(|(&entity_id, entity)| {
+                matches!(entity.payload, EntityPayload::ExperienceOrb { .. }).then_some((
+                    entity_id,
+                    entity.transform.position,
+                    entity.velocity,
+                ))
+            })
+            .collect::<Vec<_>>();
+        let follow_distance_squared = EXPERIENCE_ORB_FOLLOW_DISTANCE.powi(2);
+
+        for (entity_id, orb_position, previous_velocity) in orbs {
+            let Some((_, target_position)) = targets
+                .iter()
+                .filter_map(|(uuid, position)| {
+                    let distance_squared = squared_distance(orb_position, *position);
+                    (distance_squared <= follow_distance_squared).then_some((
+                        *uuid,
+                        *position,
+                        distance_squared,
+                    ))
+                })
+                .min_by(|left, right| {
+                    left.2
+                        .total_cmp(&right.2)
+                        .then_with(|| left.0.cmp(&right.0))
+                })
+                .map(|(uuid, position, _)| (uuid, position))
+            else {
+                continue;
+            };
+
+            let direction = [
+                target_position[0] - orb_position[0],
+                target_position[1] + PLAYER_EYE_HEIGHT / 2.0 - orb_position[1],
+                target_position[2] - orb_position[2],
+            ];
+            let length_squared = direction
+                .iter()
+                .map(|component| component * component)
+                .sum();
+            if length_squared <= f64::EPSILON {
+                continue;
+            }
+            let length = f64::sqrt(length_squared);
+            let distance_factor = 1.0 - length / EXPERIENCE_ORB_FOLLOW_DISTANCE;
+            let acceleration = distance_factor.powi(2) * EXPERIENCE_ORB_FOLLOW_ACCELERATION;
+            let velocity = Velocity([
+                previous_velocity.0[0] + direction[0] / length * acceleration,
+                previous_velocity.0[1] + direction[1] / length * acceleration,
+                previous_velocity.0[2] + direction[2] / length * acceleration,
+            ]);
+            if let Some(entity) = self.entities.get_mut(entity_id) {
+                entity.velocity = velocity;
+                if velocity.0[1] > 0.0 {
+                    entity.transform.on_ground = false;
+                }
+            }
+        }
+    }
+
     pub fn tick(&mut self) -> Vec<GameEvent> {
         self.time.game_time = self.time.game_time.saturating_add(1);
         if self.time.daylight_cycle {
@@ -1907,6 +1988,7 @@ impl GameState {
             .filter(|(_, entity)| !entity.is_player())
             .map(|(&entity_id, entity)| (entity_id, (entity.transform, entity.velocity)))
             .collect::<BTreeMap<_, _>>();
+        self.tick_experience_orb_attraction();
         let removed = self.entities.tick();
         for (entity_id, (previous_transform, previous_velocity)) in previous_motion {
             let Some(entity) = self.entities.get(entity_id) else {
@@ -1926,6 +2008,19 @@ impl GameState {
                 .into_iter()
                 .map(|entity_id| GameEvent::EntityRemoved { entity_id }),
         );
+        let pickup_players = self
+            .players
+            .values()
+            .filter(|player| player.connected)
+            .map(|player| player.uuid)
+            .collect::<Vec<_>>();
+        for uuid in pickup_players {
+            if let Ok(mut pickup_events) =
+                self.pickup_nearby_experience_orbs(uuid, EXPERIENCE_ORB_PICKUP_RADIUS)
+            {
+                events.append(&mut pickup_events);
+            }
+        }
         events
     }
 
@@ -2589,6 +2684,54 @@ mod tests {
         state.pickup_nearby_experience_orbs(uuid, 2.0).unwrap();
         assert_eq!(state.player(uuid).unwrap().experience.total, 15);
         assert!(state.entities().get(second_orb).is_none());
+    }
+
+    #[test]
+    fn experience_orbs_follow_and_reach_stationary_players_during_ticks() {
+        let uuid = PlayerUuid::new(43);
+        let mut state = GameState::default();
+        state.connect_player(uuid, "Steve", spawn()).unwrap();
+        let orb_transform = Transform::new([4.5, 65.0, 0.5], 0.0, 0.0, false).unwrap();
+        let spawned = state
+            .spawn_entity(
+                EntityType::new("minecraft:experience_orb").unwrap(),
+                orb_transform,
+                Velocity::default(),
+                EntityPayload::ExperienceOrb { value: 7 },
+            )
+            .unwrap();
+        let orb_id = match &spawned[0] {
+            GameEvent::EntitySpawned { entity } => entity.id,
+            event => panic!("unexpected event: {event:?}"),
+        };
+
+        let events = state.tick();
+        let orb = state.entities().get(orb_id).unwrap();
+        assert!(orb.transform.position[0] < orb_transform.position[0]);
+        assert!(orb.velocity.0[0] < 0.0);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            GameEvent::EntityMoved { entity_id, .. } if *entity_id == orb_id
+        )));
+
+        state
+            .entities_mut()
+            .set_transform(
+                orb_id,
+                Transform::new([0.6, 65.0, 0.5], 0.0, 0.0, false).unwrap(),
+            )
+            .unwrap();
+        let events = state.tick();
+        assert!(events.iter().any(|event| matches!(
+            event,
+            GameEvent::ExperienceOrbPickedUp {
+                uuid: picked_up_by,
+                entity_id,
+                value: 7,
+            } if *picked_up_by == uuid && *entity_id == orb_id
+        )));
+        assert_eq!(state.player(uuid).unwrap().experience.total, 7);
+        assert!(state.entities().get(orb_id).is_none());
     }
 
     #[test]

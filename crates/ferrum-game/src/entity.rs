@@ -143,6 +143,11 @@ impl Default for Velocity {
 pub const DEFAULT_ITEM_PICKUP_DELAY_TICKS: u32 = 10;
 pub const DEFAULT_ITEM_DESPAWN_TICKS: u64 = 20 * 60 * 5;
 pub const MAX_EXPERIENCE_ORB_VALUE: u32 = 32_767;
+pub const EXPERIENCE_ORB_LIFETIME_TICKS: u64 = 20 * 60 * 5;
+pub const EXPERIENCE_ORB_GRAVITY: f64 = 0.03;
+pub const EXPERIENCE_ORB_AIR_FRICTION: f64 = 0.98;
+pub const EXPERIENCE_ORB_GROUND_FRICTION: f64 = 0.6 * EXPERIENCE_ORB_AIR_FRICTION;
+pub const EXPERIENCE_ORB_GROUND_BOUNCE: f64 = 0.4;
 pub const MAX_LIVING_ENTITY_DROPS: usize = 64;
 pub const MAX_MOB_FOLLOW_RANGE: f64 = 128.0;
 pub const MAX_MOB_MOVEMENT_SPEED: f64 = 1.0;
@@ -553,9 +558,34 @@ impl EntityStore {
                         entity.transform.position[axis] += entity.velocity.0[axis];
                     }
                 }
-                EntityPayload::Generic
-                | EntityPayload::ExperienceOrb { .. }
-                | EntityPayload::Vehicle => {}
+                EntityPayload::ExperienceOrb { .. } => {
+                    if !entity.transform.on_ground {
+                        entity.velocity.0[1] =
+                            (entity.velocity.0[1] - EXPERIENCE_ORB_GRAVITY).max(-3.9);
+                    }
+                    let previous_vertical_velocity = entity.velocity.0[1];
+                    for axis in 0..3 {
+                        entity.transform.position[axis] += entity.velocity.0[axis];
+                    }
+                    let friction = if entity.transform.on_ground {
+                        EXPERIENCE_ORB_GROUND_FRICTION
+                    } else {
+                        EXPERIENCE_ORB_AIR_FRICTION
+                    };
+                    for component in &mut entity.velocity.0 {
+                        *component *= friction;
+                    }
+                    if entity.transform.on_ground
+                        && previous_vertical_velocity < -EXPERIENCE_ORB_GRAVITY
+                    {
+                        entity.velocity.0[1] =
+                            -previous_vertical_velocity * EXPERIENCE_ORB_GROUND_BOUNCE;
+                    }
+                    if entity.age_ticks >= EXPERIENCE_ORB_LIFETIME_TICKS {
+                        expired.push(entity.id);
+                    }
+                }
+                EntityPayload::Generic | EntityPayload::Vehicle => {}
             }
         }
         for id in &expired {
@@ -825,6 +855,41 @@ mod tests {
         assert_eq!(removed.uuid, EntityUuid::new(77));
         assert_eq!(store.id_by_uuid(EntityUuid::new(77)), None);
         assert!(store.is_empty());
+    }
+
+    #[test]
+    fn experience_orbs_use_vanilla_gravity_friction_and_lifetime() {
+        let mut store = EntityStore::new();
+        let moving = store
+            .spawn_with_payload(
+                EntityUuid::new(78),
+                EntityType::new("minecraft:experience_orb").unwrap(),
+                Transform::new([0.0, 10.0, 0.0], 0.0, 0.0, false).unwrap(),
+                EntityPayload::ExperienceOrb { value: 3 },
+            )
+            .unwrap();
+        store
+            .set_velocity(moving, Velocity::new([1.0, 0.0, 0.0]).unwrap())
+            .unwrap();
+        store.tick();
+        let orb = store.get(moving).unwrap();
+        assert_eq!(orb.transform.position, [1.0, 9.97, 0.0]);
+        assert_eq!(
+            orb.velocity,
+            Velocity([0.98, -EXPERIENCE_ORB_GRAVITY * 0.98, 0.0])
+        );
+
+        let expiring = store
+            .spawn_with_payload(
+                EntityUuid::new(79),
+                EntityType::new("minecraft:experience_orb").unwrap(),
+                Transform::default(),
+                EntityPayload::ExperienceOrb { value: 1 },
+            )
+            .unwrap();
+        store.get_mut(expiring).unwrap().age_ticks = EXPERIENCE_ORB_LIFETIME_TICKS - 1;
+        assert_eq!(store.tick(), vec![expiring]);
+        assert!(store.get(expiring).is_none());
     }
 
     #[test]

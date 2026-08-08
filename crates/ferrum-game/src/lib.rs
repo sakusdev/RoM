@@ -38,11 +38,12 @@ pub use effects::{
     StatusEffectInstance, StatusEffectSet,
 };
 pub use entity::{
-    DEFAULT_ITEM_DESPAWN_TICKS, DEFAULT_ITEM_PICKUP_DELAY_TICKS, Entity, EntityError, EntityId,
-    EntityPayload, EntityStore, EntityType, EntityUuid, ItemEntityData, LivingEntityData,
-    MAX_EXPERIENCE_ORB_VALUE, MAX_LIVING_ENTITY_DROPS, MAX_MOB_ATTACK_DAMAGE,
-    MAX_MOB_ATTACK_INTERVAL_TICKS, MAX_MOB_ATTACK_RANGE, MAX_MOB_FOLLOW_RANGE,
-    MAX_MOB_MOVEMENT_SPEED, MobAi, Transform, Velocity,
+    DEFAULT_ITEM_DESPAWN_TICKS, DEFAULT_ITEM_PICKUP_DELAY_TICKS, EXPERIENCE_ORB_AIR_FRICTION,
+    EXPERIENCE_ORB_GRAVITY, EXPERIENCE_ORB_GROUND_BOUNCE, EXPERIENCE_ORB_GROUND_FRICTION,
+    EXPERIENCE_ORB_LIFETIME_TICKS, Entity, EntityError, EntityId, EntityPayload, EntityStore,
+    EntityType, EntityUuid, ItemEntityData, LivingEntityData, MAX_EXPERIENCE_ORB_VALUE,
+    MAX_LIVING_ENTITY_DROPS, MAX_MOB_ATTACK_DAMAGE, MAX_MOB_ATTACK_INTERVAL_TICKS,
+    MAX_MOB_ATTACK_RANGE, MAX_MOB_FOLLOW_RANGE, MAX_MOB_MOVEMENT_SPEED, MobAi, Transform, Velocity,
 };
 pub use inventory::{
     EquipmentSlot, HOTBAR_END, HOTBAR_SLOTS, HOTBAR_START, Inventory, InventoryError, ItemStack,

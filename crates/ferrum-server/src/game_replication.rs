@@ -3716,7 +3716,7 @@ mod tests {
             PacketKind::SetEntityData,
         );
 
-        game.pickup_nearby_experience_orbs(player, 2.0).unwrap();
+        game.tick().unwrap();
         let take = recv_protocol_until(
             &writer,
             &mut workers,
