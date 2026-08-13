@@ -9,6 +9,7 @@ pub mod command;
 pub mod container;
 pub mod entity;
 pub mod inventory;
+pub mod item_entity;
 pub mod persistence;
 pub mod player;
 mod state;
@@ -27,6 +28,12 @@ pub use inventory::{
     EquipmentSlot, HOTBAR_END, HOTBAR_SLOTS, HOTBAR_START, Inventory, InventoryError, ItemStack,
     MAIN_INVENTORY_END, MAIN_INVENTORY_START, MAX_VANILLA_STACK_SIZE, OFFHAND_SLOT,
     PLAYER_INVENTORY_SLOTS,
+};
+pub use item_entity::{
+    DEFAULT_ITEM_PICKUP_DELAY_TICKS, ITEM_ENTITY_AIR_DRAG, ITEM_ENTITY_DATA_KEY,
+    ITEM_ENTITY_GRAVITY_PER_TICK, ITEM_ENTITY_GROUND_DRAG, ITEM_ENTITY_LIFETIME_TICKS,
+    ITEM_ENTITY_VERTICAL_GROUND_DRAG, ItemEntityData, ItemEntityError, item_entity_data,
+    spawn_item_entity, spawn_item_entity_with_default_delay, tick_item_entities,
 };
 pub use persistence::{GameSnapshot, PersistenceError};
 pub use player::{
