@@ -1,0 +1,1 @@
+//! Authoritative status-effect state.
