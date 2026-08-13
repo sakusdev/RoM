@@ -1,1 +1,19 @@
 name: Agent Format
+
+on:
+  push:
+    branches: [agent/item-entity-domain]
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all
+      - uses: actions/upload-artifact@v4
+        with:
+          name: formatted-ferrum-game
+          path: crates/ferrum-game/src
