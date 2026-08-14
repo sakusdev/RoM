@@ -82,11 +82,12 @@ pub fn destroy_speed(tool: Option<MiningTool>, block: BlockMining, ctx: MiningCo
     let preferred = tool.is_some_and(|t| t.class == block.preferred_tool);
     let mut speed = if preferred {
         tool.map_or(1.0, |t| {
-            let mut s = t.tier.speed();
+            let mut speed = t.tier.speed();
             if t.efficiency_level > 0 {
-                s += f64::from(t.efficiency_level * t.efficiency_level) + 1.0;
+                let efficiency = u32::from(t.efficiency_level);
+                speed += f64::from(efficiency.saturating_mul(efficiency)) + 1.0;
             }
-            s
+            speed
         })
     } else {
         1.0
@@ -118,11 +119,15 @@ pub fn ticks_to_break(
     block: BlockMining,
     ctx: MiningContext,
 ) -> Option<u32> {
-    let p = progress_per_tick(tool, block, ctx);
-    if p <= 0.0 {
+    let progress = progress_per_tick(tool, block, ctx);
+    if progress <= 0.0 || !progress.is_finite() {
         return None;
     }
-    Some((1.0 / p).ceil().clamp(1.0, f64::from(u32::MAX)) as u32)
+    Some(
+        (1.0 / progress)
+            .ceil()
+            .clamp(1.0, f64::from(u32::MAX)) as u32,
+    )
 }
 #[must_use]
 pub const fn durability_cost(successful_break: bool, creative: bool) -> u32 {
@@ -141,28 +146,28 @@ mod tests {
     }
     #[test]
     fn pickaxe_is_faster() {
-        let t = MiningTool {
+        let tool = MiningTool {
             class: ToolClass::Pickaxe,
             tier: ToolTier::Iron,
             efficiency_level: 0,
             durability: 100,
         };
         assert!(
-            destroy_speed(Some(t), stone(), MiningContext::default())
+            destroy_speed(Some(tool), stone(), MiningContext::default())
                 > destroy_speed(None, stone(), MiningContext::default())
         );
     }
     #[test]
     fn air_and_water_slow_breaking() {
-        let t = MiningTool {
+        let tool = MiningTool {
             class: ToolClass::Pickaxe,
             tier: ToolTier::Iron,
             efficiency_level: 0,
             durability: 100,
         };
-        let normal = destroy_speed(Some(t), stone(), MiningContext::default());
+        let normal = destroy_speed(Some(tool), stone(), MiningContext::default());
         let slow = destroy_speed(
-            Some(t),
+            Some(tool),
             stone(),
             MiningContext {
                 on_ground: false,
@@ -171,5 +176,17 @@ mod tests {
             },
         );
         assert!(slow < normal);
+    }
+    #[test]
+    fn high_efficiency_levels_do_not_overflow() {
+        let tool = MiningTool {
+            class: ToolClass::Pickaxe,
+            tier: ToolTier::Diamond,
+            efficiency_level: u8::MAX,
+            durability: 1,
+        };
+        let speed = destroy_speed(Some(tool), stone(), MiningContext::default());
+        assert!(speed.is_finite());
+        assert!(speed > 65_000.0);
     }
 }
