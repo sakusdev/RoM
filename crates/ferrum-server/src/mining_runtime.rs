@@ -1,8 +1,9 @@
 use ferrum_game::{
-    BlockMining, BlockPos, GameEvent, GameMode, GameStateError, HOTBAR_START, MiningContext,
-    MiningSessionError, MiningTool, PlayerUuid, ToolClass, ToolTier, damage_item, item_damage,
-    ticks_to_break, vanilla_max_durability,
+    BlockMining, BlockPos, DurabilityError, GameEvent, GameMode, GameStateError, HOTBAR_START,
+    MAX_MINING_TICKS, MiningContext, MiningSessionError, MiningTool, PlayerUuid, ToolClass,
+    ToolTier, damage_item, item_damage, ticks_to_break, vanilla_max_durability,
 };
+use thiserror::Error;
 
 use crate::game_runtime::{GameRuntimeError, SharedGameRuntime};
 
@@ -12,16 +13,26 @@ pub struct MiningStart {
     pub started_at_tick: u64,
 }
 
+#[derive(Debug, Error)]
+pub enum MiningRuntimeError {
+    #[error(transparent)]
+    Runtime(#[from] GameRuntimeError),
+    #[error(transparent)]
+    Session(#[from] MiningSessionError),
+    #[error(transparent)]
+    Durability(#[from] DurabilityError),
+}
+
 impl SharedGameRuntime {
     pub fn selected_mining_tool(
         &self,
         uuid: PlayerUuid,
-    ) -> Result<Option<MiningTool>, GameRuntimeError> {
+    ) -> Result<Option<MiningTool>, MiningRuntimeError> {
         let selected = self.selected_item(uuid)?;
         Ok(selected.and_then(|selected| mining_tool_from_item(selected.stack.item())))
     }
 
-    pub fn mining_context(&self, uuid: PlayerUuid) -> Result<MiningContext, GameRuntimeError> {
+    pub fn mining_context(&self, uuid: PlayerUuid) -> Result<MiningContext, MiningRuntimeError> {
         self.with_state(|state| {
             let player = state.player(uuid)?;
             let on_ground = player
@@ -35,7 +46,7 @@ impl SharedGameRuntime {
                 fatigue: 1.0,
             })
         })?
-        .ok_or(GameRuntimeError::State(GameStateError::UnknownPlayer { uuid }))
+        .ok_or_else(|| GameRuntimeError::State(GameStateError::UnknownPlayer { uuid }).into())
     }
 
     pub fn begin_mining(
@@ -43,7 +54,7 @@ impl SharedGameRuntime {
         uuid: PlayerUuid,
         position: BlockPos,
         block: BlockMining,
-    ) -> Result<Option<MiningStart>, GameRuntimeError> {
+    ) -> Result<Option<MiningStart>, MiningRuntimeError> {
         let tool = self.selected_mining_tool(uuid)?;
         let context = self.mining_context(uuid)?;
         let game_mode = self
@@ -59,19 +70,19 @@ impl SharedGameRuntime {
             let Some(required_ticks) = ticks_to_break(tool, block, context) else {
                 return Ok(None);
             };
-            required_ticks
+            required_ticks.min(MAX_MINING_TICKS)
         };
         let started_at_tick = self.with_state(|state| state.time().game_time)?;
-        self.with_state_mut(|state| {
+        let session_result = self.with_state_mut(|state| {
             let player = state.player_mut(uuid).ok_or(GameRuntimeError::State(
                 GameStateError::UnknownPlayer { uuid },
             ))?;
-            player
+            Ok(player
                 .gameplay
                 .begin_mining(position, started_at_tick, required_ticks)
-                .map_err(|error| GameRuntimeError::Mining(error))?;
-            Ok(())
+                .map(|_| ()))
         })?;
+        session_result?;
         Ok(Some(MiningStart {
             required_ticks,
             started_at_tick,
@@ -82,63 +93,58 @@ impl SharedGameRuntime {
         &self,
         uuid: PlayerUuid,
         position: BlockPos,
-    ) -> Result<bool, GameRuntimeError> {
-        self.with_state_mut(|state| {
+    ) -> Result<bool, MiningRuntimeError> {
+        Ok(self.with_state_mut(|state| {
             let player = state.player_mut(uuid).ok_or(GameRuntimeError::State(
                 GameStateError::UnknownPlayer { uuid },
             ))?;
             Ok(player.gameplay.abort_mining(position))
-        })
+        })?)
     }
 
     pub fn finish_mining(
         &self,
         uuid: PlayerUuid,
         position: BlockPos,
-    ) -> Result<bool, GameRuntimeError> {
+    ) -> Result<bool, MiningRuntimeError> {
         let current_tick = self.with_state(|state| state.time().game_time)?;
-        self.with_state_mut(|state| {
+        let outcome = self.with_state_mut(|state| {
             let player = state.player_mut(uuid).ok_or(GameRuntimeError::State(
                 GameStateError::UnknownPlayer { uuid },
             ))?;
-            match player.gameplay.finish_mining(position, current_tick) {
-                Ok(_) => Ok(true),
-                Err(
-                    MiningSessionError::NoActiveSession
-                    | MiningSessionError::WrongTarget { .. }
-                    | MiningSessionError::TooEarly { .. },
-                ) => Ok(false),
-                Err(error) => Err(GameRuntimeError::Mining(error)),
-            }
-        })
+            Ok(player.gameplay.finish_mining(position, current_tick))
+        })?;
+        match outcome {
+            Ok(_) => Ok(true),
+            Err(
+                MiningSessionError::NoActiveSession
+                | MiningSessionError::WrongTarget { .. }
+                | MiningSessionError::TooEarly { .. },
+            ) => Ok(false),
+            Err(error) => Err(error.into()),
+        }
     }
 
     pub fn damage_selected_tool_after_break(
         &self,
         uuid: PlayerUuid,
         seed: u64,
-    ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+    ) -> Result<Vec<GameEvent>, MiningRuntimeError> {
+        let Some(selected) = self.selected_item(uuid)? else {
+            return Ok(Vec::new());
+        };
+        if selected.game_mode == GameMode::Creative {
+            return Ok(Vec::new());
+        }
+        let Some(max_damage) = vanilla_max_durability(selected.stack.item()) else {
+            return Ok(Vec::new());
+        };
+        let result = damage_item(&selected.stack, max_damage, 1, 0, seed)?;
         let events = self.with_state_mut(|state| {
             let player = state.player_mut(uuid).ok_or(GameRuntimeError::State(
                 GameStateError::UnknownPlayer { uuid },
             ))?;
-            if player.game_mode == GameMode::Creative {
-                return Ok(Vec::new());
-            }
             let slot = HOTBAR_START + usize::from(player.inventory.selected_hotbar());
-            let Some(stack) = player
-                .inventory
-                .slot(slot)
-                .map_err(|error| GameRuntimeError::State(GameStateError::Inventory(error)))?
-                .cloned()
-            else {
-                return Ok(Vec::new());
-            };
-            let Some(max_damage) = vanilla_max_durability(stack.item()) else {
-                return Ok(Vec::new());
-            };
-            let result = damage_item(&stack, max_damage, 1, 0, seed)
-                .map_err(GameRuntimeError::Durability)?;
             player
                 .inventory
                 .set_slot(slot, result.stack.clone())
@@ -147,7 +153,7 @@ impl SharedGameRuntime {
                 GameEvent::InventorySlotChanged {
                     uuid,
                     slot,
-                    stack: result.stack,
+                    stack: result.stack.clone(),
                 },
                 GameEvent::ContainerContentChanged {
                     uuid,
