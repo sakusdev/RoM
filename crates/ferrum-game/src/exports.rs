@@ -66,6 +66,13 @@ pub use crate::item_entity::{
 };
 pub use crate::knockback::{KnockbackOutcome, MAX_KNOCKBACK_SPEED};
 pub use crate::loot::{LootContext, LootEntry, LootError, LootPool, LootTable, simple_block_drop};
+pub use crate::mining::{
+    BlockMining, MiningContext, MiningTool, ToolClass, ToolTier, correct_tool, destroy_speed,
+    durability_cost, progress_per_tick, ticks_to_break,
+};
+pub use crate::mining_session::{
+    MAX_MINING_TICKS, MiningCompletion, MiningSession, MiningSessionError,
+};
 pub use crate::persistence::{GameSnapshot, PersistenceError};
 pub use crate::player::{
     Abilities, Difficulty, Experience, GameMode, PlayerError, PlayerState, PlayerUuid, Vitals,
