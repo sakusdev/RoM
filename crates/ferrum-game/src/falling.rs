@@ -33,8 +33,6 @@ impl GameState {
             .map(|entity| entity.transform)
             .ok_or(GameStateError::UnknownPlayer { uuid })?;
 
-        // First perform the ordinary authoritative movement validation/update.
-        // Fall state is mutated only after this succeeds.
         let mut events = self.move_player(uuid, transform)?;
         let outcome = self.update_player_fall_state(uuid, previous, transform)?;
 
@@ -61,7 +59,6 @@ impl GameState {
             .player_mut(uuid)
             .ok_or(GameStateError::UnknownPlayer { uuid })?;
 
-        // Include the final downward segment carried by the landing packet.
         if downward_distance > 0.0 && (!previous.on_ground || !current.on_ground || landed) {
             player.gameplay.add_fall_distance(downward_distance);
         }
@@ -94,8 +91,7 @@ impl GameState {
             .clamp(0.0, 100.0) as f32;
 
         player.gameplay.reset_fall_distance();
-        let damage = fall_damage(accumulated_distance, safe_fall_distance, multiplier)
-            .unwrap_or(0.0);
+        let damage = fall_damage(accumulated_distance, safe_fall_distance, multiplier);
 
         Ok(FallMovementOutcome {
             downward_distance,
