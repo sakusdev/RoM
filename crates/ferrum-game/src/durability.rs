@@ -101,7 +101,7 @@ fn should_apply_damage(unbreaking_level: u8, rng: &mut SplitMix64) -> bool {
         return true;
     }
     let denominator = u32::from(unbreaking_level) + 1;
-    rng.next_u32().is_multiple_of(denominator)
+    rng.next_u32() % denominator == 0
 }
 
 #[must_use]
