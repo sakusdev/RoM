@@ -2,6 +2,7 @@ from pathlib import Path
 import os
 
 ROOT = Path(__file__).resolve().parents[2]
+WORKFLOWS = ROOT / ".github" / "workflows"
 
 DIR_RENAMES = {
     "ferrum-model": "rom-model",
@@ -31,6 +32,11 @@ PLACEHOLDER = "__ROM_PRESERVE_FERRUMC__"
 
 def should_edit(path: Path) -> bool:
     if ".git" in path.parts or "target" in path.parts:
+        return False
+    # GitHub Actions' GITHUB_TOKEN cannot push workflow-file mutations in this repo.
+    # Workflows are updated separately through the GitHub connector after this
+    # validated workspace migration lands.
+    if WORKFLOWS in path.parents:
         return False
     return path.suffix in TEXT_SUFFIXES or path.name in TEXT_NAMES
 
@@ -82,6 +88,13 @@ for path in ROOT.rglob("*"):
     if updated != original:
         path.write_text(updated, encoding="utf-8")
 
+# The porting-tool CLI used a bare Ferrum package/binary name, so it needs an
+# explicit migration in addition to the ferrum-* prefix replacements.
+cli_manifest = ROOT / "crates" / "rom-cli" / "Cargo.toml"
+manifest = cli_manifest.read_text(encoding="utf-8")
+manifest = manifest.replace('name = "ferrum"', 'name = "rom-cli"')
+cli_manifest.write_text(manifest, encoding="utf-8")
+
 # The public server executable is the product name itself, while the package stays
 # rom-server to keep workspace naming regular.
 server_manifest = ROOT / "crates" / "rom-server" / "Cargo.toml"
@@ -101,7 +114,7 @@ for path in ROOT.rglob("*"):
         text = path.read_text(encoding="utf-8")
     except UnicodeDecodeError:
         continue
-    if "ferrum-" in text or "ferrum_" in text:
+    if "ferrum-" in text or "ferrum_" in text or 'name = "ferrum"' in text:
         violations.append(str(path.relative_to(ROOT)))
 if violations:
     raise RuntimeError("legacy Ferrum crate identifiers remain in: " + ", ".join(violations))
