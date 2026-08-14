@@ -87,6 +87,8 @@ impl MiningSession {
 
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 pub enum MiningSessionError {
+    #[error("there is no active mining session")]
+    NoActiveSession,
     #[error("required mining ticks {required_ticks} are outside 1..={MAX_MINING_TICKS}")]
     InvalidRequiredTicks { required_ticks: u32 },
     #[error("mining target changed from {expected:?} to {actual:?}")]
