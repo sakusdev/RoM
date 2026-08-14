@@ -12,7 +12,7 @@ RoM runs as a native executable rather than a JAR and does not require Java or a
 
 ## Install a release
 
-The newest automatically numbered build is available on the [GitHub Releases page](https://github.com/sakusdev/RoM/releases/latest). Every successful `master` release publishes native `ferrum-server` and `rom-bootstrap` binaries, platform archives, checksums, `VERSION`, and `BUILD_INFO` metadata.
+The newest automatically numbered build is available on the [GitHub Releases page](https://github.com/sakusdev/RoM/releases/latest). Every successful `master` release publishes native `rom-server` and `rom-bootstrap` binaries, platform archives, checksums, `VERSION`, and `BUILD_INFO` metadata.
 
 ### Desktop and normal Linux
 
@@ -27,7 +27,7 @@ Download the archive for your platform, extract it, and run:
 ./rom-bootstrap run --instance ./rom-instance
 ```
 
-On Windows, use `rom-bootstrap.exe` and `ferrum-server.exe`.
+On Windows, use `rom-bootstrap.exe` and `rom-server.exe`.
 
 ### Android Termux
 
@@ -38,7 +38,7 @@ chmod +x install-termux.sh
 ./install-termux.sh
 ```
 
-The installer selects the Android Bionic AArch64 build, verifies SHA-256 checksums, and installs `rom-bootstrap` and `ferrum-server` into the Termux prefix.
+The installer selects the Android Bionic AArch64 build, verifies SHA-256 checksums, and installs `rom-bootstrap` and `rom-server` into the Termux prefix.
 
 ### Pixel Terminal
 
@@ -55,7 +55,7 @@ Set `ROM_INSTALL_DIR` to choose another installation directory. Set `ROM_VERSION
 
 ### Server console
 
-While `ferrum-server` is running interactively, enter commands without a leading slash:
+While `rom-server` is running interactively, enter commands without a leading slash:
 
 ```text
 help
@@ -122,7 +122,7 @@ A client that closes immediately after login can leave this server-side message:
 cannot read configuration acknowledged packet: failed to fill whole buffer
 ```
 
-This means the client disconnected before acknowledging the end of Configuration; it is not an EULA or TCP bind failure. Builds containing the complete 26.1.2 network tag manifest fix the known empty-Tags cause. Update both `rom-bootstrap` and `ferrum-server`, reinstall the native server into the instance, and regenerate version metadata when moving from an older build:
+This means the client disconnected before acknowledging the end of Configuration; it is not an EULA or TCP bind failure. Builds containing the complete 26.1.2 network tag manifest fix the known empty-Tags cause. Update both `rom-bootstrap` and `rom-server`, reinstall the native server into the instance, and regenerate version metadata when moving from an older build:
 
 ```bash
 rom-bootstrap setup \
@@ -170,7 +170,7 @@ If it still disconnects, keep the exact client error and the final `connection c
 
 ### Admin web GUI
 
-`ferrum-server` starts a lightweight local dashboard at
+`rom-server` starts a lightweight local dashboard at
 [`http://127.0.0.1:25575`](http://127.0.0.1:25575) by default. It is embedded in
 the native binary and loads no external assets.
 
@@ -188,7 +188,7 @@ proxy. On Termux or Pixel Terminal, leave the loopback default and open
 `http://127.0.0.1:25575` in the Android browser.
 
 ```bash
-ferrum-server \
+rom-server \
   --config ./rom-instance/server.toml \
   --version-pack ./rom-instance/versions/26.1.2/26.1.2.rompack \
   --admin-bind 127.0.0.1:25575
@@ -236,7 +236,7 @@ RoM follows a native, installer-style bootstrap model:
 5. The JAR remains in the local cache and is never bundled into a RoM Release.
 6. RoM reads only the bounded resources required to generate compatibility metadata.
 7. The deterministic `.rompack` records source hashes, packet and registry metadata, item and component palettes, and patch-set identity.
-8. `ferrum-server` validates the pack before accepting connections.
+8. `rom-server` validates the pack before accepting connections.
 
 The Bootstrap process does not execute, decompile, translate, bytecode-patch, or redistribute the official server JAR. See [`docs/BOOTSTRAP.md`](docs/BOOTSTRAP.md), [`docs/RELEASES.md`](docs/RELEASES.md), and [`NOTICE.md`](NOTICE.md).
 
@@ -245,7 +245,7 @@ The Bootstrap process does not execute, decompile, translate, bytecode-patch, or
 The workspace requires Rust **1.85 or newer**.
 
 ```bash
-cargo build --locked --release -p rom-bootstrap -p ferrum-server
+cargo build --locked --release -p rom-bootstrap -p rom-server
 ./target/release/rom-bootstrap setup \
   --instance ./rom-instance \
   --version 26.1.2 \
@@ -268,7 +268,7 @@ cargo test --workspace
 ```text
 rom-instance/
 ├── bin/
-│   └── ferrum-server
+│   └── rom-server
 ├── cache/
 │   └── official/
 │       └── 26.1.2/
@@ -303,15 +303,15 @@ Release downloads include per-file `.sha256` files and a combined `SHA256SUMS`. 
 RoM separates version-independent gameplay/runtime logic from version-specific wire metadata.
 
 - `rom-bootstrap` — official-source verification, `.rompack` generation, diagnostics, installation, and instance management
-- `ferrum-rompack` — deterministic compatibility-pack encoding, integrity validation, and bounded decoding
-- `ferrum-server` — native TCP server, connection lifecycle, replication, and gameplay integration
-- `ferrum-runtime` — fixed-rate scheduling, bounded inputs, workers, and deterministic mutation ordering
-- `ferrum-protocol` — state machine, packet tables, typed packet catalog, and framing
-- `ferrum-configuration` — Configuration-state payload codecs
-- `ferrum-play` — Play-state packet decoding and encoding, movement, ItemStack, inventory, and container codecs
-- `ferrum-game` — authoritative players, inventory, container transactions, mutations, and game events
-- `ferrum-world` — chunks, views, Anvil loading, and world primitives
-- `ferrum-version-26-1-2` — generated and hand-audited compatibility profile for Minecraft 26.1.2
+- `rom-pack` — deterministic compatibility-pack encoding, integrity validation, and bounded decoding
+- `rom-server` — native TCP server, connection lifecycle, replication, and gameplay integration
+- `rom-runtime` — fixed-rate scheduling, bounded inputs, workers, and deterministic mutation ordering
+- `rom-protocol` — state machine, packet tables, typed packet catalog, and framing
+- `rom-configuration` — Configuration-state payload codecs
+- `rom-play` — Play-state packet decoding and encoding, movement, ItemStack, inventory, and container codecs
+- `rom-game` — authoritative players, inventory, container transactions, mutations, and game events
+- `rom-world` — chunks, views, Anvil loading, and world primitives
+- `rom-version-26-1-2` — generated and hand-audited compatibility profile for Minecraft 26.1.2
 
 ## License
 

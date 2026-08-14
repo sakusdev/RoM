@@ -1,7 +1,7 @@
 [server]
 profile = "26.1.2"
 bind = "127.0.0.1:25565"
-motd = "Ferrum native Rust server"
+motd = "RoM native Rust server"
 max_players = 20
 online_players = 0
 allow_offline_login = true
@@ -13,7 +13,7 @@ previews_chat = false
 [play]
 chunk_radius = 1
 simulation_distance = 2
-welcome_message = "Ferrum native Rust world loaded"
+welcome_message = "RoM native Rust world loaded"
 keep_alive_interval_seconds = 15
 
 [configuration]

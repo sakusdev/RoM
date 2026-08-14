@@ -1,7 +1,7 @@
 use std::{collections::BTreeSet, fs, path::Path};
 
 use anyhow::{Context, Result, bail};
-use ferrum_rompack::{RomPackDataComponent, RomPackEntityType, RomPackItem};
+use rom_pack::{RomPackDataComponent, RomPackEntityType, RomPackItem};
 use serde_json::Value;
 
 const MAX_REGISTRY_REPORT_BYTES: u64 = 64 * 1024 * 1024;

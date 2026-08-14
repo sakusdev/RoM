@@ -49,13 +49,13 @@ The current server milestone provides:
 - Live online-player count in server-list status responses
 - Version-neutral in-memory world coordinates, sections, block states, biome IDs, and chunk views
 
-The socket runtime now uses `ProtocolProfile` and `ProtocolSession` from Handshake through Play. The 26.1.2 profile validates the handshake protocol, negotiates the vanilla core known pack, sends the full synchronized registry set, completes Configuration, sends the flat-overworld Play bootstrap, validates teleport and chunk-batch acknowledgements, and enters a movement-aware Play loop. The server tracks each player's authoritative position and rotation, updates the chunk-cache center only after crossing a chunk boundary, sends newly visible chunks, unloads chunks that leave the configured bounded view, keeps the server-list online-player count synchronized with Play connections, and continues Keep Alive validation while processing movement at the configured cadence. The standalone `ferrum-runtime` crate now provides deterministic scheduling and bounded input-ordering primitives, and the Play loop can route decoded block mutation events through shared in-memory world state. If the active profile exposes a clientbound Block Update packet ID, accepted mutations are written back to the acting client and queued for peers; the synchronous Play loop drains those peer queues after inbound packets and transient read timeouts. Dedicated Play reader/writer queues, a shared 20 TPS runtime, authoritative gameplay persistence, inventory replication, join/leave messages, offline-mode chat and commands, multi-client player spawning, relative/absolute movement, tab-list lifecycle, metadata placeholders, head rotation, equipment synchronization, authoritative damage/healing state, Hurt Animation, combat death, client-command respawn, and subject-only Set Health replication are implemented. Damage Event source typing, attribute resynchronization, non-player entity gameplay, visibility/range-based entity tracking, and complete Vanilla systems remain incomplete.
+The socket runtime now uses `ProtocolProfile` and `ProtocolSession` from Handshake through Play. The 26.1.2 profile validates the handshake protocol, negotiates the vanilla core known pack, sends the full synchronized registry set, completes Configuration, sends the flat-overworld Play bootstrap, validates teleport and chunk-batch acknowledgements, and enters a movement-aware Play loop. The server tracks each player's authoritative position and rotation, updates the chunk-cache center only after crossing a chunk boundary, sends newly visible chunks, unloads chunks that leave the configured bounded view, keeps the server-list online-player count synchronized with Play connections, and continues Keep Alive validation while processing movement at the configured cadence. The standalone `rom-runtime` crate now provides deterministic scheduling and bounded input-ordering primitives, and the Play loop can route decoded block mutation events through shared in-memory world state. If the active profile exposes a clientbound Block Update packet ID, accepted mutations are written back to the acting client and queued for peers; the synchronous Play loop drains those peer queues after inbound packets and transient read timeouts. Dedicated Play reader/writer queues, a shared 20 TPS runtime, authoritative gameplay persistence, inventory replication, join/leave messages, offline-mode chat and commands, multi-client player spawning, relative/absolute movement, tab-list lifecycle, metadata placeholders, head rotation, equipment synchronization, authoritative damage/healing state, Hurt Animation, combat death, client-command respawn, and subject-only Set Health replication are implemented. Damage Event source typing, attribute resynchronization, non-player entity gameplay, visibility/range-based entity tracking, and complete Vanilla systems remain incomplete.
 
 ## M9 — Binary NBT foundation
 
 Status: complete.
 
-- Add a standalone `ferrum-nbt` workspace crate.
+- Add a standalone `rom-nbt` workspace crate.
 - Support all standard binary NBT tag types.
 - Encode named roots, empty-name roots, and protocol-anonymous roots.
 - Decode untrusted input with depth, string, and collection limits.
@@ -88,7 +88,7 @@ Status: complete for the selected 26.1.2 configuration flow.
 
 Completed:
 
-- Add a standalone `ferrum-configuration` payload-encoder crate.
+- Add a standalone `rom-configuration` payload-encoder crate.
 - Encode Registry Data entries with optional anonymous NBT values.
 - Encode Feature Flags and registry-grouped Tags.
 - Consume Login Acknowledged in the live socket runtime.
@@ -115,7 +115,7 @@ Status: complete for the first 26.1.2 Play bootstrap milestone.
 
 Completed:
 
-- Add a standalone deterministic `ferrum-play` payload-codec crate.
+- Add a standalone deterministic `rom-play` payload-codec crate.
 - Send Login/Join Game data for one static overworld dimension.
 - Send default spawn and absolute player-position synchronization.
 - Validate the client's teleport acknowledgement and reject the wrong teleport ID.
@@ -178,7 +178,7 @@ Status: complete for version-neutral scheduling and input-ordering primitives.
 
 Completed:
 
-- Add a standalone `ferrum-runtime` crate with no Minecraft wire-format dependency.
+- Add a standalone `rom-runtime` crate with no Minecraft wire-format dependency.
 - Add stable `Tick`, `ConnectionId`, and per-connection `InputSequence` identifiers.
 - Add a fixed-rate clock with a standard 20 TPS server constructor.
 - Cap catch-up work and explicitly report skipped overdue ticks to prevent an unbounded catch-up spiral.
@@ -209,7 +209,7 @@ Status: implemented through deterministic in-memory chunks, Anvil reading, and v
 
 Completed foundation:
 
-- Add a standalone `ferrum-world` crate.
+- Add a standalone `rom-world` crate.
 - Add region-independent chunk coordinates and version-neutral block-state and biome IDs.
 - Implement mutable 16×16×16 chunk sections and 4×4×4 biome containers.
 - Track non-air block counts incrementally.

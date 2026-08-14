@@ -1,18 +1,18 @@
 [workspace]
 members = [
-    "crates/ferrum-model",
-    "crates/ferrum-importer",
-    "crates/ferrum-cli",
-    "crates/ferrum-server",
-    "crates/ferrum-runtime",
-    "crates/ferrum-nbt",
-    "crates/ferrum-protocol",
-    "crates/ferrum-configuration",
-    "crates/ferrum-play",
-    "crates/ferrum-world",
-    "crates/ferrum-game",
-    "crates/ferrum-version-26-1-2",
-    "crates/ferrum-rompack",
+    "crates/rom-model",
+    "crates/rom-importer",
+    "crates/rom-cli",
+    "crates/rom-server",
+    "crates/rom-runtime",
+    "crates/rom-nbt",
+    "crates/rom-protocol",
+    "crates/rom-configuration",
+    "crates/rom-play",
+    "crates/rom-world",
+    "crates/rom-game",
+    "crates/rom-version-26-1-2",
+    "crates/rom-pack",
     "crates/rom-bootstrap",
 ]
 resolver = "2"
@@ -22,7 +22,7 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 rust-version = "1.85"
-authors = ["Ferrum contributors"]
+authors = ["RoM contributors"]
 repository = "https://github.com/sakusdev/RoM"
 
 [workspace.dependencies]

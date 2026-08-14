@@ -1,7 +1,7 @@
 use std::{fs, path::Path};
 
 use anyhow::{Context, Result, bail};
-use ferrum_protocol::{
+use rom_protocol::{
     PacketCatalog, PacketDescriptor, PacketDirection, ProtocolPhase, normalize_packet_name,
 };
 use serde_json::{Map, Value};
@@ -128,7 +128,7 @@ fn packet_id(value: &Value) -> Result<i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ferrum_protocol::PacketKind;
+    use rom_protocol::PacketKind;
 
     #[test]
     fn parses_modern_mojang_packet_report_shape() {

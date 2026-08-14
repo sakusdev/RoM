@@ -67,9 +67,9 @@ install_asset() {
   install -m 0755 "${TMP_DIR}/${asset}" "${INSTALL_DIR}/${destination}"
 }
 
-install_asset "ferrum-server-${PLATFORM}" 'ferrum-server'
+install_asset "rom-server-${PLATFORM}" 'rom-server'
 install_asset "rom-bootstrap-${PLATFORM}" 'rom-bootstrap'
 
 log "Installed RoM ${RELEASE_TAG} into ${INSTALL_DIR}"
 log 'Run: rom-bootstrap --help'
-log 'Run: ferrum-server --help'
+log 'Run: rom-server --help'

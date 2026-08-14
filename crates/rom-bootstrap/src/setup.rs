@@ -99,7 +99,7 @@ pub fn doctor_instance(instance: impl AsRef<Path>) -> Result<DoctorReport> {
         problems.push("local version pack is missing or invalid".to_owned());
     }
     if !status.native_server_installed {
-        problems.push("native ferrum-server is not installed".to_owned());
+        problems.push("native rom-server is not installed".to_owned());
     }
     if !server_config_present {
         problems.push("server.toml is missing".to_owned());
@@ -165,9 +165,9 @@ fn manifests_share_source(left: &BootstrapManifest, right: &BootstrapManifest) -
 fn adjacent_native_server_binary() -> Option<PathBuf> {
     let directory = env::current_exe().ok()?.parent()?.to_path_buf();
     let candidate = directory.join(if cfg!(windows) {
-        "ferrum-server.exe"
+        "rom-server.exe"
     } else {
-        "ferrum-server"
+        "rom-server"
     });
     candidate.is_file().then_some(candidate)
 }

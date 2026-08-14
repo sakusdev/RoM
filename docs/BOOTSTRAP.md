@@ -27,7 +27,7 @@ For Minecraft 26.1.2, Bootstrap supports the complete ready-to-run workflow:
 10. Add the world data version, overworld section range, required flat-world block-state IDs, and plains biome ID.
 11. Add the dimension ID, dimension-type ID, sea level, flat floor, and deterministic spawn coordinates consumed by Play bootstrap.
 12. Write a deterministic schema-v7 `.rompack` with a container SHA-256 trailer and provenance metadata.
-13. Install the native `ferrum-server` executable from a supplied binary, an adjacent release binary, or a local workspace build.
+13. Install the native `rom-server` executable from a supplied binary, an adjacent release binary, or a local workspace build.
 14. Diagnose the manifest, EULA marker, source artifact, version pack, executable, and configuration before launch.
 15. Revalidate the pack before `rom-bootstrap run`; the native server then builds its `ProtocolProfile`, Configuration registry payloads, Join Game metadata, spawn packets, movement floor, and initial shared world from pack metadata.
 
@@ -36,12 +36,12 @@ The extractor does **not** decompile, translate, execute, or bytecode-patch the 
 ## Build the tools
 
 ```bash
-cargo build --locked --release -p rom-bootstrap -p ferrum-server
+cargo build --locked --release -p rom-bootstrap -p rom-server
 ```
 
 ## Complete an instance in one command
 
-From an extracted native release, the adjacent `ferrum-server` binary is detected automatically:
+From an extracted native release, the adjacent `rom-server` binary is detected automatically:
 
 ```bash
 ./rom-bootstrap setup \
@@ -53,7 +53,7 @@ From an extracted native release, the adjacent `ferrum-server` binary is detecte
 From a source checkout, build and install from the workspace:
 
 ```bash
-cargo build --locked --release -p rom-bootstrap -p ferrum-server
+cargo build --locked --release -p rom-bootstrap -p rom-server
 ./target/release/rom-bootstrap setup \
   --instance ./rom-instance \
   --version 26.1.2 \
@@ -97,7 +97,7 @@ Use `--force` to regenerate an already valid pack. Generation is deterministic f
 
 ### Install the local native server
 
-Build `ferrum-server` from the current RoM checkout and copy it into the instance:
+Build `rom-server` from the current RoM checkout and copy it into the instance:
 
 ```bash
 ./target/release/rom-bootstrap install-local \
@@ -110,7 +110,7 @@ An already-built binary can be installed instead:
 ```bash
 ./target/release/rom-bootstrap install-local \
   --instance ./rom-instance \
-  --server-binary ./target/release/ferrum-server
+  --server-binary ./target/release/rom-server
 ```
 
 ## Inspect the instance
@@ -139,7 +139,7 @@ Machine-readable output:
 ./target/release/rom-bootstrap run --instance ./rom-instance
 ```
 
-Arguments after `--` are forwarded to `ferrum-server`:
+Arguments after `--` are forwarded to `rom-server`:
 
 ```bash
 ./target/release/rom-bootstrap run --instance ./rom-instance -- --help
@@ -150,7 +150,7 @@ Arguments after `--` are forwarded to `ferrum-server`:
 ```text
 rom-instance/
 ├── bin/
-│   └── ferrum-server
+│   └── rom-server
 ├── cache/
 │   └── official/
 │       └── 26.1.2/
@@ -169,7 +169,7 @@ The file under `cache/official` is a user-local official artifact. Do not add in
 
 ## Native release archives
 
-Platform release archives contain both `rom-bootstrap` and `ferrum-server`. After extracting an archive, the full first-run flow is:
+Platform release archives contain both `rom-bootstrap` and `rom-server`. After extracting an archive, the full first-run flow is:
 
 ```bash
 ./rom-bootstrap setup --instance ./rom-instance --version 26.1.2 --accept-minecraft-eula
@@ -177,7 +177,7 @@ Platform release archives contain both `rom-bootstrap` and `ferrum-server`. Afte
 ./rom-bootstrap run --instance ./rom-instance
 ```
 
-The adjacent server executable is detected automatically. Existing development instances containing `bin/rom-server` remain readable, but new installations use `bin/ferrum-server`.
+The adjacent server executable is detected automatically. Existing development instances containing `bin/rom-server` remain readable, but new installations use `bin/rom-server`.
 
 ## Runtime Play policy
 
@@ -187,7 +187,7 @@ Bootstrap writes an explicit bounded Play policy into new `server.toml` files:
 [play]
 chunk_radius = 1
 simulation_distance = 2
-welcome_message = "Ferrum native Rust world loaded"
+welcome_message = "RoM native Rust world loaded"
 keep_alive_interval_seconds = 15
 ```
 
@@ -195,7 +195,7 @@ The chunk radius controls both initial in-memory chunk seeding and each player's
 
 ## Runtime world source
 
-By default, Ferrum starts from the deterministic in-memory flat world. To seed chunks from a Minecraft Anvil region file, configure one source in `server.toml`:
+By default, RoM starts from the deterministic in-memory flat world. To seed chunks from a Minecraft Anvil region file, configure one source in `server.toml`:
 
 ```toml
 [world]

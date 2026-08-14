@@ -70,7 +70,7 @@ install_asset() {
   install -m 0755 "${TMP_DIR}/${asset}" "${INSTALL_DIR}/${destination}"
 }
 
-install_asset "ferrum-server-${PLATFORM}" 'ferrum-server'
+install_asset "rom-server-${PLATFORM}" 'rom-server'
 install_asset "rom-bootstrap-${PLATFORM}" 'rom-bootstrap'
 
 log "Installed RoM ${RELEASE_TAG} into ${INSTALL_DIR}"
@@ -78,4 +78,4 @@ if [[ ":${PATH}:" != *":${INSTALL_DIR}:"* ]]; then
   log "Add this line to ~/.bashrc: export PATH=\"${INSTALL_DIR}:\$PATH\""
 fi
 log 'Run: rom-bootstrap --help'
-log 'Run: ferrum-server --help'
+log 'Run: rom-server --help'

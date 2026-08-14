@@ -15,7 +15,7 @@ Every archive contains a `VERSION` file and a `BUILD_INFO` file containing the r
 
 ## Published artifacts
 
-Each release includes `ferrum-server` and `rom-bootstrap` for:
+Each release includes `rom-server` and `rom-bootstrap` for:
 
 - Windows x86_64
 - Linux x86_64

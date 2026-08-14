@@ -54,7 +54,7 @@ enum Command {
         #[arg(long, default_value = ".")]
         workspace: PathBuf,
 
-        /// Existing ferrum-server binary to install. A sibling release binary is detected automatically.
+        /// Existing rom-server binary to install. A sibling release binary is detected automatically.
         #[arg(long)]
         server_binary: Option<PathBuf>,
 
@@ -109,7 +109,7 @@ enum Command {
         json: bool,
     },
 
-    /// Build ferrum-server from a local RoM checkout or install an existing native binary.
+    /// Build rom-server from a local RoM checkout or install an existing native binary.
     InstallLocal {
         /// Prepared RoM instance directory.
         #[arg(long, default_value = "rom-instance")]
@@ -119,7 +119,7 @@ enum Command {
         #[arg(long, default_value = ".")]
         workspace: PathBuf,
 
-        /// Existing ferrum-server binary to install instead of building the workspace.
+        /// Existing rom-server binary to install instead of building the workspace.
         #[arg(long)]
         server_binary: Option<PathBuf>,
     },
@@ -152,7 +152,7 @@ enum Command {
         #[arg(long, default_value = "rom-instance")]
         instance: PathBuf,
 
-        /// Additional arguments passed to ferrum-server after `--`.
+        /// Additional arguments passed to rom-server after `--`.
         #[arg(last = true)]
         server_args: Vec<OsString>,
     },

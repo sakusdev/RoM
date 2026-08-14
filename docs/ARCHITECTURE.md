@@ -4,10 +4,10 @@
 JAR/CLASS input
     │
     ▼
-ferrum-importer          Fault-tolerant archive and class-file ingestion
+rom-importer          Fault-tolerant archive and class-file ingestion
     │
     ▼
-ferrum-model             Stable serializable models and future IR contracts
+rom-model             Stable serializable models and future IR contracts
     │
     ├── JSON reports      Human inspection, diffs, compatibility database
     ├── typed IR          Stack bytecode → CFG → explicit values
@@ -46,14 +46,14 @@ Implementation order:
 ## Native server path
 
 ```text
-ferrum-version-26-1-2   Exact protocol IDs and version-specific numeric IDs
+rom-version-26-1-2   Exact protocol IDs and version-specific numeric IDs
           │
-          ├── ferrum-configuration   Known packs, registries, features, tags
-          ├── ferrum-play            Play payload and palette/light encoding
-          └── ferrum-world           Version-neutral coordinates and chunk state
+          ├── rom-configuration   Known packs, registries, features, tags
+          ├── rom-play            Play payload and palette/light encoding
+          └── rom-world           Version-neutral coordinates and chunk state
                        │
                        ▼
-                 ferrum-server        Socket runtime and protocol orchestration
+                 rom-server        Socket runtime and protocol orchestration
 ```
 
 The world crate does not know packet IDs or Minecraft-version numeric registries. The Play codec does not own authoritative world mutation. The server runtime orders Configuration, Join Game, chunk batches, acknowledgements, and Keep Alive while preserving deterministic state transitions.

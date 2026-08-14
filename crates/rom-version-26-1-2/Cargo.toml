@@ -1,0 +1,11 @@
+[package]
+name = "rom-version-26-1-2"
+description = "Built-in Minecraft Java Edition 26.1.2 protocol profile for RoM"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rom-configuration = { path = "../rom-configuration" }
+rom-protocol = { path = "../rom-protocol" }

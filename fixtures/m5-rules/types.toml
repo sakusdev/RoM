@@ -1,7 +1,7 @@
 [java_types]
 "java/lang/String" = "String"
 "java/util/UUID" = "uuid::Uuid"
-"net/minecraft/util/Identifier" = "ferrum_types::Identifier"
-"net/minecraft/util/math/BlockPos" = "ferrum_types::BlockPos"
-"net/minecraft/util/math/ChunkPos" = "ferrum_types::ChunkPos"
-"net/minecraft/item/ItemStack" = "ferrum_inventory::ItemStack"
+"net/minecraft/util/Identifier" = "rom_types::Identifier"
+"net/minecraft/util/math/BlockPos" = "rom_types::BlockPos"
+"net/minecraft/util/math/ChunkPos" = "rom_types::ChunkPos"
+"net/minecraft/item/ItemStack" = "rom_inventory::ItemStack"

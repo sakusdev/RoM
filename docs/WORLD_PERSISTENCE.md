@@ -10,7 +10,7 @@ Both files are written through temporary files and atomically replaced. The serv
 The same autosave interval controls gameplay and world snapshots. A value of zero disables periodic saves but final shutdown saves remain enabled. The `save-all` command requests both snapshots and reports their paths and sizes.
 
 ```bash
-ferrum-server \
+rom-server \
   --config server.toml \
   --version-pack versions/26.1.2/26.1.2.rompack \
   --game-state game-state.json \

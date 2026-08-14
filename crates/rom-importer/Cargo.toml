@@ -1,0 +1,16 @@
+[package]
+name = "rom-importer"
+description = "Fault-tolerant JAR and JVM class-file importer for RoM"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rom-model = { path = "../rom-model" }
+ristretto_classfile.workspace = true
+thiserror.workspace = true
+zip.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

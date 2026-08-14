@@ -1,0 +1,11 @@
+[package]
+name = "rom-configuration"
+description = "Minecraft Configuration-state payload encoders for RoM"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rom-nbt = { path = "../rom-nbt" }
+thiserror.workspace = true

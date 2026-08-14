@@ -58,7 +58,7 @@ previews_chat = false
 [play]
 chunk_radius = 1
 simulation_distance = 2
-welcome_message = "Ferrum native Rust world loaded"
+welcome_message = "RoM native Rust world loaded"
 keep_alive_interval_seconds = 15
 
 # Uncomment one of these world sources to seed chunks from Anvil region files.
@@ -241,12 +241,12 @@ pub fn install_local_server(options: &InstallLocalOptions) -> Result<PathBuf> {
             );
         }
         let status = Command::new("cargo")
-            .args(["build", "--locked", "--release", "-p", "ferrum-server"])
+            .args(["build", "--locked", "--release", "-p", "rom-server"])
             .current_dir(&workspace)
             .status()
-            .context("failed to start Cargo while building ferrum-server")?;
+            .context("failed to start Cargo while building rom-server")?;
         if !status.success() {
-            bail!("ferrum-server build failed with status {status}");
+            bail!("rom-server build failed with status {status}");
         }
         let binary = workspace
             .join("target")
@@ -694,9 +694,9 @@ fn installed_native_server(instance: &Path) -> Option<PathBuf> {
 
 fn native_server_file_name() -> &'static str {
     if cfg!(windows) {
-        "ferrum-server.exe"
+        "rom-server.exe"
     } else {
-        "ferrum-server"
+        "rom-server"
     }
 }
 
@@ -784,7 +784,7 @@ mod tests {
         let legacy = instance.join("bin").join(legacy_native_server_file_name());
         fs::write(&legacy, b"legacy").unwrap();
         assert_eq!(installed_native_server(instance), Some(legacy));
-        assert!(native_server_file_name().starts_with("ferrum-server"));
+        assert!(native_server_file_name().starts_with("rom-server"));
     }
 
     #[test]

@@ -1,0 +1,27 @@
+[package]
+name = "rom-server"
+description = "Native Rust Minecraft-compatible server runtime for RoM"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "rom"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+rom-configuration = { path = "../rom-configuration" }
+rom-game = { path = "../rom-game" }
+rom-nbt = { path = "../rom-nbt" }
+rom-play = { path = "../rom-play" }
+rom-protocol = { path = "../rom-protocol" }
+rom-pack = { path = "../rom-pack" }
+rom-runtime = { path = "../rom-runtime" }
+rom-version-26-1-2 = { path = "../rom-version-26-1-2" }
+rom-world = { path = "../rom-world" }
+serde_json.workspace = true
+sysinfo.workspace = true
+thiserror.workspace = true

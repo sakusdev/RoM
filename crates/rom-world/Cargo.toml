@@ -1,0 +1,17 @@
+[package]
+name = "rom-world"
+description = "Deterministic in-memory world primitives for RoM"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rom-nbt = { path = "../rom-nbt" }
+flate2.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+rom-runtime = { path = "../rom-runtime" }

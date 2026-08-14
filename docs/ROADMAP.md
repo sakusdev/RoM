@@ -29,7 +29,7 @@
 
 ## Native server release foundation (included)
 
-- Add `ferrum-server` as a native Rust binary target.
+- Add `rom-server` as a native Rust binary target.
 - Build release artifacts with Cargo's `release` profile.
 - Package native binaries for Windows x86_64, Linux x86_64, Linux ARM64, macOS x86_64, and macOS ARM64.
 - Publish release artifacts through GitHub Actions without producing or requiring a JAR.
@@ -76,8 +76,8 @@
 
 ## M8 — Server integration pilots (documented boundary)
 
-- `ferrum-server` remains a native Rust binary target.
-- Native `ferrum-server` now implements the first Minecraft Java server surface: handshake, status response, and ping/pong.
+- `rom-server` remains a native Rust binary target.
+- Native `rom-server` now implements the first Minecraft Java server surface: handshake, status response, and ping/pong.
 - Login-intent handshakes derive Java-compatible offline-mode player UUIDs and can optionally receive a minimal Login Success packet; otherwise they receive an explicit disconnect message instead of silent connection close.
 - Connections are handled independently so slow clients do not block status responses.
 - Packet framing, VarInt, string, and packet-reader code is isolated in the server codec module.
@@ -85,7 +85,7 @@
 - Minecraft Java Edition `26.1.2` is the first concrete built-in profile, including strict protocol validation and vanilla Known Packs negotiation.
 - The 26.1.2 profile synchronizes all 28 data-driven registries and 382 vanilla entry identifiers using references to the accepted `minecraft/core/26.1.2` pack.
 - The runtime now emits a static-overworld Join Game bootstrap, one palette-encoded flat chunk with full skylight, chunk-batch negotiation, teleport acknowledgement, a welcome system message, and live Keep Alive exchanges.
-- `ferrum-world` now provides version-neutral chunk coordinates, block-state and biome IDs, mutable sections, and deterministic flat-world construction as the first persistent-world foundation.
+- `rom-world` now provides version-neutral chunk coordinates, block-state and biome IDs, mutable sections, and deterministic flat-world construction as the first persistent-world foundation.
 - Manual packet tables remain available for protocol experiments outside built-in profiles.
 - Generated reports and replay cases are ready to feed later Rust-native server subsystems.
 - Actual gameplay subsystem implementation is intentionally outside the porting kit CLI.

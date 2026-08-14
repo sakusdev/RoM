@@ -2,17 +2,17 @@
 bind = "127.0.0.1:25565"
 version_name = "Minecraft Java Edition 26.*.*"
 protocol = 0
-motd = "Ferrum native Rust server"
+motd = "RoM native Rust server"
 max_players = 20
 online_players = 0
-login_disconnect_message = "Ferrum native server currently implements status ping only"
+login_disconnect_message = "RoM native server currently implements status ping only"
 allow_offline_login = false
 online_mode = false
 hide_online_players = false
 enforces_secure_chat = false
 previews_chat = false
 server_icon = "data:image/png;base64,iVBORw0KGgo="
-sample_players = "Ferrum:00000000-0000-0000-0000-000000000000"
+sample_players = "RoM:00000000-0000-0000-0000-000000000000"
 
 [protocol]
 handshake_serverbound = 0
