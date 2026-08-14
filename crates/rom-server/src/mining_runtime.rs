@@ -1,7 +1,8 @@
 use rom_game::{
-    BlockMining, BlockPos, DurabilityError, GameEvent, GameMode, GameStateError, HOTBAR_START,
-    MAX_MINING_TICKS, MiningContext, MiningSessionError, MiningTool, PlayerUuid, ToolClass,
-    ToolTier, correct_tool, damage_item, ticks_to_break, vanilla_max_durability,
+    BlockMining, BlockPos, DurabilityError, EFFICIENCY_ENCHANTMENT, GameEvent, GameMode,
+    GameStateError, HOTBAR_START, MAX_MINING_TICKS, MAX_UNBREAKING_LEVEL, MiningContext,
+    MiningSessionError, MiningTool, PlayerUuid, ToolClass, ToolTier, UNBREAKING_ENCHANTMENT,
+    correct_tool, damage_item, item_enchantment_level, ticks_to_break, vanilla_max_durability,
 };
 use rom_pack::RomPackWorld;
 use rom_world::BlockStateId;
@@ -31,7 +32,7 @@ impl SharedGameRuntime {
         uuid: PlayerUuid,
     ) -> Result<Option<MiningTool>, MiningRuntimeError> {
         let selected = self.selected_item(uuid)?;
-        Ok(selected.and_then(|selected| mining_tool_from_item(selected.stack.item())))
+        Ok(selected.and_then(|selected| mining_tool_from_stack(&selected.stack)))
     }
 
     pub fn mining_context(&self, uuid: PlayerUuid) -> Result<MiningContext, MiningRuntimeError> {
@@ -164,7 +165,9 @@ impl SharedGameRuntime {
         let Some(max_damage) = vanilla_max_durability(selected.stack.item()) else {
             return Ok(Vec::new());
         };
-        let result = damage_item(&selected.stack, max_damage, 1, 0, seed)?;
+        let unbreaking_level = item_enchantment_level(&selected.stack, UNBREAKING_ENCHANTMENT)
+            .min(MAX_UNBREAKING_LEVEL);
+        let result = damage_item(&selected.stack, max_damage, 1, unbreaking_level, seed)?;
         let events = self.with_state_mut(|state| {
             let player = state.player_mut(uuid).ok_or(GameRuntimeError::State(
                 GameStateError::UnknownPlayer { uuid },
@@ -238,6 +241,13 @@ pub fn mining_properties_for_state(
         required_tier: None,
         requires_correct_tool: false,
     })
+}
+
+#[must_use]
+pub fn mining_tool_from_stack(stack: &rom_game::ItemStack) -> Option<MiningTool> {
+    let mut tool = mining_tool_from_item(stack.item())?;
+    tool.efficiency_level = item_enchantment_level(stack, EFFICIENCY_ENCHANTMENT);
+    Some(tool)
 }
 
 #[must_use]
@@ -324,6 +334,21 @@ mod tests {
         assert_eq!(tool.class, ToolClass::Pickaxe);
         assert_eq!(tool.tier, ToolTier::Diamond);
         assert!(mining_tool_from_item("minecraft:stick").is_none());
+    }
+
+    #[test]
+    fn semantic_efficiency_component_changes_selected_mining_tool() {
+        let stack = ItemStack::with_max_count("minecraft:diamond_pickaxe", 1, 1)
+            .unwrap()
+            .with_component(
+                rom_game::ENCHANTMENTS_COMPONENT,
+                serde_json::json!({
+                    "wire_hex": "00",
+                    "levels": {rom_game::EFFICIENCY_ENCHANTMENT: 5}
+                }),
+            );
+        let tool = mining_tool_from_stack(&stack).unwrap();
+        assert_eq!(tool.efficiency_level, 5);
     }
 
     #[test]

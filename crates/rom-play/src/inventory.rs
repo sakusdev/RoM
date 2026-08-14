@@ -320,7 +320,22 @@ fn explicit_component_bytes(value: &Value) -> Result<Option<Vec<u8>>, InventoryE
     let Some(object) = value.as_object() else {
         return Ok(None);
     };
-    if object.len() != 1 {
+    let known_wire_fields = [
+        "wire_hex",
+        "wire_bytes",
+        "varint",
+        "string",
+        "bool",
+        "i32",
+        "i64",
+        "f32",
+        "f64",
+    ];
+    let wire_field_count = known_wire_fields
+        .into_iter()
+        .filter(|field| object.contains_key(*field))
+        .count();
+    if wire_field_count != 1 {
         return Ok(None);
     }
     if let Some(value) = object.get("wire_hex") {
@@ -714,6 +729,26 @@ mod tests {
             error,
             InventoryDecodeError::UnsupportedInboundComponents { .. }
         ));
+    }
+
+    #[test]
+    fn explicit_wire_component_can_carry_server_semantic_fields() {
+        let items = ItemProtocolRegistry::new([("minecraft:diamond_pickaxe", 7)]).unwrap();
+        let components =
+            DataComponentProtocolRegistry::new([("minecraft:enchantments", 11)]).unwrap();
+        let stack = ItemStack::with_max_count("minecraft:diamond_pickaxe", 1, 1)
+            .unwrap()
+            .with_component(
+                "minecraft:enchantments",
+                serde_json::json!({
+                    "wire_hex": "abcd",
+                    "levels": {"minecraft:efficiency": 4}
+                }),
+            );
+        let payload = encode_item_stack(Some(&stack), &items, &components)
+            .unwrap()
+            .unwrap();
+        assert!(payload.ends_with(&[11, 0xab, 0xcd]));
     }
 
     #[test]
