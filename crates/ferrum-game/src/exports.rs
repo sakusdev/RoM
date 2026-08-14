@@ -43,8 +43,7 @@ pub use crate::furnace::{
 };
 pub use crate::gameplay_tick::{GameplayTickError, GameplayTickOutcome, GameplayTickStats};
 pub use crate::hunger::{
-    HungerState, HungerTick, MAX_EXHAUSTION, MAX_FOOD, natural_regeneration_allowed,
-    sprint_allowed,
+    HungerState, HungerTick, MAX_EXHAUSTION, MAX_FOOD, natural_regeneration_allowed, sprint_allowed,
 };
 pub use crate::inventory::{
     EquipmentSlot, HOTBAR_END, HOTBAR_SLOTS, HOTBAR_START, Inventory, InventoryError, ItemStack,
