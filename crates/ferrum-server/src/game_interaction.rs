@@ -126,12 +126,8 @@ impl SharedGameRuntime {
         stack: ItemStack,
     ) -> Result<EntityId, GameRuntimeError> {
         self.with_state_mut(|state| {
-            let mut candidate = mix_world_item_uuid(
-                source.get(),
-                state.time().game_time,
-                position,
-                stack.item(),
-            );
+            let mut candidate =
+                mix_world_item_uuid(source.get(), state.time().game_time, position, stack.item());
             loop {
                 let uuid = EntityUuid::new(candidate);
                 if state.entities().id_by_uuid(uuid).is_none() {
