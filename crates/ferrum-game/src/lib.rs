@@ -23,6 +23,7 @@ pub mod loot;
 pub mod mining;
 pub mod persistence;
 pub mod player;
+pub mod player_gameplay;
 pub mod raycast;
 pub mod scheduled_tick;
 pub mod spatial;
