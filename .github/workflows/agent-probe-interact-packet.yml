@@ -23,27 +23,22 @@ jobs:
       - name: Extract bundled game jar
         run: |
           unzip -p server.jar META-INF/versions/26.1.2/server-26.1.2.jar > game.jar
-      - name: Inspect interact packet class
+      - name: Inspect interact packet and handler
         run: |
           javap -classpath game.jar -c -p net.minecraft.network.protocol.game.ServerboundInteractPacket | tee interact.txt
+          javap -classpath game.jar -c -p net.minecraft.server.network.ServerGamePacketListenerImpl | sed -n '/handleInteract(/,/^[[:space:]]*public /p' | tee handle-interact.txt
+          javap -classpath game.jar -c -p net.minecraft.world.InteractionHand | tee interaction-hand.txt
+          javap -classpath game.jar -c -p net.minecraft.world.phys.Vec3 | sed -n '/LP_STREAM_CODEC/,/static {/p' | tee vec3-codec.txt
       - name: Generate packet reports
         run: |
           mkdir -p out
           java -DbundlerMainClass=net.minecraft.data.Main -jar server.jar --reports --output out || true
-          find out -type f -maxdepth 4 -print
           if [ -f out/reports/packets.json ]; then
             python - <<'PY'
           import json
           p='out/reports/packets.json'
           d=json.load(open(p))
-          def walk(x,path=''):
-              if isinstance(x,dict):
-                  for k,v in x.items():
-                      if 'interact' in k.lower(): print(path+'/'+k, v)
-                      walk(v,path+'/'+k)
-              elif isinstance(x,list):
-                  for i,v in enumerate(x): walk(v,f'{path}/{i}')
-          walk(d)
+          print('/play/serverbound/minecraft:interact', d['play']['serverbound']['minecraft:interact'])
           PY
           fi
       - uses: actions/upload-artifact@v4
@@ -51,5 +46,8 @@ jobs:
           name: interact-probe
           path: |
             interact.txt
+            handle-interact.txt
+            interaction-hand.txt
+            vec3-codec.txt
             out/reports/packets.json
           if-no-files-found: warn
