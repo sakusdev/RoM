@@ -1,0 +1,41 @@
+name: Agent Survival Pickup Test
+
+on:
+  push:
+    branches: [agent/item-entity-domain]
+    paths:
+      - '.github/scripts/agent_add_survival_pickup_test.py'
+      - '.github/workflows/agent-survival-pickup-test.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  add-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Add Survival Loop pickup test
+        run: python .github/scripts/agent_add_survival_pickup_test.py
+      - run: cargo fmt --all
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test -p rom-server game_interaction::tests::block_drop_obeys_pickup_delay_and_enters_inventory -- --exact
+      - run: cargo test --workspace --no-fail-fast
+      - name: Commit validated test
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add crates/rom-server/src/game_interaction.rs
+          git commit -m "Test block drop pickup lifecycle"
+          git push
