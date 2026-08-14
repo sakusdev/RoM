@@ -37,6 +37,7 @@ pub use crate::experience_orb::{
     merge_experience_orbs, set_experience_orb_data, spawn_experience_orb, split_experience_value,
     tick_experience_orbs, try_pickup_experience_orb,
 };
+pub use crate::falling::FallMovementOutcome;
 pub use crate::furnace::{
     DEFAULT_COOK_TIME_TICKS, Fuel, FurnaceError, FurnaceState, FurnaceTick, SmeltingRecipe,
     vanilla_fuel_burn_time,
@@ -59,6 +60,7 @@ pub use crate::item_entity::{
     spawn_item_entity, spawn_item_entity_with_default_delay, tick_item_entities,
     try_merge_item_entities, try_pickup_item_entity,
 };
+pub use crate::knockback::{KnockbackOutcome, MAX_KNOCKBACK_SPEED};
 pub use crate::loot::{LootContext, LootEntry, LootError, LootPool, LootTable, simple_block_drop};
 pub use crate::persistence::{GameSnapshot, PersistenceError};
 pub use crate::player::{
