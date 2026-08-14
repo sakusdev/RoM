@@ -36,21 +36,28 @@ jobs:
               else:
                   pathlib.Path('game.jar').write_bytes(outer.read_bytes())
       - name: Inspect entity data serializer registration
-        run: |
-          javap -classpath game.jar -c -p net.minecraft.network.syncher.EntityDataSerializers > serializers.txt
-          cat serializers.txt
+        run: javap -classpath game.jar -c -p net.minecraft.network.syncher.EntityDataSerializers > serializers.txt
+      - name: Inspect base Entity synchronized data
+        run: javap -classpath game.jar -c -p net.minecraft.world.entity.Entity > entity.txt
       - name: Inspect ItemEntity synchronized data
-        run: |
-          javap -classpath game.jar -c -p net.minecraft.world.entity.item.ItemEntity > item_entity.txt
-          cat item_entity.txt
+        run: javap -classpath game.jar -c -p net.minecraft.world.entity.item.ItemEntity > item_entity.txt
       - name: Inspect ExperienceOrb synchronized data
+        run: javap -classpath game.jar -c -p net.minecraft.world.entity.ExperienceOrb > xp_orb.txt
+      - name: Summarize metadata definitions
         run: |
-          javap -classpath game.jar -c -p net.minecraft.world.entity.ExperienceOrb > xp_orb.txt
-          cat xp_orb.txt
+          echo '=== SERIALIZER REGISTRATION ==='
+          grep -n -E 'getstatic.*(BYTE|INT|ITEM_STACK)|registerSerializer' serializers.txt | head -80
+          echo '=== ENTITY DEFINE IDS ==='
+          grep -n -E 'defineId|EntityDataAccessor' entity.txt | tail -120
+          echo '=== ITEM STATIC ==='
+          grep -n -E 'DATA_ITEM|defineId' item_entity.txt | tail -20
+          echo '=== XP STATIC ==='
+          grep -n -E 'DATA_VALUE|defineId|EntityDataSerializers.INT' xp_orb.txt | tail -20
       - uses: actions/upload-artifact@v4
         with:
           name: entity-metadata-probe
           path: |
             serializers.txt
+            entity.txt
             item_entity.txt
             xp_orb.txt
