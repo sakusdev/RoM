@@ -15,7 +15,10 @@ pub use crate::container::{
     ContainerClick, ContainerClickKind, ContainerError, ContainerMutation, ContainerSnapshot,
     InventorySession, MAX_CONTAINER_SLOTS, OUTSIDE_SLOT, PLAYER_CONTAINER_ID,
 };
-pub use crate::crafting::{CraftingError, CraftingGrid, Ingredient, ShapelessRecipe};
+pub use crate::crafting::{
+    CraftingError, CraftingGrid, CraftingRecipe, Ingredient, ShapedRecipe, ShapelessRecipe,
+    craft_once,
+};
 pub use crate::damage::{
     DamageError, DamageKind, DamageMitigation, DamageResult, DamageSource, apply_armor,
     apply_protection, apply_resistance, calculate_damage, difficulty_multiplier, fall_damage,
