@@ -20,9 +20,7 @@ impl SharedGameRuntime {
         uuid: PlayerUuid,
     ) -> Result<Option<SelectedItemSnapshot>, GameRuntimeError> {
         self.with_state(|state| {
-            let Some(player) = state.player(uuid) else {
-                return None;
-            };
+            let player = state.player(uuid)?;
             let slot = HOTBAR_START + usize::from(player.inventory.selected_hotbar());
             player
                 .inventory
@@ -50,7 +48,7 @@ impl SharedGameRuntime {
         let events = self.with_state_mut(|state| {
             let player = state
                 .player_mut(uuid)
-                .ok_or_else(|| GameRuntimeError::State(GameStateError::UnknownPlayer { uuid }))?;
+                .ok_or(GameRuntimeError::State(GameStateError::UnknownPlayer { uuid }))?;
             if player.game_mode == GameMode::Creative {
                 return Ok(Vec::new());
             }
