@@ -1,0 +1,30 @@
+name: Agent Probe XP Packet
+
+on:
+  push:
+    branches: [agent/item-entity-domain]
+    paths:
+      - '.github/workflows/agent-probe-xp-packet.yml'
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect official 26.1.2 SetExperience packet
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL 'https://piston-data.mojang.com/v1/objects/97ccd4c0ed3f81bbb7bfacddd1090b0c56f9bc51/server.jar' -o /tmp/server.jar
+          echo '97ccd4c0ed3f81bbb7bfacddd1090b0c56f9bc51  /tmp/server.jar' | sha1sum -c -
+          mkdir -p /tmp/outer /tmp/game /tmp/out
+          cd /tmp/outer
+          jar xf /tmp/server.jar META-INF/versions/26.1.2/server-26.1.2.jar
+          cp META-INF/versions/26.1.2/server-26.1.2.jar /tmp/game/server.jar
+          javap -classpath /tmp/game/server.jar -c -p net.minecraft.network.protocol.game.ClientboundSetExperiencePacket > /tmp/out/set-experience.txt
+          javap -classpath /tmp/game/server.jar -c -p net.minecraft.network.protocol.game.GamePacketTypes > /tmp/out/game-packet-types.txt
+          grep -n -A8 -B8 -i 'experience' /tmp/out/game-packet-types.txt > /tmp/out/experience-registration.txt || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xp-packet-probe
+          path: /tmp/out/*
