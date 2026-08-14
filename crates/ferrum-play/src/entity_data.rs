@@ -72,6 +72,13 @@ pub fn encode_entity_data(
     Ok(output)
 }
 
+#[must_use]
+pub fn encode_entity_data_varint_value(value: i32) -> Vec<u8> {
+    let mut output = Vec::new();
+    write_varint(&mut output, value);
+    output
+}
+
 pub fn encode_empty_entity_data(entity_id: EntityId) -> Result<Vec<u8>, EntityDataEncodeError> {
     encode_entity_data(entity_id, &[])
 }
@@ -114,6 +121,15 @@ mod tests {
         assert_eq!(
             encode_entity_data(id, &[EntityDataEntry::new(8, 7, &[1, 2, 3])]).unwrap(),
             vec![5, 8, 7, 1, 2, 3, 0xff]
+        );
+    }
+
+    #[test]
+    fn int_serializer_values_use_varint_encoding() {
+        assert_eq!(encode_entity_data_varint_value(300), vec![0xac, 0x02]);
+        assert_eq!(
+            encode_entity_data_varint_value(-1),
+            vec![0xff, 0xff, 0xff, 0xff, 0x0f]
         );
     }
 
