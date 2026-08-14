@@ -24,6 +24,7 @@ pub mod item_entity;
 pub mod knockback;
 pub mod loot;
 pub mod mining;
+pub mod mining_session;
 pub mod persistence;
 pub mod player;
 pub mod player_gameplay;
