@@ -14,10 +14,11 @@ use ferrum_game::{
 use ferrum_play::{
     CommonPlayerSpawnInfo, DataComponentProtocolRegistry, EncodedEntityMovement,
     EntityMovementKind, EntityProtocolRegistry, EquipmentEntry, ItemProtocolRegistry,
-    PlayerInfoEntry, Respawn, RespawnDataToKeep, encode_add_entity, encode_empty_entity_data,
-    encode_entity_movement, encode_hurt_animation, encode_player_combat_kill,
-    encode_player_info_remove, encode_player_info_update, encode_remove_entities, encode_respawn,
-    encode_rotate_head, encode_set_equipment, encode_set_health, encode_teleport_entity,
+    PlayerInfoEntry, Respawn, RespawnDataToKeep, encode_add_entity, encode_add_world_entity,
+    encode_empty_entity_data, encode_entity_movement, encode_hurt_animation,
+    encode_player_combat_kill, encode_player_info_remove, encode_player_info_update,
+    encode_remove_entities, encode_respawn, encode_rotate_head, encode_set_equipment,
+    encode_set_health, encode_teleport_entity,
 };
 use ferrum_protocol::PacketKind;
 use ferrum_rompack::RomPackWorld;
@@ -87,6 +88,15 @@ struct PlayerEntitySnapshot {
     selected_hotbar: u8,
 }
 
+#[derive(Debug, Clone)]
+struct WorldEntitySnapshot {
+    entity_id: EntityId,
+    uuid: ferrum_game::EntityUuid,
+    entity_type: String,
+    transform: Transform,
+    velocity: Velocity,
+}
+
 #[derive(Debug)]
 struct ReplicationConnection {
     endpoint: PlayReaderEndpoint,
@@ -94,6 +104,7 @@ struct ReplicationConnection {
     pending_limit: usize,
     next_teleport_id: i32,
     entities: BTreeMap<PlayerUuid, PlayerEntitySnapshot>,
+    world_entities: BTreeMap<EntityId, WorldEntitySnapshot>,
     active: bool,
     healthy: bool,
     self_initialized: bool,
@@ -107,6 +118,7 @@ impl ReplicationConnection {
             pending_limit,
             next_teleport_id: 2,
             entities: BTreeMap::new(),
+            world_entities: BTreeMap::new(),
             active: false,
             healthy: true,
             self_initialized: false,
@@ -131,6 +143,7 @@ impl ReplicationConnection {
         if self.pending.len() >= self.pending_limit {
             self.pending.clear();
             self.entities.clear();
+            self.world_entities.clear();
             self.healthy = false;
             exit.dropped_outputs = exit.dropped_outputs.saturating_add(1);
             let _ = self.endpoint.try_disconnect();
@@ -353,6 +366,7 @@ fn run_replication(
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => bail!("game event publisher disconnected"),
         }
+        sync_world_entities(&runtime, &config, &mut connections, &mut exit)?;
         flush_connections(&mut connections, &mut exit);
     }
 }
@@ -874,6 +888,117 @@ fn dispatch_event(
             }
         }
         GameEvent::TimeChanged { .. } | GameEvent::SaveRequested | GameEvent::ShutdownRequested => {
+        }
+    }
+    Ok(())
+}
+
+fn authoritative_world_entities(
+    runtime: &SharedGameRuntime,
+    registry: &EntityProtocolRegistry,
+) -> Result<BTreeMap<EntityId, WorldEntitySnapshot>> {
+    runtime
+        .with_state(|state| {
+            state
+                .entities()
+                .iter()
+                .filter_map(|(entity_id, entity)| {
+                    if entity.is_player()
+                        || registry.protocol_id(entity.entity_type.as_str()).is_none()
+                    {
+                        return None;
+                    }
+                    Some((
+                        *entity_id,
+                        WorldEntitySnapshot {
+                            entity_id: *entity_id,
+                            uuid: entity.uuid,
+                            entity_type: entity.entity_type.as_str().to_owned(),
+                            transform: entity.transform,
+                            velocity: entity.velocity,
+                        },
+                    ))
+                })
+                .collect()
+        })
+        .context("cannot read authoritative world entities")
+}
+
+fn sync_world_entities(
+    runtime: &SharedGameRuntime,
+    config: &GameReplicationConfig,
+    connections: &mut BTreeMap<PlayerUuid, ReplicationConnection>,
+    exit: &mut GameReplicationExit,
+) -> Result<()> {
+    let current = authoritative_world_entities(runtime, &config.entity_protocol_ids)?;
+    for connection in connections.values_mut() {
+        if !connection.active || !connection.healthy {
+            continue;
+        }
+
+        let removed = connection
+            .world_entities
+            .keys()
+            .filter(|entity_id| !current.contains_key(entity_id))
+            .copied()
+            .collect::<Vec<_>>();
+        if !removed.is_empty() {
+            connection.queue(
+                PlayOutput::ProtocolPacket {
+                    kind: PacketKind::RemoveEntities,
+                    payload: encode_remove_entities(&removed)
+                        .context("cannot encode world entity removals")?,
+                },
+                exit,
+            );
+        }
+
+        for (entity_id, snapshot) in &current {
+            match connection.world_entities.get(entity_id).cloned() {
+                None => {
+                    if let Some(payload) = encode_add_world_entity(
+                        snapshot.entity_id,
+                        snapshot.uuid,
+                        &snapshot.entity_type,
+                        snapshot.transform,
+                        snapshot.velocity,
+                        &config.entity_protocol_ids,
+                    )
+                    .context("cannot encode world add-entity packet")?
+                    {
+                        connection.queue(
+                            PlayOutput::ProtocolPacket {
+                                kind: PacketKind::AddEntity,
+                                payload,
+                            },
+                            exit,
+                        );
+                        connection.queue(
+                            PlayOutput::ProtocolPacket {
+                                kind: PacketKind::SetEntityData,
+                                payload: encode_empty_entity_data(snapshot.entity_id)
+                                    .context("cannot encode initial world entity data")?,
+                            },
+                            exit,
+                        );
+                    }
+                }
+                Some(previous) => {
+                    if let Some(movement) = encode_entity_movement(
+                        snapshot.entity_id,
+                        previous.transform,
+                        snapshot.transform,
+                    )
+                    .context("cannot encode world entity movement")?
+                    {
+                        queue_encoded_movement(connection, movement, exit);
+                    }
+                }
+            }
+        }
+
+        if connection.healthy {
+            connection.world_entities = current.clone();
         }
     }
     Ok(())
