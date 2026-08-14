@@ -39,7 +39,11 @@ pub fn spawn_experience_orb(
     value: u32,
     pickup_delay_ticks: u16,
 ) -> Result<EntityId, ExperienceOrbError> {
-    let id = store.spawn(uuid, EntityType::new("minecraft:experience_orb")?, transform)?;
+    let id = store.spawn(
+        uuid,
+        EntityType::new("minecraft:experience_orb")?,
+        transform,
+    )?;
     store.set_velocity(id, velocity)?;
     set_experience_orb_data(
         store,
@@ -87,9 +91,7 @@ pub fn set_experience_orb_data(
     Ok(())
 }
 
-pub fn tick_experience_orbs(
-    store: &mut EntityStore,
-) -> Result<Vec<EntityId>, ExperienceOrbError> {
+pub fn tick_experience_orbs(store: &mut EntityStore) -> Result<Vec<EntityId>, ExperienceOrbError> {
     let ids = store
         .iter()
         .filter_map(|(id, entity)| {
@@ -165,9 +167,7 @@ pub fn try_pickup_experience_orb(
     Ok(Some(data.value))
 }
 
-pub fn merge_experience_orbs(
-    store: &mut EntityStore,
-) -> Result<usize, ExperienceOrbError> {
+pub fn merge_experience_orbs(store: &mut EntityStore) -> Result<usize, ExperienceOrbError> {
     let mut ids = store
         .iter()
         .filter_map(|(id, entity)| {
@@ -268,7 +268,10 @@ mod tests {
             0,
         )
         .unwrap();
-        assert_eq!(try_pickup_experience_orb(&mut store, id, [0.0; 3]).unwrap(), Some(7));
+        assert_eq!(
+            try_pickup_experience_orb(&mut store, id, [0.0; 3]).unwrap(),
+            Some(7)
+        );
         assert!(store.get(id).is_none());
     }
 

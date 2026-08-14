@@ -231,18 +231,20 @@ mod tests {
     #[test]
     fn silk_touch_conditions_are_applied() {
         let table = LootTable {
-            pools: vec![LootPool::new(
-                1,
-                vec![
-                    LootEntry::new("minecraft:diamond_ore", 1, 1, 1)
-                        .unwrap()
-                        .requiring_silk_touch(),
-                    LootEntry::new("minecraft:diamond", 1, 1, 1)
-                        .unwrap()
-                        .forbidden_with_silk_touch(),
-                ],
-            )
-            .unwrap()],
+            pools: vec![
+                LootPool::new(
+                    1,
+                    vec![
+                        LootEntry::new("minecraft:diamond_ore", 1, 1, 1)
+                            .unwrap()
+                            .requiring_silk_touch(),
+                        LootEntry::new("minecraft:diamond", 1, 1, 1)
+                            .unwrap()
+                            .forbidden_with_silk_touch(),
+                    ],
+                )
+                .unwrap(),
+            ],
         };
         let silk = table
             .evaluate(LootContext {
@@ -257,20 +259,25 @@ mod tests {
     #[test]
     fn evaluation_is_deterministic() {
         let table = LootTable {
-            pools: vec![LootPool::new(
-                8,
-                vec![
-                    LootEntry::new("minecraft:coal", 1, 3, 3).unwrap(),
-                    LootEntry::new("minecraft:flint", 1, 1, 1).unwrap(),
-                ],
-            )
-            .unwrap()],
+            pools: vec![
+                LootPool::new(
+                    8,
+                    vec![
+                        LootEntry::new("minecraft:coal", 1, 3, 3).unwrap(),
+                        LootEntry::new("minecraft:flint", 1, 1, 1).unwrap(),
+                    ],
+                )
+                .unwrap(),
+            ],
         };
         let context = LootContext {
             silk_touch: false,
             fortune_level: 0,
             seed: 99,
         };
-        assert_eq!(table.evaluate(context).unwrap(), table.evaluate(context).unwrap());
+        assert_eq!(
+            table.evaluate(context).unwrap(),
+            table.evaluate(context).unwrap()
+        );
     }
 }

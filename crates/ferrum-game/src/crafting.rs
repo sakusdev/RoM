@@ -64,7 +64,9 @@ impl CraftingGrid {
     pub fn consume_slots(&mut self, slots: &[usize]) -> Result<(), CraftingError> {
         for &index in slots {
             let slot = self.slots.get_mut(index).ok_or(CraftingError::Slot)?;
-            let stack = slot.take().ok_or(CraftingError::MissingIngredient { index })?;
+            let stack = slot
+                .take()
+                .ok_or(CraftingError::MissingIngredient { index })?;
             if stack.count() > 1 {
                 *slot = Some(stack.copy_with_count(stack.count() - 1)?);
             }
@@ -224,7 +226,9 @@ impl ShapedRecipe {
                 let actual = grid.slots[index].as_ref();
                 match (expected, actual) {
                     (None, None) => {}
-                    (Some(ingredient), Some(stack)) if ingredient.matches(stack) => plan.push(index),
+                    (Some(ingredient), Some(stack)) if ingredient.matches(stack) => {
+                        plan.push(index)
+                    }
                     _ => return None,
                 }
             }

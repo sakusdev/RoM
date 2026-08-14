@@ -201,7 +201,9 @@ impl FurnaceState {
         let produced = ItemStack::new(recipe.output.clone(), 1)?;
         self.output = match self.output.take() {
             None => Some(produced),
-            Some(existing) if existing.can_merge(&produced) && existing.remaining_capacity() > 0 => {
+            Some(existing)
+                if existing.can_merge(&produced) && existing.remaining_capacity() > 0 =>
+            {
                 Some(existing.copy_with_count(existing.count() + 1)?)
             }
             Some(existing) => {
@@ -267,10 +269,22 @@ mod tests {
             fuel: Some(ItemStack::new("minecraft:coal", 2).unwrap()),
             ..FurnaceState::default()
         };
-        assert_eq!(furnace.tick(Some(&recipe()), Some(&fuel())).unwrap(), FurnaceTick::StartedFuel);
-        assert_eq!(furnace.tick(Some(&recipe()), Some(&fuel())).unwrap(), FurnaceTick::Burning);
-        assert_eq!(furnace.tick(Some(&recipe()), Some(&fuel())).unwrap(), FurnaceTick::Smelted);
-        assert_eq!(furnace.output.as_ref().unwrap().item(), "minecraft:iron_ingot");
+        assert_eq!(
+            furnace.tick(Some(&recipe()), Some(&fuel())).unwrap(),
+            FurnaceTick::StartedFuel
+        );
+        assert_eq!(
+            furnace.tick(Some(&recipe()), Some(&fuel())).unwrap(),
+            FurnaceTick::Burning
+        );
+        assert_eq!(
+            furnace.tick(Some(&recipe()), Some(&fuel())).unwrap(),
+            FurnaceTick::Smelted
+        );
+        assert_eq!(
+            furnace.output.as_ref().unwrap().item(),
+            "minecraft:iron_ingot"
+        );
         assert_eq!(furnace.input.as_ref().unwrap().count(), 1);
         assert_eq!(furnace.fuel.as_ref().unwrap().count(), 1);
     }
@@ -283,7 +297,10 @@ mod tests {
             output: Some(ItemStack::new("minecraft:gold_ingot", 1).unwrap()),
             ..FurnaceState::default()
         };
-        assert_eq!(furnace.tick(Some(&recipe()), Some(&fuel())).unwrap(), FurnaceTick::Idle);
+        assert_eq!(
+            furnace.tick(Some(&recipe()), Some(&fuel())).unwrap(),
+            FurnaceTick::Idle
+        );
         assert_eq!(furnace.cook_progress, 0);
     }
 

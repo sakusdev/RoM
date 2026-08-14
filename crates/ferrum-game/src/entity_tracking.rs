@@ -104,8 +104,7 @@ pub fn visible_entities(
             let dx = x - ox;
             let dz = z - oz;
             let dy = (y - oy).abs();
-            (dx * dx + dz * dz <= horizontal_squared && dy <= config.vertical_range)
-                .then_some(*id)
+            (dx * dx + dz * dz <= horizontal_squared && dy <= config.vertical_range).then_some(*id)
         })
         .collect()
 }

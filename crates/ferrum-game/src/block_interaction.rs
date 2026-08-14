@@ -106,7 +106,11 @@ pub fn evaluate_placement(
     if context.collides_with_player {
         return Err(BlockInteractionError::PlayerCollision { target });
     }
-    if !within_reach(context.player_eye, target.center(), context.interaction_range) {
+    if !within_reach(
+        context.player_eye,
+        target.center(),
+        context.interaction_range,
+    ) {
         return Err(BlockInteractionError::OutOfReach { target });
     }
 
@@ -118,7 +122,10 @@ pub fn evaluate_placement(
 
 #[must_use]
 pub fn within_reach(origin: [f64; 3], target: [f64; 3], range: f64) -> bool {
-    if origin.into_iter().chain(target).any(|value| !value.is_finite())
+    if origin
+        .into_iter()
+        .chain(target)
+        .any(|value| !value.is_finite())
         || !range.is_finite()
         || range < 0.0
     {
@@ -163,7 +170,11 @@ pub fn opposite(face: BlockFace) -> BlockFace {
 }
 
 fn validate_context(context: PlacementContext) -> Result<(), BlockInteractionError> {
-    if context.player_eye.into_iter().any(|value| !value.is_finite()) {
+    if context
+        .player_eye
+        .into_iter()
+        .any(|value| !value.is_finite())
+    {
         return Err(BlockInteractionError::NonFinitePosition);
     }
     if !context.interaction_range.is_finite() || context.interaction_range < 0.0 {

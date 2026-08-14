@@ -20,7 +20,11 @@ impl Ray {
         direction: [f64; 3],
         max_distance: f64,
     ) -> Result<Self, RaycastError> {
-        if origin.into_iter().chain(direction).any(|value| !value.is_finite()) {
+        if origin
+            .into_iter()
+            .chain(direction)
+            .any(|value| !value.is_finite())
+        {
             return Err(RaycastError::NonFinite);
         }
         if !max_distance.is_finite() || max_distance < 0.0 {
@@ -138,15 +142,13 @@ pub fn direction_from_rotation(yaw_degrees: f32, pitch_degrees: f32) -> [f64; 3]
     let yaw = f64::from(yaw_degrees).to_radians();
     let pitch = f64::from(pitch_degrees).to_radians();
     let cos_pitch = pitch.cos();
-    [
-        -yaw.sin() * cos_pitch,
-        -pitch.sin(),
-        yaw.cos() * cos_pitch,
-    ]
+    [-yaw.sin() * cos_pitch, -pitch.sin(), yaw.cos() * cos_pitch]
 }
 
 fn floor_i32(value: f64) -> i32 {
-    value.floor().clamp(f64::from(i32::MIN), f64::from(i32::MAX)) as i32
+    value
+        .floor()
+        .clamp(f64::from(i32::MIN), f64::from(i32::MAX)) as i32
 }
 
 const fn sign_i32(value: f64) -> i32 {

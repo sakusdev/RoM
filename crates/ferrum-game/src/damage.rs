@@ -117,11 +117,7 @@ pub fn apply_protection(amount: f32, points: u8) -> f32 {
 }
 
 #[must_use]
-pub fn fall_damage(
-    fall_distance: f32,
-    safe_fall_distance: f32,
-    multiplier: f32,
-) -> f32 {
+pub fn fall_damage(fall_distance: f32, safe_fall_distance: f32, multiplier: f32) -> f32 {
     if !fall_distance.is_finite()
         || !safe_fall_distance.is_finite()
         || !multiplier.is_finite()
@@ -174,7 +170,11 @@ pub fn knockback_vector(
         return [0.0, vertical_strength.max(0.0), 0.0];
     }
     let scale = (1.0 - resistance.clamp(0.0, 1.0)) * horizontal_strength.max(0.0);
-    [dx / length * scale, vertical_strength.max(0.0), dz / length * scale]
+    [
+        dx / length * scale,
+        vertical_strength.max(0.0),
+        dz / length * scale,
+    ]
 }
 
 fn validate_mitigation(mitigation: DamageMitigation) -> Result<(), DamageError> {

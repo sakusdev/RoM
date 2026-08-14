@@ -1,7 +1,7 @@
 //! Deterministic scheduled-tick queue for blocks and fluids.
 
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, BTreeSet};
+use std::collections::{BTreeSet, BinaryHeap};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -179,11 +179,15 @@ mod tests {
     #[test]
     fn duplicate_target_and_position_is_rejected() {
         let mut queue = ScheduledTickQueue::default();
-        assert!(queue
-            .schedule("minecraft:water", pos(0), 10, TickPriority::Normal)
-            .unwrap());
-        assert!(!queue
-            .schedule("minecraft:water", pos(0), 20, TickPriority::High)
-            .unwrap());
+        assert!(
+            queue
+                .schedule("minecraft:water", pos(0), 10, TickPriority::Normal)
+                .unwrap()
+        );
+        assert!(
+            !queue
+                .schedule("minecraft:water", pos(0), 20, TickPriority::High)
+                .unwrap()
+        );
     }
 }
