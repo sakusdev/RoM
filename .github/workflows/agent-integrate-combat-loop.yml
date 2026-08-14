@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/scripts/agent_integrate_combat_loop.py'
       - '.github/scripts/agent_integrate_combat_loop_v2.py'
+      - '.github/scripts/agent_integrate_combat_loop_v3.py'
       - '.github/workflows/agent-integrate-combat-loop.yml'
   workflow_dispatch:
 
@@ -25,6 +26,7 @@ jobs:
       - name: Apply authoritative combat loop
         run: |
           python .github/scripts/agent_integrate_combat_loop_v2.py
+          python .github/scripts/agent_integrate_combat_loop_v3.py
           python .github/scripts/agent_integrate_combat_loop.py
       - run: cargo fmt --all
       - run: cargo fmt --all --check
