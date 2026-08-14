@@ -21,7 +21,7 @@ jobs:
           curl -fsSL -o server.jar https://piston-data.mojang.com/v1/objects/97ccd4c0ed3f81bbb7bfacddd1090b0c56f9bc51/server.jar
           echo '97ccd4c0ed3f81bbb7bfacddd1090b0c56f9bc51  server.jar' | sha1sum -c -
           unzip -p server.jar META-INF/versions/26.1.2/server-26.1.2.jar > game.jar
-      - name: Generate and scan packet report
+      - name: Generate packet report
         run: |
           mkdir -p out
           java -DbundlerMainClass=net.minecraft.data.Main -jar server.jar --reports --output out
@@ -29,29 +29,16 @@ jobs:
           import json
           d=json.load(open('out/reports/packets.json'))['play']['serverbound']
           for name, meta in sorted(d.items(), key=lambda kv: kv[1]['protocol_id']):
-              print(f"{meta['protocol_id']:3} 0x{meta['protocol_id']:02X} {name}")
-          print('\nLIKELY COMBAT:')
-          for name, meta in d.items():
-              if any(x in name.lower() for x in ('attack','combat','hit','entity','swing')):
-                  print(name, meta)
+              print(f"PACKET {meta['protocol_id']:3} 0x{meta['protocol_id']:02X} {name}")
           PY
-      - name: Scan serverbound packet classes and listener methods for attack
+      - name: Find direct attack call site
         run: |
-          jar tf game.jar | grep 'net/minecraft/network/protocol/game/Serverbound.*Packet.class' | sed 's#/#.#g;s#.class$##' > classes.txt
-          while read cls; do
-            out=$(javap -classpath game.jar -p "$cls" 2>/dev/null || true)
-            if printf '%s\n' "$out" | grep -Eqi 'attack|hit'; then
-              echo "=== $cls ==="
-              printf '%s\n' "$out"
-            fi
-          done < classes.txt | tee candidate-classes.txt
+          javap -classpath game.jar -c -p net.minecraft.server.network.ServerGamePacketListenerImpl | grep -n -B25 -A25 'ServerPlayer.attack' | tee attack-call-sites.txt || true
           javap -classpath game.jar -p net.minecraft.network.protocol.game.ServerGamePacketListener | grep -Ei 'attack|hit|combat|swing|interact' | tee listener-methods.txt
-          javap -classpath game.jar -c -p net.minecraft.server.network.ServerGamePacketListenerImpl | grep -n -B8 -A20 'ServerPlayer.attack' | tee attack-call-sites.txt || true
       - uses: actions/upload-artifact@v4
         with:
           name: combat-packet-probe
           path: |
             out/reports/packets.json
-            candidate-classes.txt
             listener-methods.txt
             attack-call-sites.txt
