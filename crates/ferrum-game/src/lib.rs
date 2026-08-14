@@ -13,6 +13,7 @@ pub mod entity;
 pub mod entity_tracking;
 pub mod experience;
 pub mod experience_orb;
+pub mod falling;
 mod exports;
 pub mod furnace;
 pub mod gameplay_tick;
