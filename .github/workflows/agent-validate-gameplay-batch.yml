@@ -1,0 +1,120 @@
+name: Agent Validate Gameplay Batch
+
+on:
+  push:
+    branches: [agent/item-entity-domain]
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Replace shapeless greedy matcher with backtracking
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path("crates/ferrum-game/src/crafting.rs")
+          text = path.read_text()
+          old = '''        let mut used = vec![false; stacks.len()];
+                  let mut plan = Vec::with_capacity(stacks.len());
+                  for ingredient in &self.ingredients {
+                      let position = stacks
+                          .iter()
+                          .enumerate()
+                          .position(|(i, (_, stack))| !used[i] && ingredient.matches(stack))?;
+                      used[position] = true;
+                      plan.push(stacks[position].0);
+                  }
+                  plan.sort_unstable();
+                  Some(plan)
+          '''
+          new = '''        let mut order = (0..self.ingredients.len()).collect::<Vec<_>>();
+                  order.sort_by_key(|ingredient_index| {
+                      stacks
+                          .iter()
+                          .filter(|(_, stack)| self.ingredients[*ingredient_index].matches(stack))
+                          .count()
+                  });
+                  let mut used = vec![false; stacks.len()];
+                  let mut assignment = vec![usize::MAX; self.ingredients.len()];
+                  if !assign_shapeless(
+                      &self.ingredients,
+                      &stacks,
+                      &order,
+                      0,
+                      &mut used,
+                      &mut assignment,
+                  ) {
+                      return None;
+                  }
+                  assignment.sort_unstable();
+                  Some(assignment)
+          '''
+          if old not in text:
+              raise SystemExit("shapeless greedy matcher marker not found")
+          text = text.replace(old, new, 1)
+          helper = '''fn assign_shapeless(
+              ingredients: &[Ingredient],
+              stacks: &[(usize, &ItemStack)],
+              order: &[usize],
+              depth: usize,
+              used: &mut [bool],
+              assignment: &mut [usize],
+          ) -> bool {
+              if depth == order.len() {
+                  return true;
+              }
+              let ingredient_index = order[depth];
+              let ingredient = &ingredients[ingredient_index];
+              for (stack_index, (slot, stack)) in stacks.iter().enumerate() {
+                  if used[stack_index] || !ingredient.matches(stack) {
+                      continue;
+                  }
+                  used[stack_index] = true;
+                  assignment[ingredient_index] = *slot;
+                  if assign_shapeless(
+                      ingredients,
+                      stacks,
+                      order,
+                      depth + 1,
+                      used,
+                      assignment,
+                  ) {
+                      return true;
+                  }
+                  used[stack_index] = false;
+                  assignment[ingredient_index] = usize::MAX;
+              }
+              false
+          }
+
+          '''
+          marker = "#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]\npub struct ShapedRecipe"
+          if "fn assign_shapeless(" not in text:
+              if marker not in text:
+                  raise SystemExit("shaped recipe insertion marker not found")
+              text = text.replace(marker, helper + marker, 1)
+          path.write_text(text)
+      - name: Format
+        run: cargo fmt --all
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test --workspace
+      - name: Commit validated batch
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add --all
+          git commit -m "Complete crafting matcher and gameplay primitives"
+          git push
