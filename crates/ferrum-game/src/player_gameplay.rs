@@ -153,7 +153,9 @@ impl GameState {
                     .player_mut(uuid)
                     .ok_or(GameStateError::UnknownPlayer { uuid })?;
                 let before = player.vitals;
-                let tick = player.gameplay.tick(&mut player.vitals, natural_regeneration);
+                let tick = player
+                    .gameplay
+                    .tick(&mut player.vitals, natural_regeneration);
                 (before, player.vitals, tick)
             };
 
@@ -175,11 +177,8 @@ impl GameState {
                 }
             }
 
-            let starvation = starvation_damage_for(
-                difficulty,
-                after_hunger.health,
-                tick.starvation_damage,
-            );
+            let starvation =
+                starvation_damage_for(difficulty, after_hunger.health, tick.starvation_damage);
             if starvation > 0.0 {
                 events.extend(self.damage_player(uuid, starvation)?);
                 emitted_health_event = true;
