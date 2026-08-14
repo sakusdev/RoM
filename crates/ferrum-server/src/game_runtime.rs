@@ -106,7 +106,7 @@ impl SharedGameRuntime {
         uuid: PlayerUuid,
         transform: Transform,
     ) -> Result<Vec<GameEvent>, GameRuntimeError> {
-        let events = self.write()?.move_player(uuid, transform)?;
+        let events = self.write()?.move_player_with_gameplay(uuid, transform)?;
         self.finalize_events(&events)?;
         Ok(events)
     }

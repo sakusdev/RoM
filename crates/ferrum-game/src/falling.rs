@@ -5,7 +5,7 @@
 //! component, and landing damage is routed through `GameState::damage_player`
 //! so invulnerability, death events, keepInventory, and drops stay consistent.
 
-use crate::{fall_damage, GameEvent, GameState, GameStateError, PlayerUuid, Transform};
+use crate::{GameEvent, GameState, GameStateError, PlayerUuid, Transform, fall_damage};
 
 const DEFAULT_SAFE_FALL_DISTANCE: f32 = 3.0;
 const DEFAULT_FALL_DAMAGE_MULTIPLIER: f32 = 1.0;
@@ -121,18 +121,26 @@ mod tests {
     #[test]
     fn short_fall_does_not_damage() {
         let (mut state, uuid) = state_at(65.0);
-        state.move_player_with_gameplay(uuid, at(65.0, false)).unwrap();
+        state
+            .move_player_with_gameplay(uuid, at(65.0, false))
+            .unwrap();
         let events = state
             .move_player_with_gameplay(uuid, at(62.0, true))
             .unwrap();
         assert_eq!(state.player(uuid).unwrap().vitals.health, 20.0);
-        assert!(!events.iter().any(|event| matches!(event, GameEvent::PlayerDamaged { .. })));
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, GameEvent::PlayerDamaged { .. }))
+        );
     }
 
     #[test]
     fn eight_block_fall_applies_five_damage() {
         let (mut state, uuid) = state_at(70.0);
-        state.move_player_with_gameplay(uuid, at(70.0, false)).unwrap();
+        state
+            .move_player_with_gameplay(uuid, at(70.0, false))
+            .unwrap();
         let events = state
             .move_player_with_gameplay(uuid, at(62.0, true))
             .unwrap();
@@ -146,11 +154,19 @@ mod tests {
     #[test]
     fn fall_distance_accumulates_across_airborne_packets() {
         let (mut state, uuid) = state_at(80.0);
-        state.move_player_with_gameplay(uuid, at(80.0, false)).unwrap();
-        state.move_player_with_gameplay(uuid, at(77.5, false)).unwrap();
-        state.move_player_with_gameplay(uuid, at(74.0, false)).unwrap();
+        state
+            .move_player_with_gameplay(uuid, at(80.0, false))
+            .unwrap();
+        state
+            .move_player_with_gameplay(uuid, at(77.5, false))
+            .unwrap();
+        state
+            .move_player_with_gameplay(uuid, at(74.0, false))
+            .unwrap();
         assert_eq!(state.player(uuid).unwrap().gameplay.fall_distance(), 6.0);
-        state.move_player_with_gameplay(uuid, at(72.0, true)).unwrap();
+        state
+            .move_player_with_gameplay(uuid, at(72.0, true))
+            .unwrap();
         assert_eq!(state.player(uuid).unwrap().gameplay.fall_distance(), 0.0);
         assert_eq!(state.player(uuid).unwrap().vitals.health, 15.0);
     }
@@ -159,8 +175,12 @@ mod tests {
     fn creative_uses_same_damage_path_and_stays_invulnerable() {
         let (mut state, uuid) = state_at(100.0);
         state.set_game_mode(uuid, GameMode::Creative).unwrap();
-        state.move_player_with_gameplay(uuid, at(100.0, false)).unwrap();
-        state.move_player_with_gameplay(uuid, at(60.0, true)).unwrap();
+        state
+            .move_player_with_gameplay(uuid, at(100.0, false))
+            .unwrap();
+        state
+            .move_player_with_gameplay(uuid, at(60.0, true))
+            .unwrap();
         assert_eq!(state.player(uuid).unwrap().vitals.health, 20.0);
         assert_eq!(state.player(uuid).unwrap().gameplay.fall_distance(), 0.0);
     }
@@ -171,12 +191,18 @@ mod tests {
         state
             .give_item(uuid, ItemStack::new("minecraft:diamond", 2).unwrap())
             .unwrap();
-        state.move_player_with_gameplay(uuid, at(100.0, false)).unwrap();
+        state
+            .move_player_with_gameplay(uuid, at(100.0, false))
+            .unwrap();
         let events = state
             .move_player_with_gameplay(uuid, at(60.0, true))
             .unwrap();
         assert!(state.player(uuid).unwrap().vitals.is_dead());
-        assert!(events.iter().any(|event| matches!(event, GameEvent::PlayerKilled { .. })));
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, GameEvent::PlayerKilled { .. }))
+        );
         assert!(events.iter().any(|event| matches!(
             event,
             GameEvent::ItemsDropped { stacks, .. } if !stacks.is_empty()
@@ -186,8 +212,14 @@ mod tests {
     #[test]
     fn ground_motion_clears_stale_fall_distance() {
         let (mut state, uuid) = state_at(65.0);
-        state.player_mut(uuid).unwrap().gameplay.add_fall_distance(12.0);
-        state.move_player_with_gameplay(uuid, at(65.0, true)).unwrap();
+        state
+            .player_mut(uuid)
+            .unwrap()
+            .gameplay
+            .add_fall_distance(12.0);
+        state
+            .move_player_with_gameplay(uuid, at(65.0, true))
+            .unwrap();
         assert_eq!(state.player(uuid).unwrap().gameplay.fall_distance(), 0.0);
     }
 }
