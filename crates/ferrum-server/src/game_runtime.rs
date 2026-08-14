@@ -11,7 +11,8 @@ use std::{
 
 use ferrum_game::{
     CommandError, CommandOutcome, CommandSource, ContainerClick, GameEvent, GameSnapshot,
-    GameState, GameStateError, ItemStack, PersistenceError, PlayerUuid, Transform, execute_command,
+    GameState, GameStateError, GameplayTickError, ItemStack, PersistenceError, PlayerUuid,
+    Transform, execute_command,
 };
 use thiserror::Error;
 
@@ -90,13 +91,13 @@ impl SharedGameRuntime {
         transform: Transform,
     ) -> Result<Vec<GameEvent>, GameRuntimeError> {
         let events = self.write()?.connect_player(uuid, name, transform)?;
-        self.publish(&events)?;
+        self.finalize_events(&events)?;
         Ok(events)
     }
 
     pub fn disconnect_player(&self, uuid: PlayerUuid) -> Result<Vec<GameEvent>, GameRuntimeError> {
         let events = self.write()?.disconnect_player(uuid)?;
-        self.publish(&events)?;
+        self.finalize_events(&events)?;
         Ok(events)
     }
 
@@ -106,7 +107,7 @@ impl SharedGameRuntime {
         transform: Transform,
     ) -> Result<Vec<GameEvent>, GameRuntimeError> {
         let events = self.write()?.move_player(uuid, transform)?;
-        self.publish(&events)?;
+        self.finalize_events(&events)?;
         Ok(events)
     }
 
@@ -116,7 +117,7 @@ impl SharedGameRuntime {
         selected_hotbar: u8,
     ) -> Result<Vec<GameEvent>, GameRuntimeError> {
         let events = self.write()?.select_hotbar(uuid, selected_hotbar)?;
-        self.publish(&events)?;
+        self.finalize_events(&events)?;
         Ok(events)
     }
 
@@ -126,7 +127,7 @@ impl SharedGameRuntime {
         amount: f32,
     ) -> Result<Vec<GameEvent>, GameRuntimeError> {
         let events = self.write()?.damage_player(uuid, amount)?;
-        self.publish(&events)?;
+        self.finalize_events(&events)?;
         Ok(events)
     }
 
@@ -136,13 +137,13 @@ impl SharedGameRuntime {
         amount: f32,
     ) -> Result<Vec<GameEvent>, GameRuntimeError> {
         let events = self.write()?.heal_player(uuid, amount)?;
-        self.publish(&events)?;
+        self.finalize_events(&events)?;
         Ok(events)
     }
 
     pub fn kill_player(&self, uuid: PlayerUuid) -> Result<Vec<GameEvent>, GameRuntimeError> {
         let events = self.write()?.kill_player(uuid)?;
-        self.publish(&events)?;
+        self.finalize_events(&events)?;
         Ok(events)
     }
 
@@ -152,7 +153,7 @@ impl SharedGameRuntime {
         transform: Transform,
     ) -> Result<Vec<GameEvent>, GameRuntimeError> {
         let events = self.write()?.respawn_player(uuid, transform)?;
-        self.publish(&events)?;
+        self.finalize_events(&events)?;
         Ok(events)
     }
 
@@ -162,13 +163,13 @@ impl SharedGameRuntime {
         click: ContainerClick,
     ) -> Result<Vec<GameEvent>, GameRuntimeError> {
         let events = self.write()?.click_container(uuid, click)?;
-        self.publish(&events)?;
+        self.finalize_events(&events)?;
         Ok(events)
     }
 
     pub fn close_container(&self, uuid: PlayerUuid) -> Result<Vec<GameEvent>, GameRuntimeError> {
         let events = self.write()?.close_container(uuid)?;
-        self.publish(&events)?;
+        self.finalize_events(&events)?;
         Ok(events)
     }
 
@@ -181,7 +182,7 @@ impl SharedGameRuntime {
         let events = self
             .write()?
             .set_creative_inventory_slot(uuid, slot, stack)?;
-        self.publish(&events)?;
+        self.finalize_events(&events)?;
         Ok(events)
     }
 
@@ -194,12 +195,13 @@ impl SharedGameRuntime {
             let mut state = self.write()?;
             execute_command(&mut state, source, input)?
         };
-        self.publish(&outcome.events)?;
+        self.finalize_events(&outcome.events)?;
         Ok(outcome)
     }
 
     pub fn tick(&self) -> Result<(), GameRuntimeError> {
-        self.write()?.tick();
+        let outcome = self.write()?.tick_gameplay()?;
+        self.publish(&outcome.events)?;
         Ok(())
     }
 
@@ -259,6 +261,14 @@ impl SharedGameRuntime {
         Ok(report)
     }
 
+    fn finalize_events(&self, events: &[GameEvent]) -> Result<(), GameRuntimeError> {
+        if events.iter().any(|event| matches!(event, GameEvent::ItemsDropped { .. })) {
+            self.write()?.materialize_drop_events(events)?;
+        }
+        self.publish(events)?;
+        Ok(())
+    }
+
     fn read(&self) -> Result<std::sync::RwLockReadGuard<'_, GameState>, GameRuntimeError> {
         self.inner
             .state
@@ -292,6 +302,8 @@ pub enum GameRuntimeError {
     PoisonedSubscribers,
     #[error(transparent)]
     State(#[from] GameStateError),
+    #[error(transparent)]
+    Gameplay(#[from] GameplayTickError),
     #[error(transparent)]
     Command(#[from] CommandError),
     #[error(transparent)]
@@ -417,5 +429,29 @@ mod tests {
             subscription.try_recv().unwrap(),
             GameEvent::PlayerKilled { .. }
         ));
+    }
+
+    #[test]
+    fn death_drops_are_materialized_as_world_entities() {
+        let runtime = SharedGameRuntime::vanilla_overworld();
+        let uuid = PlayerUuid::new(41);
+        runtime.connect_player(uuid, "Herobrine", spawn()).unwrap();
+        runtime
+            .with_state_mut(|state| {
+                state.give_item(uuid, ItemStack::new("minecraft:stone", 3).unwrap())?;
+                Ok(())
+            })
+            .unwrap();
+        runtime.kill_player(uuid).unwrap();
+        let item_count = runtime
+            .with_state(|state| {
+                state
+                    .entities()
+                    .iter()
+                    .filter(|(_, entity)| entity.entity_type.as_str() == "minecraft:item")
+                    .count()
+            })
+            .unwrap();
+        assert_eq!(item_count, 1);
     }
 }
