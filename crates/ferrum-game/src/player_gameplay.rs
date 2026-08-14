@@ -6,7 +6,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{AttributeMap, HungerState, HungerTick, StatusEffect, StatusEffectStore, Vitals};
+use crate::{
+    AttributeMap, Difficulty, GameEvent, GameRuleValue, GameState, GameStateError, HungerState,
+    HungerTick, StatusEffect, StatusEffectStore, Vitals,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlayerGameplay {
@@ -125,10 +128,91 @@ impl PlayerGameplay {
     }
 }
 
+impl GameState {
+    /// Advances persistent player-only gameplay systems after the world entity
+    /// tick. Health consequences are routed through the normal authoritative
+    /// heal/damage methods so death, inventory drops, and replication stay intact.
+    pub fn tick_player_gameplay(&mut self) -> Result<Vec<GameEvent>, GameStateError> {
+        let natural_regeneration = matches!(
+            self.game_rules().get("naturalRegeneration"),
+            None | Some(GameRuleValue::Boolean(true))
+        );
+        let difficulty = self.difficulty();
+        let players = self
+            .players()
+            .iter()
+            .filter_map(|(uuid, player)| {
+                (player.connected && !player.vitals.is_dead()).then_some(*uuid)
+            })
+            .collect::<Vec<_>>();
+        let mut events = Vec::new();
+
+        for uuid in players {
+            let (before, after_hunger, tick) = {
+                let player = self
+                    .player_mut(uuid)
+                    .ok_or(GameStateError::UnknownPlayer { uuid })?;
+                let before = player.vitals;
+                let tick = player.gameplay.tick(&mut player.vitals, natural_regeneration);
+                (before, player.vitals, tick)
+            };
+
+            let mut emitted_health_event = false;
+            if tick.health_delta > 0.0 {
+                let max_health = self
+                    .player(uuid)
+                    .map(|player| player.gameplay.max_health())
+                    .unwrap_or(20.0);
+                let current = self
+                    .player(uuid)
+                    .ok_or(GameStateError::UnknownPlayer { uuid })?
+                    .vitals
+                    .health;
+                let heal = tick.health_delta.min((max_health - current).max(0.0));
+                if heal > 0.0 {
+                    events.extend(self.heal_player(uuid, heal)?);
+                    emitted_health_event = true;
+                }
+            }
+
+            let starvation = starvation_damage_for(
+                difficulty,
+                after_hunger.health,
+                tick.starvation_damage,
+            );
+            if starvation > 0.0 {
+                events.extend(self.damage_player(uuid, starvation)?);
+                emitted_health_event = true;
+            }
+
+            if !emitted_health_event && before != after_hunger {
+                events.push(GameEvent::PlayerVitalsChanged {
+                    uuid,
+                    vitals: after_hunger,
+                });
+            }
+        }
+        Ok(events)
+    }
+}
+
+#[must_use]
+fn starvation_damage_for(difficulty: Difficulty, health: f32, requested: f32) -> f32 {
+    if requested <= 0.0 || !requested.is_finite() {
+        return 0.0;
+    }
+    match difficulty {
+        Difficulty::Peaceful => 0.0,
+        Difficulty::Easy if health <= 10.0 => 0.0,
+        Difficulty::Normal if health <= 1.0 => 0.0,
+        Difficulty::Easy | Difficulty::Normal | Difficulty::Hard => requested,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Attribute, StatusEffect};
+    use crate::{Attribute, PlayerUuid, StatusEffect, Transform};
 
     #[test]
     fn defaults_have_vanilla_health_attribute() {
@@ -183,5 +267,32 @@ mod tests {
         assert_eq!(gameplay.fall_distance(), 1024.0);
         gameplay.reset_fall_distance();
         assert_eq!(gameplay.fall_distance(), 0.0);
+    }
+
+    #[test]
+    fn starvation_respects_difficulty_health_floors() {
+        assert_eq!(starvation_damage_for(Difficulty::Peaceful, 20.0, 1.0), 0.0);
+        assert_eq!(starvation_damage_for(Difficulty::Easy, 10.0, 1.0), 0.0);
+        assert_eq!(starvation_damage_for(Difficulty::Normal, 1.0, 1.0), 0.0);
+        assert_eq!(starvation_damage_for(Difficulty::Hard, 1.0, 1.0), 1.0);
+    }
+
+    #[test]
+    fn game_state_ticks_natural_regeneration() {
+        let mut state = GameState::default();
+        let uuid = PlayerUuid::new(7);
+        state
+            .connect_player(
+                uuid,
+                "Steve",
+                Transform::new([0.5, 65.0, 0.5], 0.0, 0.0, true).unwrap(),
+            )
+            .unwrap();
+        let player = state.player_mut(uuid).unwrap();
+        player.vitals.health = 10.0;
+        for _ in 0..80 {
+            state.tick_player_gameplay().unwrap();
+        }
+        assert_eq!(state.player(uuid).unwrap().vitals.health, 11.0);
     }
 }
