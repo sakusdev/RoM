@@ -775,7 +775,17 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
                 Some(PacketKind::PlayerAction) => {
                     let action = decode_player_action(packet_reader.take_remaining())?;
                     let sequence = action.sequence;
-                    if is_block_interaction_within_reach(&player, action.position)
+                    let in_reach = is_block_interaction_within_reach(&player, action.position);
+                    let broken_state = if in_reach {
+                        shared_world.interaction_block_state(BlockPos {
+                            x: action.position.x,
+                            y: action.position.y,
+                            z: action.position.z,
+                        })?
+                    } else {
+                        None
+                    };
+                    if in_reach
                         && let Some(event) = player_action_to_world_event(
                             action,
                             BlockStateId::new(shared_world.world_profile().block_states.air),
@@ -784,21 +794,42 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
                     {
                         let applied = shared_world.apply_event(connection, event)?;
                         send_world_updates(writer, profile, &applied, play_reader)?;
+                        if !applied.is_empty()
+                            && let Some(gameplay) = gameplay
+                            && let Some(state) = broken_state
+                        {
+                            gameplay.spawn_block_drop(
+                                action.position,
+                                state,
+                                shared_world.world_profile(),
+                            )?;
+                        }
                     }
                     send_block_changed_ack(writer, profile, sequence, play_reader)?;
                 }
                 Some(PacketKind::UseItemOn) => {
                     let interaction = decode_use_item_on_block(packet_reader.take_remaining())?;
                     let sequence = interaction.sequence;
+                    let placed_state = if let Some(gameplay) = gameplay {
+                        gameplay.selected_placement_state(shared_world.world_profile())?
+                    } else {
+                        Some(BlockStateId::new(
+                            shared_world.world_profile().block_states.stone,
+                        ))
+                    };
                     if is_block_interaction_within_reach(&player, interaction.position)
-                        && let Some(event) = use_item_on_block_to_world_event(
-                            interaction,
-                            BlockStateId::new(shared_world.world_profile().block_states.stone),
-                        )
+                        && let Some(placed_state) = placed_state
+                        && let Some(event) =
+                            use_item_on_block_to_world_event(interaction, placed_state)
                         && is_placement_target_air(shared_world, event)?
                     {
                         let applied = shared_world.apply_event(connection, event)?;
                         send_world_updates(writer, profile, &applied, play_reader)?;
+                        if !applied.is_empty()
+                            && let Some(gameplay) = gameplay
+                        {
+                            gameplay.consume_placement_item()?;
+                        }
                     }
                     send_block_changed_ack(writer, profile, sequence, play_reader)?;
                 }
