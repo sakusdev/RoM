@@ -3,6 +3,8 @@ use rom_game::{
     MAX_MINING_TICKS, MiningContext, MiningSessionError, MiningTool, PlayerUuid, ToolClass,
     ToolTier, correct_tool, damage_item, ticks_to_break, vanilla_max_durability,
 };
+use rom_pack::RomPackWorld;
+use rom_world::BlockStateId;
 use thiserror::Error;
 
 use crate::game_runtime::{GameRuntimeError, SharedGameRuntime};
@@ -190,6 +192,55 @@ impl SharedGameRuntime {
 }
 
 #[must_use]
+pub fn mining_properties_for_state(
+    state: BlockStateId,
+    world: &RomPackWorld,
+) -> Option<BlockMining> {
+    let raw = state.get();
+    if raw == world.block_states.air {
+        return None;
+    }
+    if raw == world.block_states.bedrock {
+        return Some(BlockMining {
+            hardness: -1.0,
+            preferred_tool: ToolClass::Pickaxe,
+            required_tier: None,
+            requires_correct_tool: true,
+        });
+    }
+    if raw == world.block_states.stone {
+        return Some(BlockMining {
+            hardness: 1.5,
+            preferred_tool: ToolClass::Pickaxe,
+            required_tier: Some(ToolTier::Wood),
+            requires_correct_tool: true,
+        });
+    }
+    if raw == world.block_states.dirt {
+        return Some(BlockMining {
+            hardness: 0.5,
+            preferred_tool: ToolClass::Shovel,
+            required_tier: None,
+            requires_correct_tool: false,
+        });
+    }
+    if raw == world.block_states.grass {
+        return Some(BlockMining {
+            hardness: 0.6,
+            preferred_tool: ToolClass::Shovel,
+            required_tier: None,
+            requires_correct_tool: false,
+        });
+    }
+    Some(BlockMining {
+        hardness: 1.0,
+        preferred_tool: ToolClass::None,
+        required_tier: None,
+        requires_correct_tool: false,
+    })
+}
+
+#[must_use]
 pub fn mining_tool_from_item(item: &str) -> Option<MiningTool> {
     let name = item.strip_prefix("minecraft:")?;
     let (tier, suffix) = if let Some(suffix) = name.strip_prefix("wooden_") {
@@ -226,9 +277,45 @@ pub fn mining_tool_from_item(item: &str) -> Option<MiningTool> {
 mod tests {
     use super::*;
     use rom_game::{ItemStack, Transform, item_damage};
+    use rom_pack::{RomPackBiomes, RomPackBlockStates};
 
     fn spawn() -> Transform {
         Transform::new([0.5, 65.0, 0.5], 0.0, 0.0, true).unwrap()
+    }
+
+    fn test_world() -> RomPackWorld {
+        RomPackWorld {
+            data_version: 0,
+            overworld_min_section_y: -4,
+            overworld_section_count: 24,
+            dimension: "minecraft:overworld".to_owned(),
+            dimension_type_id: 0,
+            sea_level: 63,
+            floor_y: 63,
+            spawn_x: 0,
+            spawn_z: 0,
+            block_states: RomPackBlockStates {
+                air: 0,
+                stone: 1,
+                grass: 9,
+                dirt: 10,
+                bedrock: 85,
+            },
+            biomes: RomPackBiomes { plains: 40 },
+        }
+    }
+
+    #[test]
+    fn block_profiles_are_server_domain_data() {
+        let world = test_world();
+        assert!(mining_properties_for_state(BlockStateId::new(0), &world).is_none());
+        let stone = mining_properties_for_state(BlockStateId::new(1), &world).unwrap();
+        assert_eq!(stone.hardness, 1.5);
+        assert_eq!(stone.preferred_tool, ToolClass::Pickaxe);
+        assert_eq!(stone.required_tier, Some(ToolTier::Wood));
+        assert!(stone.requires_correct_tool);
+        let bedrock = mining_properties_for_state(BlockStateId::new(85), &world).unwrap();
+        assert!(bedrock.hardness < 0.0);
     }
 
     #[test]

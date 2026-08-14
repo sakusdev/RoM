@@ -5,8 +5,7 @@ use super::{
 use crate::codec::{PacketReader, build_packet, read_packet};
 use anyhow::{Context, Result, bail};
 use rom_game::{
-    BlockMining, BlockPos as GameBlockPos, CommandSource, GameEvent, PlayerUuid as GamePlayerUuid,
-    ToolClass, ToolTier, Transform,
+    BlockPos as GameBlockPos, CommandSource, GameEvent, PlayerUuid as GamePlayerUuid, Transform,
 };
 use rom_pack::{RomPackBiomes, RomPackBlockStates, RomPackWorld};
 use rom_play::PlayerActionStatus;
@@ -23,6 +22,7 @@ use rom_runtime::{ConnectionId, DeterministicRuntime, Tick};
 use rom_server::{
     authoritative_runtime::{PlayInput, PlayOutput},
     game_runtime::SharedGameRuntime,
+    mining_runtime::mining_properties_for_state,
     play_connection::PlayReaderEndpoint,
     play_input::decode_play_input,
 };
@@ -57,51 +57,6 @@ const MESSAGE_SIGNATURE_BYTES: usize = 256;
 const LAST_SEEN_ACKNOWLEDGED_BYTES: usize = 3;
 
 type LocalWorldRuntime = DeterministicRuntime<ChunkStore, WorldEvent>;
-
-fn mining_properties_for_state(state: BlockStateId, world: &RomPackWorld) -> Option<BlockMining> {
-    let raw = state.get();
-    if raw == world.block_states.air {
-        return None;
-    }
-    if raw == world.block_states.bedrock {
-        return Some(BlockMining {
-            hardness: -1.0,
-            preferred_tool: ToolClass::Pickaxe,
-            required_tier: None,
-            requires_correct_tool: true,
-        });
-    }
-    if raw == world.block_states.stone {
-        return Some(BlockMining {
-            hardness: 1.5,
-            preferred_tool: ToolClass::Pickaxe,
-            required_tier: Some(ToolTier::Wood),
-            requires_correct_tool: true,
-        });
-    }
-    if raw == world.block_states.dirt {
-        return Some(BlockMining {
-            hardness: 0.5,
-            preferred_tool: ToolClass::Shovel,
-            required_tier: None,
-            requires_correct_tool: false,
-        });
-    }
-    if raw == world.block_states.grass {
-        return Some(BlockMining {
-            hardness: 0.6,
-            preferred_tool: ToolClass::Shovel,
-            required_tier: None,
-            requires_correct_tool: false,
-        });
-    }
-    Some(BlockMining {
-        hardness: 1.0,
-        preferred_tool: ToolClass::None,
-        required_tier: None,
-        requires_correct_tool: false,
-    })
-}
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct GameplaySync<'a> {
