@@ -1,8 +1,6 @@
 //! Authoritative knockback application for player entities.
 
-use crate::{
-    knockback_vector, EntityId, GameState, GameStateError, PlayerUuid, Velocity,
-};
+use crate::{knockback_vector, EntityId, GameState, GameStateError, PlayerUuid, Velocity};
 
 pub const MAX_KNOCKBACK_SPEED: f64 = 4.0;
 
@@ -147,11 +145,14 @@ mod tests {
             .attributes
             .get_mut("minecraft:knockback_resistance")
             .unwrap();
-        attribute.add_modifier(AttributeModifier::new(
-            "rom:test_resistance",
-            0.5,
-            AttributeOperation::AddValue,
-        ).unwrap());
+        attribute.insert_modifier(
+            AttributeModifier::new(
+                "rom:test_resistance",
+                0.5,
+                AttributeOperation::AddValue,
+            )
+            .unwrap(),
+        );
         let outcome = state
             .knockback_player(uuid, [0.0, 65.0, 0.0], 1.0, 0.0)
             .unwrap();
