@@ -5,6 +5,7 @@ pub mod game_interaction;
 pub mod game_replication;
 pub mod game_runtime;
 pub mod game_service;
+pub mod mining_runtime;
 pub mod play_connection;
 pub mod play_input;
 pub mod play_writer;
