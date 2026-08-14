@@ -1,0 +1,46 @@
+name: Agent Rename RoM
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [agent/item-entity-domain]
+    paths:
+      - '.github/scripts/agent_rename_ferrum_to_rom.py'
+      - '.github/workflows/agent-rename-rom.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  rename-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Apply RoM rename
+        run: python .github/scripts/agent_rename_ferrum_to_rom.py
+      - name: Regenerate lockfile
+        run: cargo generate-lockfile
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --workspace
+      - name: Verify public server binary name
+        run: cargo metadata --no-deps --format-version 1 | python -c 'import json,sys; d=json.load(sys.stdin); p=next(p for p in d["packages"] if p["name"]=="rom-server"); assert any(t["name"]=="rom" and "bin" in t["kind"] for t in p["targets"])'
+      - name: Commit validated rename
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add --all
+          git commit -m "Rename Ferrum internals to RoM"
+          git push
