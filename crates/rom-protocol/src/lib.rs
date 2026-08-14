@@ -104,6 +104,7 @@ pub enum PacketKind {
     RotateHead,
     SetEntityData,
     SetEquipment,
+    SetExperience,
     SetHealth,
     HurtAnimation,
     PlayerCombatKill,
@@ -175,6 +176,7 @@ impl PacketKind {
         Self::RotateHead,
         Self::SetEntityData,
         Self::SetEquipment,
+        Self::SetExperience,
         Self::SetHealth,
         Self::HurtAnimation,
         Self::PlayerCombatKill,
@@ -293,6 +295,7 @@ impl PacketKind {
             | Self::RotateHead
             | Self::SetEntityData
             | Self::SetEquipment
+            | Self::SetExperience
             | Self::SetHealth
             | Self::HurtAnimation
             | Self::PlayerCombatKill

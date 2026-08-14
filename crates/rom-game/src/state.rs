@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use crate::{
     ContainerClick, ContainerError, ContainerMutation, ContainerSnapshot, Difficulty, EntityError,
-    EntityId, EntityStore, EntityType, EntityUuid, GameMode, InventoryError, ItemStack,
+    EntityId, EntityStore, EntityType, EntityUuid, Experience, GameMode, InventoryError, ItemStack,
     PlayerError, PlayerState, PlayerUuid, Transform, Vitals,
 };
 
@@ -99,6 +99,10 @@ pub enum GameEvent {
     PlayerVitalsChanged {
         uuid: PlayerUuid,
         vitals: Vitals,
+    },
+    PlayerExperienceChanged {
+        uuid: PlayerUuid,
+        experience: Experience,
     },
     PlayerKilled {
         uuid: PlayerUuid,

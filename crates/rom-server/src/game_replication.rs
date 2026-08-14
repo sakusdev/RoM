@@ -8,8 +8,8 @@ use std::{
 
 use anyhow::{Context, Result, bail};
 use rom_game::{
-    EntityId, EquipmentSlot, GameEvent, GameMode, GameState, PLAYER_INVENTORY_SLOTS, PlayerState,
-    PlayerUuid, Transform, Velocity, Vitals, experience_orb::experience_orb_data,
+    EntityId, EquipmentSlot, Experience, GameEvent, GameMode, GameState, PLAYER_INVENTORY_SLOTS,
+    PlayerState, PlayerUuid, Transform, Velocity, Vitals, experience_orb::experience_orb_data,
     item_entity::item_entity_data,
 };
 use rom_pack::RomPackWorld;
@@ -20,7 +20,8 @@ use rom_play::{
     encode_empty_entity_data, encode_entity_data, encode_entity_data_varint_value,
     encode_entity_movement, encode_hurt_animation, encode_item_stack, encode_player_combat_kill,
     encode_player_info_remove, encode_player_info_update, encode_remove_entities, encode_respawn,
-    encode_rotate_head, encode_set_equipment, encode_set_health, encode_teleport_entity,
+    encode_rotate_head, encode_set_equipment, encode_set_experience, encode_set_health,
+    encode_teleport_entity,
 };
 use rom_protocol::PacketKind;
 use rom_version_26_1_2::entity_metadata::{
@@ -418,6 +419,7 @@ fn process_commands(
                             let self_state = match state.player(uuid) {
                                 Some(player) if player.connected => Some((
                                     player.vitals,
+                                    player.experience,
                                     player_snapshot_from_state(state, uuid)?.with_context(|| {
                                         format!(
                                             "active player {uuid:?} has no authoritative entity snapshot"
@@ -450,8 +452,9 @@ fn process_commands(
                         format!("player {uuid:?} is not registered for replication")
                     })?;
                     connection.activate()?;
-                    if let Some((vitals, snapshot)) = self_state {
+                    if let Some((vitals, experience, snapshot)) = self_state {
                         queue_set_health(connection, vitals, exit)?;
+                        queue_set_experience(connection, experience, exit)?;
                         queue_player_info_update(connection, &snapshot, exit)?;
                         connection.self_initialized = true;
                     }
@@ -548,15 +551,20 @@ fn dispatch_event(
             } else {
                 None
             };
-            let vitals = runtime
-                .with_state(|state| state.player(uuid).map(|player| player.vitals))
-                .context("cannot read connected player vitals")?;
+            let player_state = runtime
+                .with_state(|state| {
+                    state
+                        .player(uuid)
+                        .map(|player| (player.vitals, player.experience))
+                })
+                .context("cannot read connected player vitals and experience")?;
             if let Some(connection) = connections.get_mut(&uuid)
                 && connection.active
                 && !connection.self_initialized
             {
-                if let Some(vitals) = vitals {
+                if let Some((vitals, experience)) = player_state {
                     queue_set_health(connection, vitals, exit)?;
+                    queue_set_experience(connection, experience, exit)?;
                 }
                 if let Some(snapshot) = snapshot.as_ref() {
                     queue_player_info_update(connection, snapshot, exit)?;
@@ -800,6 +808,11 @@ fn dispatch_event(
         GameEvent::PlayerVitalsChanged { uuid, vitals } => {
             if let Some(connection) = connections.get_mut(&uuid) {
                 queue_set_health(connection, vitals, exit)?;
+            }
+        }
+        GameEvent::PlayerExperienceChanged { uuid, experience } => {
+            if let Some(connection) = connections.get_mut(&uuid) {
+                queue_set_experience(connection, experience, exit)?;
             }
         }
         GameEvent::PlayerKilled {
@@ -1414,6 +1427,22 @@ fn queue_player_absolute_teleport(
     Ok(())
 }
 
+fn queue_set_experience(
+    connection: &mut ReplicationConnection,
+    experience: Experience,
+    exit: &mut GameReplicationExit,
+) -> Result<()> {
+    connection.queue(
+        PlayOutput::ProtocolPacket {
+            kind: PacketKind::SetExperience,
+            payload: encode_set_experience(experience)
+                .context("cannot encode player experience")?,
+        },
+        exit,
+    );
+    Ok(())
+}
+
 fn queue_set_health(
     connection: &mut ReplicationConnection,
     vitals: Vitals,
@@ -1565,7 +1594,7 @@ mod tests {
             if matches!(
                 output,
                 PlayOutput::ProtocolPacket {
-                    kind: PacketKind::SetHealth,
+                    kind: PacketKind::SetHealth | PacketKind::SetExperience,
                     ..
                 }
             ) {
@@ -2180,6 +2209,13 @@ mod tests {
             recv_raw_output(&alex_writer, &mut workers, &mut inputs),
             PlayOutput::ProtocolPacket {
                 kind: PacketKind::SetHealth,
+                ..
+            }
+        ));
+        assert!(matches!(
+            recv_raw_output(&alex_writer, &mut workers, &mut inputs),
+            PlayOutput::ProtocolPacket {
+                kind: PacketKind::SetExperience,
                 ..
             }
         ));

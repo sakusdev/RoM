@@ -6,6 +6,7 @@ mod block_interaction;
 mod chunk_stream;
 mod entity;
 mod entity_data;
+mod experience;
 mod generic_entity;
 mod health;
 mod inventory;
@@ -27,6 +28,7 @@ pub use entity_data::{
     ENTITY_DATA_TERMINATOR, EntityDataEncodeError, EntityDataEntry, MAX_ENTITY_DATA_ENTRIES,
     MAX_ENTITY_DATA_VALUE_BYTES, encode_entity_data, encode_entity_data_varint_value,
 };
+pub use experience::{ExperienceEncodeError, encode_set_experience};
 pub use generic_entity::{GenericEntityEncodeError, encode_add_world_entity};
 pub use health::{HealthEncodeError, encode_set_health};
 pub use inventory::{

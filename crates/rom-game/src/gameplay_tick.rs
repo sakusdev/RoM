@@ -250,6 +250,10 @@ impl GameState {
             player.experience.total = total;
             player.experience.level = level;
             player.experience.progress = progress;
+            outcome.events.push(GameEvent::PlayerExperienceChanged {
+                uuid,
+                experience: player.experience,
+            });
             outcome.stats.experience_pickups = outcome.stats.experience_pickups.saturating_add(1);
         }
         Ok(())
