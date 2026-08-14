@@ -1,6 +1,4 @@
-use ferrum_game::{
-    GameEvent, GameMode, GameStateError, HOTBAR_START, ItemStack, PlayerUuid,
-};
+use ferrum_game::{GameEvent, GameMode, GameStateError, HOTBAR_START, ItemStack, PlayerUuid};
 
 use crate::game_runtime::{GameRuntimeError, SharedGameRuntime};
 
@@ -21,13 +19,15 @@ impl SharedGameRuntime {
                 return None;
             };
             let slot = HOTBAR_START + usize::from(player.inventory.selected_hotbar());
-            player.inventory.selected_stack().cloned().map(|stack| {
-                SelectedItemSnapshot {
+            player
+                .inventory
+                .selected_stack()
+                .cloned()
+                .map(|stack| SelectedItemSnapshot {
                     slot,
                     stack,
                     game_mode: player.game_mode,
-                }
-            })
+                })
         })
     }
 
@@ -43,17 +43,20 @@ impl SharedGameRuntime {
         }
 
         let events = self.with_state_mut(|state| {
-            let player = state.player_mut(uuid).ok_or_else(|| {
-                GameRuntimeError::State(GameStateError::UnknownPlayer { uuid })
-            })?;
+            let player = state
+                .player_mut(uuid)
+                .ok_or_else(|| GameRuntimeError::State(GameStateError::UnknownPlayer { uuid }))?;
             if player.game_mode == GameMode::Creative {
                 return Ok(Vec::new());
             }
 
             let slot = HOTBAR_START + usize::from(player.inventory.selected_hotbar());
-            let Some(stack) = player.inventory.slot(slot).map_err(|error| {
-                GameRuntimeError::State(GameStateError::Inventory(error))
-            })?.cloned() else {
+            let Some(stack) = player
+                .inventory
+                .slot(slot)
+                .map_err(|error| GameRuntimeError::State(GameStateError::Inventory(error)))?
+                .cloned()
+            else {
                 return Ok(Vec::new());
             };
             if stack.count() < count {
@@ -63,13 +66,18 @@ impl SharedGameRuntime {
             let replacement = if stack.count() == count {
                 None
             } else {
-                Some(stack.copy_with_count(stack.count() - count).map_err(|error| {
-                    GameRuntimeError::State(GameStateError::Inventory(error))
-                })?)
+                Some(
+                    stack
+                        .copy_with_count(stack.count() - count)
+                        .map_err(|error| {
+                            GameRuntimeError::State(GameStateError::Inventory(error))
+                        })?,
+                )
             };
-            player.inventory.set_slot(slot, replacement.clone()).map_err(|error| {
-                GameRuntimeError::State(GameStateError::Inventory(error))
-            })?;
+            player
+                .inventory
+                .set_slot(slot, replacement.clone())
+                .map_err(|error| GameRuntimeError::State(GameStateError::Inventory(error)))?;
 
             Ok(vec![
                 GameEvent::InventorySlotChanged {
@@ -98,11 +106,9 @@ impl SharedGameRuntime {
         if count == 0 {
             return Ok(true);
         }
-        Ok(self
-            .selected_item(uuid)?
-            .is_some_and(|selected| {
-                selected.game_mode == GameMode::Creative || selected.stack.count() >= count
-            }))
+        Ok(self.selected_item(uuid)?.is_some_and(|selected| {
+            selected.game_mode == GameMode::Creative || selected.stack.count() >= count
+        }))
     }
 }
 
@@ -131,12 +137,7 @@ mod tests {
             .unwrap();
 
         runtime.consume_selected_item(uuid, 1).unwrap();
-        let remaining = runtime
-            .selected_item(uuid)
-            .unwrap()
-            .unwrap()
-            .stack
-            .count();
+        let remaining = runtime.selected_item(uuid).unwrap().unwrap().stack.count();
         assert_eq!(remaining, 1);
     }
 
