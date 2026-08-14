@@ -232,6 +232,88 @@ mod tests {
     }
 
     #[test]
+    fn block_drop_obeys_pickup_delay_and_enters_inventory() {
+        use std::num::NonZeroUsize;
+
+        let runtime = SharedGameRuntime::vanilla_overworld();
+        let uuid = PlayerUuid::new(3);
+        runtime.connect_player(uuid, "Notch", spawn()).unwrap();
+        let subscription = runtime.subscribe(NonZeroUsize::new(32).unwrap()).unwrap();
+        let entity_id = runtime
+            .spawn_world_item(
+                uuid,
+                [0.0, 64.0, 0.0],
+                ItemStack::new("minecraft:cobblestone", 1).unwrap(),
+            )
+            .unwrap();
+
+        for _ in 0..9 {
+            runtime.tick().unwrap();
+        }
+        assert!(
+            runtime
+                .with_state(|state| state.entities().get(entity_id).is_some())
+                .unwrap()
+        );
+        let before = runtime
+            .with_state(|state| {
+                state
+                    .player(uuid)
+                    .unwrap()
+                    .inventory
+                    .slots()
+                    .iter()
+                    .flatten()
+                    .filter(|stack| stack.item() == "minecraft:cobblestone")
+                    .map(ItemStack::count)
+                    .sum::<u32>()
+            })
+            .unwrap();
+        assert_eq!(before, 0);
+
+        runtime.tick().unwrap();
+
+        assert!(
+            runtime
+                .with_state(|state| state.entities().get(entity_id).is_none())
+                .unwrap()
+        );
+        let after = runtime
+            .with_state(|state| {
+                state
+                    .player(uuid)
+                    .unwrap()
+                    .inventory
+                    .slots()
+                    .iter()
+                    .flatten()
+                    .filter(|stack| stack.item() == "minecraft:cobblestone")
+                    .map(ItemStack::count)
+                    .sum::<u32>()
+            })
+            .unwrap();
+        assert_eq!(after, 1);
+
+        let events = std::iter::from_fn(|| subscription.try_recv().ok()).collect::<Vec<_>>();
+        assert!(events.iter().any(|event| matches!(
+            event,
+            GameEvent::InventoryChanged {
+                uuid: event_uuid,
+                inserted: 1,
+                item,
+            } if *event_uuid == uuid && item == "minecraft:cobblestone"
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            GameEvent::InventorySlotChanged { uuid: event_uuid, .. } if *event_uuid == uuid
+        )));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            GameEvent::ContainerContentChanged { uuid: event_uuid, .. } if *event_uuid == uuid
+        )));
+    }
+
+    #[test]
     fn block_drop_enters_world_item_simulation() {
         let runtime = SharedGameRuntime::vanilla_overworld();
         let uuid = PlayerUuid::new(3);
