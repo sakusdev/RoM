@@ -238,26 +238,14 @@ jobs:
           if "fn selected_placement_state(" not in text:
               text = text.replace(helper_marker, gameplay_helpers + helper_marker, 1)
 
-          old_break = r'''                Some(PacketKind::PlayerAction) => {
+          block_start = text.find("                Some(PacketKind::PlayerAction) => {")
+          block_end = text.find("                _ => {", block_start)
+          if block_start >= 0 and block_end >= 0:
+              replacement = r'''                Some(PacketKind::PlayerAction) => {
                       let action = decode_player_action(packet_reader.take_remaining())?;
                       let sequence = action.sequence;
-                      if is_block_interaction_within_reach(&player, action.position)
-                          && let Some(event) = player_action_to_world_event(
-                              action,
-                              BlockStateId::new(shared_world.world_profile().block_states.air),
-                          )
-                          && is_break_target_mutable(shared_world, event)?
-                      {
-                          let applied = shared_world.apply_event(connection, event)?;
-                          send_world_updates(writer, profile, &applied, play_reader)?;
-                      }
-                      send_block_changed_ack(writer, profile, sequence, play_reader)?;
-                  }
-          '''
-          new_break = r'''                Some(PacketKind::PlayerAction) => {
-                      let action = decode_player_action(packet_reader.take_remaining())?;
-                      let sequence = action.sequence;
-                      let broken_state = if is_block_interaction_within_reach(&player, action.position) {
+                      let in_reach = is_block_interaction_within_reach(&player, action.position);
+                      let broken_state = if in_reach {
                           shared_world.interaction_block_state(BlockPos {
                               x: action.position.x,
                               y: action.position.y,
@@ -266,7 +254,7 @@ jobs:
                       } else {
                           None
                       };
-                      if is_block_interaction_within_reach(&player, action.position)
+                      if in_reach
                           && let Some(event) = player_action_to_world_event(
                               action,
                               BlockStateId::new(shared_world.world_profile().block_states.air),
@@ -288,27 +276,7 @@ jobs:
                       }
                       send_block_changed_ack(writer, profile, sequence, play_reader)?;
                   }
-          '''
-          if old_break in text:
-              text = text.replace(old_break, new_break, 1)
-
-          old_place = r'''                Some(PacketKind::UseItemOn) => {
-                      let interaction = decode_use_item_on_block(packet_reader.take_remaining())?;
-                      let sequence = interaction.sequence;
-                      if is_block_interaction_within_reach(&player, interaction.position)
-                          && let Some(event) = use_item_on_block_to_world_event(
-                              interaction,
-                              BlockStateId::new(shared_world.world_profile().block_states.stone),
-                          )
-                          && is_placement_target_air(shared_world, event)?
-                      {
-                          let applied = shared_world.apply_event(connection, event)?;
-                          send_world_updates(writer, profile, &applied, play_reader)?;
-                      }
-                      send_block_changed_ack(writer, profile, sequence, play_reader)?;
-                  }
-          '''
-          new_place = r'''                Some(PacketKind::UseItemOn) => {
+                  Some(PacketKind::UseItemOn) => {
                       let interaction = decode_use_item_on_block(packet_reader.take_remaining())?;
                       let sequence = interaction.sequence;
                       let placed_state = if let Some(gameplay) = gameplay {
@@ -330,8 +298,7 @@ jobs:
                       send_block_changed_ack(writer, profile, sequence, play_reader)?;
                   }
           '''
-          if old_place in text:
-              text = text.replace(old_place, new_place, 1)
+              text = text[:block_start] + replacement + text[block_end:]
           runtime.write_text(text)
       - name: Format workspace
         run: cargo fmt --all
