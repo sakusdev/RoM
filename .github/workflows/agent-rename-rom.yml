@@ -35,8 +35,8 @@ jobs:
         shell: bash
         run: |
           set +e
-          cargo test --workspace --no-fail-fast 2>&1 | tee test-output.log
-          echo "${PIPESTATUS[0]}" > test-status.txt
+          cargo test --workspace --no-fail-fast 2>&1 | tee /tmp/test-output.log
+          echo "${PIPESTATUS[0]}" > /tmp/test-status.txt
           exit 0
       - name: Upload test output
         if: always()
@@ -44,18 +44,20 @@ jobs:
         with:
           name: rom-rename-test-output
           path: |
-            test-output.log
-            test-status.txt
+            /tmp/test-output.log
+            /tmp/test-status.txt
       - name: Fail on test errors
         shell: bash
         run: |
-          status=$(cat test-status.txt)
+          status=$(cat /tmp/test-status.txt)
           if [ "$status" != "0" ]; then
-            tail -n 200 test-output.log
+            tail -n 200 /tmp/test-output.log
             exit "$status"
           fi
       - name: Verify public server binary name
         run: cargo metadata --no-deps --format-version 1 | python -c 'import json,sys; d=json.load(sys.stdin); p=next(p for p in d["packages"] if p["name"]=="rom-server"); assert any(t["name"]=="rom" and "bin" in t["kind"] for t in p["targets"])'
+      - name: Verify workspace package names
+        run: cargo metadata --no-deps --format-version 1 | python -c 'import json,sys; d=json.load(sys.stdin); assert all("ferrum" not in p["name"].lower() for p in d["packages"]), [p["name"] for p in d["packages"]]'
       - name: Commit validated rename
         shell: bash
         run: |
