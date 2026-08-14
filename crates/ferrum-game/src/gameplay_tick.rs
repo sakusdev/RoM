@@ -196,15 +196,13 @@ impl GameState {
             });
 
             if let Some(player) = self.players.get(&uuid) {
-                outcome
-                    .events
-                    .extend(result.changed_slots.iter().copied().map(|slot| {
-                        GameEvent::InventorySlotChanged {
-                            uuid,
-                            slot,
-                            stack: player.inventory.slots()[slot].clone(),
-                        }
-                    }));
+                outcome.events.extend(result.changed_slots.iter().copied().map(|slot| {
+                    GameEvent::InventorySlotChanged {
+                        uuid,
+                        slot,
+                        stack: player.inventory.slots()[slot].clone(),
+                    }
+                }));
             }
         }
 
@@ -236,8 +234,7 @@ impl GameState {
             if data.value == 0 {
                 continue;
             }
-            let Some(value) = try_pickup_experience_orb(&mut self.entities, entity_id, position)?
-            else {
+            let Some(value) = try_pickup_experience_orb(&mut self.entities, entity_id, position)? else {
                 continue;
             };
 
@@ -334,8 +331,10 @@ fn experience_orb_ids(state: &GameState) -> Vec<EntityId> {
 }
 
 fn mix_seed(source: u128, game_time: u64, index: u64, domain: u64) -> u128 {
-    let mut value =
-        source ^ (u128::from(game_time) << 64) ^ u128::from(index) ^ (u128::from(domain) << 32);
+    let mut value = source
+        ^ (u128::from(game_time) << 64)
+        ^ u128::from(index)
+        ^ (u128::from(domain) << 32);
     value ^= value >> 33;
     value = value.wrapping_mul(0xff51_afd7_ed55_8ccd_ff51_afd7_ed55_8ccd);
     value ^= value >> 29;
@@ -351,7 +350,11 @@ fn deterministic_angle(source: u128, game_time: u64, index: u64) -> f64 {
 
 fn radial_velocity(index: usize, horizontal: f64, vertical: f64) -> Result<Velocity, EntityError> {
     let angle = (index as f64 * 2.399_963_229_728_653).rem_euclid(std::f64::consts::TAU);
-    Velocity::new([angle.cos() * horizontal, vertical, angle.sin() * horizontal])
+    Velocity::new([
+        angle.cos() * horizontal,
+        vertical,
+        angle.sin() * horizontal,
+    ])
 }
 
 #[derive(Debug, Error)]
@@ -419,12 +422,10 @@ mod tests {
         let outcome = state.tick_gameplay().unwrap();
         assert_eq!(outcome.stats.item_pickups, 1);
         assert!(state.entities.get(item_id).is_none());
-        assert!(
-            outcome
-                .events
-                .iter()
-                .any(|event| matches!(event, GameEvent::InventoryChanged { inserted: 4, .. }))
-        );
+        assert!(outcome.events.iter().any(|event| matches!(
+            event,
+            GameEvent::InventoryChanged { inserted: 4, .. }
+        )));
     }
 
     #[test]
@@ -474,13 +475,12 @@ mod tests {
         let sum = state
             .entities
             .iter()
-            .filter_map(|(id, entity)| {
-                (entity.entity_type.as_str() == "minecraft:experience_orb").then(|| {
-                    experience_orb_data(&state.entities, *id)
-                        .unwrap()
-                        .unwrap()
-                        .value
-                })
+            .filter(|(_, entity)| entity.entity_type.as_str() == "minecraft:experience_orb")
+            .map(|(id, _)| {
+                experience_orb_data(&state.entities, *id)
+                    .unwrap()
+                    .unwrap()
+                    .value
             })
             .sum::<u32>();
         assert_eq!(sum, 3000);
