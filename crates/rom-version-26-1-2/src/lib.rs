@@ -100,6 +100,7 @@ pub fn protocol_profile() -> Result<ProtocolProfile, ProfileError> {
         (PacketKind::PlayerCombatKill, 0x44),
         (PacketKind::Respawn, 0x52),
         (PacketKind::AcceptTeleportation, 0x00),
+        (PacketKind::Attack, 0x01),
         (PacketKind::PlayDisconnect, 0x20),
         (PacketKind::KeepAliveRequest, 0x2c),
         (PacketKind::KeepAliveResponse, 0x1c),
@@ -221,6 +222,7 @@ mod tests {
             packets.require(PacketKind::AcceptTeleportation).unwrap(),
             0x00
         );
+        assert_eq!(packets.require(PacketKind::Attack).unwrap(), 0x01);
         assert_eq!(packets.require(PacketKind::KeepAliveRequest).unwrap(), 0x2c);
         assert_eq!(
             packets.require(PacketKind::KeepAliveResponse).unwrap(),

@@ -21,6 +21,7 @@ use rom_protocol::{PacketDirection, PacketKind, ProtocolPhase, ProtocolProfile, 
 use rom_runtime::{ConnectionId, DeterministicRuntime, Tick};
 use rom_server::{
     authoritative_runtime::{PlayInput, PlayOutput},
+    combat_runtime::PlayerAttackOutcome,
     game_runtime::SharedGameRuntime,
     mining_runtime::mining_properties_for_state,
     play_connection::PlayReaderEndpoint,
@@ -77,6 +78,12 @@ impl<'a> GameplaySync<'a> {
             player_uuid,
             items,
         }
+    }
+
+    fn attack_entity(self, entity_id: u32) -> Result<Option<PlayerAttackOutcome>> {
+        Ok(self
+            .runtime
+            .attack_player_entity(self.player_uuid, entity_id)?)
     }
 
     fn synchronize(self, player: &PlayerState) -> Result<()> {
@@ -628,6 +635,7 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
                 Some(
                     kind @ (PacketKind::KeepAliveResponse
                     | PacketKind::ClientTickEnd
+                    | PacketKind::Attack
                     | PacketKind::ChunkBatchReceived
                     | PacketKind::MovePlayerPosition
                     | PacketKind::MovePlayerPositionRotation
@@ -655,6 +663,11 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
                         }
                         PlayInput::ClientTickEnd => {
                             ticks_since_request = ticks_since_request.saturating_add(1);
+                        }
+                        PlayInput::AttackEntity(entity_id) => {
+                            if let Some(gameplay) = gameplay {
+                                let _ = gameplay.attack_entity(entity_id)?;
+                            }
                         }
                         PlayInput::ChunkBatchReceived(_) => {}
                         PlayInput::Movement(movement) => {

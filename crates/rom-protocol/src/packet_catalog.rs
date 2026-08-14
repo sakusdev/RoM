@@ -300,6 +300,7 @@ pub fn known_packet_kind(
         (ProtocolPhase::Play, PacketDirection::Serverbound, "client_command") => {
             Some(PacketKind::ClientCommand)
         }
+        (ProtocolPhase::Play, PacketDirection::Serverbound, "attack") => Some(PacketKind::Attack),
         (ProtocolPhase::Play, PacketDirection::Serverbound, "move_player_pos") => {
             Some(PacketKind::MovePlayerPosition)
         }
@@ -446,6 +447,7 @@ pub const fn canonical_packet_name(kind: PacketKind) -> &'static str {
         PacketKind::KeepAliveRequest | PacketKind::KeepAliveResponse => "minecraft:keep_alive",
         PacketKind::ClientTickEnd => "minecraft:client_tick_end",
         PacketKind::ClientCommand => "minecraft:client_command",
+        PacketKind::Attack => "minecraft:attack",
         PacketKind::MovePlayerPosition => "minecraft:move_player_pos",
         PacketKind::MovePlayerPositionRotation => "minecraft:move_player_pos_rot",
         PacketKind::MovePlayerRotation => "minecraft:move_player_rot",
@@ -524,6 +526,22 @@ pub enum PacketCatalogError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recognizes_attack_as_serverbound_play_packet() {
+        assert_eq!(
+            known_packet_kind(
+                ProtocolPhase::Play,
+                PacketDirection::Serverbound,
+                "minecraft:attack",
+            ),
+            Some(PacketKind::Attack)
+        );
+        assert_eq!(
+            canonical_packet_name(PacketKind::Attack),
+            "minecraft:attack"
+        );
+    }
 
     #[test]
     fn recognizes_set_player_inventory_as_optional_typed_packet() {

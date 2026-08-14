@@ -76,6 +76,7 @@ pub enum PacketKind {
     KeepAliveResponse,
     ClientTickEnd,
     ClientCommand,
+    Attack,
     MovePlayerPosition,
     MovePlayerPositionRotation,
     MovePlayerRotation,
@@ -149,6 +150,7 @@ impl PacketKind {
         Self::KeepAliveResponse,
         Self::ClientTickEnd,
         Self::ClientCommand,
+        Self::Attack,
         Self::MovePlayerPosition,
         Self::MovePlayerPositionRotation,
         Self::MovePlayerRotation,
@@ -223,6 +225,7 @@ impl PacketKind {
         Self::KeepAliveRequest,
         Self::KeepAliveResponse,
         Self::ClientTickEnd,
+        Self::Attack,
         Self::MovePlayerPosition,
         Self::MovePlayerPositionRotation,
         Self::MovePlayerRotation,
@@ -269,6 +272,7 @@ impl PacketKind {
             | Self::KeepAliveResponse
             | Self::ClientTickEnd
             | Self::ClientCommand
+            | Self::Attack
             | Self::MovePlayerPosition
             | Self::MovePlayerPositionRotation
             | Self::MovePlayerRotation
@@ -324,6 +328,7 @@ impl PacketKind {
             | Self::KeepAliveResponse
             | Self::ClientTickEnd
             | Self::ClientCommand
+            | Self::Attack
             | Self::MovePlayerPosition
             | Self::MovePlayerPositionRotation
             | Self::MovePlayerRotation

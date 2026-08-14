@@ -19,6 +19,9 @@ pub fn decode_play_input(kind: PacketKind, payload: &[u8]) -> Result<Option<Play
             require_length("client tick end", payload, 0)?;
             PlayInput::ClientTickEnd
         }
+        PacketKind::Attack => {
+            PlayInput::AttackEntity(decode_positive_varint("attack entity id", payload)?)
+        }
         PacketKind::KeepAliveResponse => {
             require_length("keep alive response", payload, 8)?;
             PlayInput::KeepAliveResponse(i64::from_be_bytes(
@@ -57,6 +60,29 @@ pub fn decode_play_input(kind: PacketKind, payload: &[u8]) -> Result<Option<Play
     Ok(Some(input))
 }
 
+fn decode_positive_varint(name: &str, payload: &[u8]) -> Result<u32> {
+    let mut value = 0_u32;
+    let mut cursor = 0_usize;
+    for shift in (0..35).step_by(7) {
+        let Some(&byte) = payload.get(cursor) else {
+            bail!("{name} contains a truncated VarInt");
+        };
+        cursor += 1;
+        value |= u32::from(byte & 0x7f) << shift;
+        if byte & 0x80 == 0 {
+            if cursor != payload.len() {
+                bail!("{name} payload contains trailing bytes");
+            }
+            let signed = value as i32;
+            if signed <= 0 {
+                bail!("{name} must be a positive entity id, got {signed}");
+            }
+            return Ok(signed as u32);
+        }
+    }
+    bail!("{name} VarInt is too long")
+}
+
 fn require_length(name: &str, payload: &[u8], expected: usize) -> Result<()> {
     if payload.len() != expected {
         bail!(
@@ -88,6 +114,16 @@ mod tests {
                 .to_string()
                 .contains("must be 0 bytes")
         );
+    }
+
+    #[test]
+    fn decodes_dedicated_attack_entity_id() {
+        assert_eq!(
+            decode_play_input(PacketKind::Attack, &[0xac, 0x02]).unwrap(),
+            Some(PlayInput::AttackEntity(300))
+        );
+        assert!(decode_play_input(PacketKind::Attack, &[0]).is_err());
+        assert!(decode_play_input(PacketKind::Attack, &[1, 0]).is_err());
     }
 
     #[test]

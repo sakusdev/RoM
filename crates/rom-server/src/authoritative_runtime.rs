@@ -16,6 +16,7 @@ use std::{
 pub enum PlayInput {
     ClientTickEnd,
     KeepAliveResponse(i64),
+    AttackEntity(u32),
     Movement(PlayerMovement),
     ChunkBatchReceived(f32),
     Disconnected,
@@ -66,6 +67,7 @@ pub struct ConnectionRuntimeState {
     pub last_keep_alive_request: Option<i64>,
     pub keep_alive_pending: bool,
     pub last_movement: Option<PlayerMovement>,
+    pub last_attack_entity: Option<u32>,
     pub desired_chunks_per_tick: Option<f32>,
     ticks_since_keep_alive_request: u64,
 }
@@ -235,6 +237,12 @@ impl AuthoritativePlayRuntime {
                             &mut report,
                         );
                     }
+                }
+                PlayInput::AttackEntity(entity_id) => {
+                    self.connections
+                        .entry(input.connection)
+                        .or_default()
+                        .last_attack_entity = Some(entity_id);
                 }
                 PlayInput::Movement(movement) => {
                     self.connections
