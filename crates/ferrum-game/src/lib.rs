@@ -20,6 +20,7 @@ pub mod gameplay_tick;
 pub mod hunger;
 pub mod inventory;
 pub mod item_entity;
+pub mod knockback;
 pub mod loot;
 pub mod mining;
 pub mod persistence;
