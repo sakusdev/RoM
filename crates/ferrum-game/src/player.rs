@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{EntityId, Inventory, InventorySession, validate_resource_location};
+use crate::{EntityId, Inventory, InventorySession, PlayerGameplay, validate_resource_location};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -141,10 +141,17 @@ impl Vitals {
     }
 
     pub fn heal(&mut self, amount: f32) -> Result<f32, PlayerError> {
+        self.heal_to(amount, 20.0)
+    }
+
+    pub fn heal_to(&mut self, amount: f32, max_health: f32) -> Result<f32, PlayerError> {
         if !amount.is_finite() || amount < 0.0 {
             return Err(PlayerError::InvalidHealing { amount });
         }
-        self.health = (self.health + amount).min(20.0);
+        if !max_health.is_finite() || max_health <= 0.0 {
+            return Err(PlayerError::InvalidMaximumHealth { max_health });
+        }
+        self.health = (self.health + amount).min(max_health);
         Ok(self.health)
     }
 
@@ -185,6 +192,8 @@ pub struct PlayerState {
     pub abilities: Abilities,
     pub vitals: Vitals,
     pub experience: Experience,
+    #[serde(default)]
+    pub gameplay: PlayerGameplay,
     pub permission_level: u8,
     pub connected: bool,
 }
@@ -214,6 +223,7 @@ impl PlayerState {
             abilities: Abilities::for_game_mode(GameMode::Survival),
             vitals: Vitals::default(),
             experience: Experience::default(),
+            gameplay: PlayerGameplay::default(),
             permission_level: 0,
             connected: true,
         })
@@ -277,6 +287,8 @@ pub enum PlayerError {
     InvalidDamage { amount: f32 },
     #[error("healing amount {amount} must be finite and non-negative")]
     InvalidHealing { amount: f32 },
+    #[error("maximum health {max_health} must be finite and positive")]
+    InvalidMaximumHealth { max_health: f32 },
 }
 
 #[cfg(test)]
@@ -320,6 +332,15 @@ mod tests {
         assert_eq!(vitals.absorption, 0.0);
         assert_eq!(vitals.damage(100.0).unwrap(), 0.0);
         assert!(vitals.is_dead());
+    }
+
+    #[test]
+    fn healing_can_respect_attribute_maximum() {
+        let mut vitals = Vitals {
+            health: 20.0,
+            ..Vitals::default()
+        };
+        assert_eq!(vitals.heal_to(30.0, 40.0).unwrap(), 40.0);
     }
 
     #[test]
