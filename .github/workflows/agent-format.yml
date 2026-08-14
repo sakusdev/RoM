@@ -20,15 +20,180 @@ jobs:
         run: |
           from pathlib import Path
 
-          path = Path("crates/ferrum-play/src/lib.rs")
-          text = path.read_text()
+          play = Path("crates/ferrum-play/src/lib.rs")
+          text = play.read_text()
           if "mod generic_entity;" not in text:
               text = text.replace("mod entity;\n", "mod entity;\nmod generic_entity;\n", 1)
           export = "pub use generic_entity::{GenericEntityEncodeError, encode_add_world_entity};\n"
           if export not in text:
               marker = "pub use health::{HealthEncodeError, encode_set_health};\n"
               text = text.replace(marker, export + marker, 1)
-          path.write_text(text)
+          play.write_text(text)
+
+          replication = Path("crates/ferrum-server/src/game_replication.rs")
+          text = replication.read_text()
+          text = text.replace(
+              "PlayerInfoEntry, Respawn, RespawnDataToKeep, encode_add_entity, encode_empty_entity_data,",
+              "PlayerInfoEntry, Respawn, RespawnDataToKeep, encode_add_entity, encode_add_world_entity, encode_empty_entity_data,",
+              1,
+          )
+
+          world_snapshot = '''#[derive(Debug, Clone)]
+          struct WorldEntitySnapshot {
+              entity_id: EntityId,
+              uuid: ferrum_game::EntityUuid,
+              entity_type: String,
+              transform: Transform,
+              velocity: Velocity,
+          }
+
+          '''
+          marker = "#[derive(Debug)]\nstruct ReplicationConnection"
+          if "struct WorldEntitySnapshot" not in text:
+              text = text.replace(marker, world_snapshot + marker, 1)
+
+          if "world_entities: BTreeMap<EntityId, WorldEntitySnapshot>" not in text:
+              text = text.replace(
+                  "    entities: BTreeMap<PlayerUuid, PlayerEntitySnapshot>,\n    active: bool,",
+                  "    entities: BTreeMap<PlayerUuid, PlayerEntitySnapshot>,\n    world_entities: BTreeMap<EntityId, WorldEntitySnapshot>,\n    active: bool,",
+                  1,
+              )
+              text = text.replace(
+                  "            entities: BTreeMap::new(),\n            active: false,",
+                  "            entities: BTreeMap::new(),\n            world_entities: BTreeMap::new(),\n            active: false,",
+                  1,
+              )
+              text = text.replace(
+                  "            self.entities.clear();\n            self.healthy = false;",
+                  "            self.entities.clear();\n            self.world_entities.clear();\n            self.healthy = false;",
+                  1,
+              )
+
+          sync_call = "        sync_world_entities(&runtime, &config, &mut connections, &mut exit)?;\n        flush_connections(&mut connections, &mut exit);"
+          if sync_call not in text:
+              text = text.replace(
+                  "        flush_connections(&mut connections, &mut exit);\n    }\n}\n\nfn process_commands(",
+                  sync_call + "\n    }\n}\n\nfn process_commands(",
+                  1,
+              )
+
+          helpers = r'''fn authoritative_world_entities(
+              runtime: &SharedGameRuntime,
+              registry: &EntityProtocolRegistry,
+          ) -> Result<BTreeMap<EntityId, WorldEntitySnapshot>> {
+              runtime
+                  .with_state(|state| {
+                      state
+                          .entities()
+                          .iter()
+                          .filter_map(|(entity_id, entity)| {
+                              if entity.is_player()
+                                  || registry.protocol_id(entity.entity_type.as_str()).is_none()
+                              {
+                                  return None;
+                              }
+                              Some((
+                                  *entity_id,
+                                  WorldEntitySnapshot {
+                                      entity_id: *entity_id,
+                                      uuid: entity.uuid,
+                                      entity_type: entity.entity_type.as_str().to_owned(),
+                                      transform: entity.transform,
+                                      velocity: entity.velocity,
+                                  },
+                              ))
+                          })
+                          .collect()
+                  })
+                  .context("cannot read authoritative world entities")
+          }
+
+          fn sync_world_entities(
+              runtime: &SharedGameRuntime,
+              config: &GameReplicationConfig,
+              connections: &mut BTreeMap<PlayerUuid, ReplicationConnection>,
+              exit: &mut GameReplicationExit,
+          ) -> Result<()> {
+              let current = authoritative_world_entities(runtime, &config.entity_protocol_ids)?;
+              for connection in connections.values_mut() {
+                  if !connection.active || !connection.healthy {
+                      continue;
+                  }
+
+                  let removed = connection
+                      .world_entities
+                      .keys()
+                      .filter(|entity_id| !current.contains_key(entity_id))
+                      .copied()
+                      .collect::<Vec<_>>();
+                  if !removed.is_empty() {
+                      connection.queue(
+                          PlayOutput::ProtocolPacket {
+                              kind: PacketKind::RemoveEntities,
+                              payload: encode_remove_entities(&removed)
+                                  .context("cannot encode world entity removals")?,
+                          },
+                          exit,
+                      );
+                  }
+
+                  for (entity_id, snapshot) in &current {
+                      match connection.world_entities.get(entity_id).cloned() {
+                          None => {
+                              if let Some(payload) = encode_add_world_entity(
+                                  snapshot.entity_id,
+                                  snapshot.uuid,
+                                  &snapshot.entity_type,
+                                  snapshot.transform,
+                                  snapshot.velocity,
+                                  &config.entity_protocol_ids,
+                              )
+                              .context("cannot encode world add-entity packet")?
+                              {
+                                  connection.queue(
+                                      PlayOutput::ProtocolPacket {
+                                          kind: PacketKind::AddEntity,
+                                          payload,
+                                      },
+                                      exit,
+                                  );
+                                  connection.queue(
+                                      PlayOutput::ProtocolPacket {
+                                          kind: PacketKind::SetEntityData,
+                                          payload: encode_empty_entity_data(snapshot.entity_id)
+                                              .context("cannot encode initial world entity data")?,
+                                      },
+                                      exit,
+                                  );
+                              }
+                          }
+                          Some(previous) => {
+                              if let Some(movement) = encode_entity_movement(
+                                  snapshot.entity_id,
+                                  previous.transform,
+                                  snapshot.transform,
+                              )
+                              .context("cannot encode world entity movement")?
+                              {
+                                  queue_encoded_movement(connection, movement, exit);
+                              }
+                          }
+                      }
+                  }
+
+                  if connection.healthy {
+                      connection.world_entities = current.clone();
+                  }
+              }
+              Ok(())
+          }
+
+          '''
+          helper_marker = "const fn protocol_game_mode(game_mode: GameMode) -> i8 {"
+          if "fn sync_world_entities(" not in text:
+              text = text.replace(helper_marker, helpers + helper_marker, 1)
+
+          replication.write_text(text)
       - name: Format workspace
         run: cargo fmt --all
       - name: Commit formatting
@@ -40,7 +205,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add --all
-          git commit -m "Apply agent gameplay codemods and rustfmt"
+          git commit -m "Wire generic world entity replication"
           git push
       - uses: actions/upload-artifact@v4
         with:
