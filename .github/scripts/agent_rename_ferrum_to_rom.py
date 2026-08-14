@@ -45,6 +45,9 @@ def rewrite(text: str) -> str:
     text = text.replace("FERRUM_", "ROM_")
     text = text.replace("Ferrum", "RoM")
     text = text.replace("FERRUM", "ROM")
+    # One protocol test encoded the old branding length manually. After the
+    # string becomes "RoM", its VarInt byte length must change from 6 to 3.
+    text = text.replace('let mut expected = vec![8, 0, 6];\n        expected.extend_from_slice(b"RoM");', 'let mut expected = vec![8, 0, 3];\n        expected.extend_from_slice(b"RoM");')
     text = text.replace(PLACEHOLDER, "FerrumC")
     return text
 
