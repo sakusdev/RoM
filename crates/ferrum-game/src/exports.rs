@@ -24,6 +24,10 @@ pub use crate::damage::{
     apply_protection, apply_resistance, calculate_damage, difficulty_multiplier, fall_damage,
     knockback_vector,
 };
+pub use crate::durability::{
+    DAMAGE_COMPONENT, DurabilityError, DurabilityResult, MAX_UNBREAKING_LEVEL, damage_item,
+    item_damage, vanilla_max_durability,
+};
 pub use crate::entity::{
     Entity, EntityError, EntityId, EntityStore, EntityType, EntityUuid, Transform, Velocity,
 };
