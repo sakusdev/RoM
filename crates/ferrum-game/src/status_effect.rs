@@ -23,27 +23,38 @@ impl StatusEffect {
         amplifier: u8,
         duration_ticks: u32,
     ) -> Result<Self, StatusEffectError> {
-        let id = id.into();
-        if !validate_resource_location(&id) {
-            return Err(StatusEffectError::InvalidId(id));
-        }
-        if amplifier > MAX_EFFECT_AMPLIFIER {
-            return Err(StatusEffectError::AmplifierTooLarge(amplifier));
-        }
-        if duration_ticks == 0 || duration_ticks > MAX_EFFECT_DURATION_TICKS {
-            return Err(StatusEffectError::InvalidDuration(duration_ticks));
-        }
-        Ok(Self {
-            id,
+        let effect = Self {
+            id: id.into(),
             amplifier,
             duration_ticks,
             ambient: false,
             show_particles: true,
             show_icon: true,
-        })
+        };
+        effect.validate()?;
+        Ok(effect)
     }
+
+    pub fn validate(&self) -> Result<(), StatusEffectError> {
+        if !validate_resource_location(&self.id) {
+            return Err(StatusEffectError::InvalidId(self.id.clone()));
+        }
+        if self.amplifier > MAX_EFFECT_AMPLIFIER {
+            return Err(StatusEffectError::AmplifierTooLarge(self.amplifier));
+        }
+        if self.duration_ticks == 0 || self.duration_ticks > MAX_EFFECT_DURATION_TICKS {
+            return Err(StatusEffectError::InvalidDuration(self.duration_ticks));
+        }
+        Ok(())
+    }
+
     pub fn tick(&mut self) {
         self.duration_ticks = self.duration_ticks.saturating_sub(1);
+    }
+
+    #[must_use]
+    pub fn level(&self) -> u16 {
+        u16::from(self.amplifier) + 1
     }
 }
 
@@ -104,7 +115,7 @@ impl StatusEffectStore {
         let ids = self
             .active
             .iter()
-            .filter_map(|(id, e)| (e.duration_ticks == 0).then_some(id.clone()))
+            .filter_map(|(id, effect)| (effect.duration_ticks == 0).then_some(id.clone()))
             .collect::<Vec<_>>();
         ids.into_iter()
             .filter_map(|id| self.active.remove(&id))
@@ -114,21 +125,21 @@ impl StatusEffectStore {
     pub fn movement_multiplier(&self) -> f64 {
         let speed = self
             .get("minecraft:speed")
-            .map_or(0.0, |e| 0.2 * f64::from(e.amplifier + 1));
+            .map_or(0.0, |effect| 0.2 * f64::from(effect.level()));
         let slow = self
             .get("minecraft:slowness")
-            .map_or(0.0, |e| 0.15 * f64::from(e.amplifier + 1));
+            .map_or(0.0, |effect| 0.15 * f64::from(effect.level()));
         (1.0 + speed) * (1.0 - slow).max(0.0)
     }
     #[must_use]
     pub fn jump_bonus(&self) -> f64 {
         self.get("minecraft:jump_boost")
-            .map_or(0.0, |e| 0.1 * f64::from(e.amplifier + 1))
+            .map_or(0.0, |effect| 0.1 * f64::from(effect.level()))
     }
     #[must_use]
     pub fn haste_multiplier(&self) -> f64 {
         self.get("minecraft:haste")
-            .map_or(1.0, |e| 1.0 + 0.2 * f64::from(e.amplifier + 1))
+            .map_or(1.0, |effect| 1.0 + 0.2 * f64::from(effect.level()))
     }
     #[must_use]
     pub fn mining_fatigue_multiplier(&self) -> f64 {
@@ -157,27 +168,47 @@ mod tests {
     use super::*;
     #[test]
     fn stronger_replaces() {
-        let mut s = StatusEffectStore::default();
-        s.apply(StatusEffect::new("minecraft:speed", 0, 20).unwrap());
+        let mut store = StatusEffectStore::default();
+        store.apply(StatusEffect::new("minecraft:speed", 0, 20).unwrap());
         assert_eq!(
-            s.apply(StatusEffect::new("minecraft:speed", 1, 10).unwrap()),
+            store.apply(StatusEffect::new("minecraft:speed", 1, 10).unwrap()),
             EffectUpdate::Replaced
         );
     }
     #[test]
     fn equal_extends() {
-        let mut s = StatusEffectStore::default();
-        s.apply(StatusEffect::new("minecraft:haste", 0, 20).unwrap());
+        let mut store = StatusEffectStore::default();
+        store.apply(StatusEffect::new("minecraft:haste", 0, 20).unwrap());
         assert_eq!(
-            s.apply(StatusEffect::new("minecraft:haste", 0, 40).unwrap()),
+            store.apply(StatusEffect::new("minecraft:haste", 0, 40).unwrap()),
             EffectUpdate::Extended
         );
     }
     #[test]
     fn expires() {
-        let mut s = StatusEffectStore::default();
-        s.apply(StatusEffect::new("minecraft:speed", 0, 1).unwrap());
-        assert_eq!(s.tick().len(), 1);
-        assert!(!s.contains("minecraft:speed"));
+        let mut store = StatusEffectStore::default();
+        store.apply(StatusEffect::new("minecraft:speed", 0, 1).unwrap());
+        assert_eq!(store.tick().len(), 1);
+        assert!(!store.contains("minecraft:speed"));
+    }
+    #[test]
+    fn maximum_amplifier_level_math_does_not_overflow() {
+        let effect = StatusEffect::new("minecraft:speed", MAX_EFFECT_AMPLIFIER, 20).unwrap();
+        assert_eq!(effect.level(), 128);
+    }
+    #[test]
+    fn public_data_can_be_revalidated_after_deserialization() {
+        let effect = StatusEffect {
+            id: "minecraft:speed".to_owned(),
+            amplifier: u8::MAX,
+            duration_ticks: 20,
+            ambient: false,
+            show_particles: true,
+            show_icon: true,
+        };
+        assert_eq!(
+            effect.validate(),
+            Err(StatusEffectError::AmplifierTooLarge(u8::MAX))
+        );
     }
 }
