@@ -1,0 +1,28 @@
+name: Agent Render RoM Release Workflow
+
+on:
+  push:
+    branches: [agent/item-entity-domain]
+    paths:
+      - '.github/workflows/agent-render-rom-release.yml'
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Render renamed release workflow
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('.github/workflows/release.yml')
+          text = path.read_text()
+          text = text.replace('-p ferrum-server', '-p rom-server')
+          text = text.replace('ferrum-server', 'rom')
+          path.write_text(text)
+          assert 'ferrum-server' not in text
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: renamed-release-workflow
+          path: .github/workflows/release.yml
