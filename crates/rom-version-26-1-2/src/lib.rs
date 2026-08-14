@@ -4,6 +4,7 @@
 //! and the generated synchronized-registry manifest required during Configuration.
 //! Gameplay state remains separate from version data.
 
+pub mod entity_metadata;
 mod registries;
 mod tags;
 

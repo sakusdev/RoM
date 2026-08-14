@@ -9,19 +9,24 @@ use std::{
 use anyhow::{Context, Result, bail};
 use rom_game::{
     EntityId, EquipmentSlot, GameEvent, GameMode, GameState, PLAYER_INVENTORY_SLOTS, PlayerState,
-    PlayerUuid, Transform, Velocity, Vitals,
+    PlayerUuid, Transform, Velocity, Vitals, experience_orb::experience_orb_data,
+    item_entity::item_entity_data,
 };
 use rom_pack::RomPackWorld;
 use rom_play::{
-    CommonPlayerSpawnInfo, DataComponentProtocolRegistry, EncodedEntityMovement,
+    CommonPlayerSpawnInfo, DataComponentProtocolRegistry, EncodedEntityMovement, EntityDataEntry,
     EntityMovementKind, EntityProtocolRegistry, EquipmentEntry, ItemProtocolRegistry,
     PlayerInfoEntry, Respawn, RespawnDataToKeep, encode_add_entity, encode_add_world_entity,
-    encode_empty_entity_data, encode_entity_movement, encode_hurt_animation,
-    encode_player_combat_kill, encode_player_info_remove, encode_player_info_update,
-    encode_remove_entities, encode_respawn, encode_rotate_head, encode_set_equipment,
-    encode_set_health, encode_teleport_entity,
+    encode_empty_entity_data, encode_entity_data, encode_entity_data_varint_value,
+    encode_entity_movement, encode_hurt_animation, encode_item_stack, encode_player_combat_kill,
+    encode_player_info_remove, encode_player_info_update, encode_remove_entities, encode_respawn,
+    encode_rotate_head, encode_set_equipment, encode_set_health, encode_teleport_entity,
 };
 use rom_protocol::PacketKind;
+use rom_version_26_1_2::entity_metadata::{
+    EXPERIENCE_ORB_VALUE_INDEX, INT_SERIALIZER_ID, ITEM_ENTITY_STACK_INDEX,
+    ITEM_STACK_SERIALIZER_ID,
+};
 
 use crate::{
     authoritative_runtime::PlayOutput,
@@ -95,6 +100,7 @@ struct WorldEntitySnapshot {
     entity_type: String,
     transform: Transform,
     velocity: Velocity,
+    entity_data_payload: Vec<u8>,
 }
 
 #[derive(Debug)]
@@ -895,33 +901,90 @@ fn dispatch_event(
 
 fn authoritative_world_entities(
     runtime: &SharedGameRuntime,
-    registry: &EntityProtocolRegistry,
+    config: &GameReplicationConfig,
 ) -> Result<BTreeMap<EntityId, WorldEntitySnapshot>> {
     runtime
-        .with_state(|state| {
-            state
-                .entities()
-                .iter()
-                .filter_map(|(entity_id, entity)| {
-                    if entity.is_player()
-                        || registry.protocol_id(entity.entity_type.as_str()).is_none()
-                    {
-                        return None;
-                    }
-                    Some((
-                        *entity_id,
-                        WorldEntitySnapshot {
-                            entity_id: *entity_id,
-                            uuid: entity.uuid,
-                            entity_type: entity.entity_type.as_str().to_owned(),
-                            transform: entity.transform,
-                            velocity: entity.velocity,
-                        },
-                    ))
-                })
-                .collect()
+        .with_state(|state| -> Result<_> {
+            let mut snapshots = BTreeMap::new();
+            for (entity_id, entity) in state.entities().iter() {
+                if entity.is_player()
+                    || config
+                        .entity_protocol_ids
+                        .protocol_id(entity.entity_type.as_str())
+                        .is_none()
+                {
+                    continue;
+                }
+                let entity_data_payload = encode_world_entity_data(
+                    state,
+                    *entity_id,
+                    entity.entity_type.as_str(),
+                    config,
+                )?;
+                snapshots.insert(
+                    *entity_id,
+                    WorldEntitySnapshot {
+                        entity_id: *entity_id,
+                        uuid: entity.uuid,
+                        entity_type: entity.entity_type.as_str().to_owned(),
+                        transform: entity.transform,
+                        velocity: entity.velocity,
+                        entity_data_payload,
+                    },
+                );
+            }
+            Ok(snapshots)
         })
-        .context("cannot read authoritative world entities")
+        .context("cannot read authoritative world entities")?
+}
+
+fn encode_world_entity_data(
+    state: &GameState,
+    entity_id: EntityId,
+    entity_type: &str,
+    config: &GameReplicationConfig,
+) -> Result<Vec<u8>> {
+    match entity_type {
+        "minecraft:item" => {
+            let data = item_entity_data(state.entities(), entity_id)
+                .context("cannot read authoritative item entity data")?
+                .context("item entity is missing its authoritative stack data")?;
+            let stack = encode_item_stack(
+                Some(&data.stack),
+                &config.item_protocol_ids,
+                &config.data_component_protocol_ids,
+            )
+            .context("cannot encode item entity stack")?
+            .context("item entity stack references unavailable protocol registry data")?;
+            encode_entity_data(
+                entity_id,
+                &[EntityDataEntry::new(
+                    ITEM_ENTITY_STACK_INDEX,
+                    ITEM_STACK_SERIALIZER_ID,
+                    &stack,
+                )],
+            )
+            .context("cannot encode item entity metadata")
+        }
+        "minecraft:experience_orb" => {
+            let data = experience_orb_data(state.entities(), entity_id)
+                .context("cannot read authoritative experience orb data")?
+                .context("experience orb is missing its authoritative value")?;
+            let value = i32::try_from(data.value)
+                .context("experience orb value exceeds protocol VarInt range")?;
+            let value = encode_entity_data_varint_value(value);
+            encode_entity_data(
+                entity_id,
+                &[EntityDataEntry::new(
+                    EXPERIENCE_ORB_VALUE_INDEX,
+                    INT_SERIALIZER_ID,
+                    &value,
+                )],
+            )
+            .context("cannot encode experience orb metadata")
+        }
+        _ => encode_empty_entity_data(entity_id).context("cannot encode empty world entity data"),
+    }
 }
 
 fn sync_world_entities(
@@ -930,7 +993,7 @@ fn sync_world_entities(
     connections: &mut BTreeMap<PlayerUuid, ReplicationConnection>,
     exit: &mut GameReplicationExit,
 ) -> Result<()> {
-    let current = authoritative_world_entities(runtime, &config.entity_protocol_ids)?;
+    let current = authoritative_world_entities(runtime, config)?;
     for connection in connections.values_mut() {
         if !connection.active || !connection.healthy {
             continue;
@@ -976,8 +1039,7 @@ fn sync_world_entities(
                         connection.queue(
                             PlayOutput::ProtocolPacket {
                                 kind: PacketKind::SetEntityData,
-                                payload: encode_empty_entity_data(snapshot.entity_id)
-                                    .context("cannot encode initial world entity data")?,
+                                payload: snapshot.entity_data_payload.clone(),
                             },
                             exit,
                         );
@@ -992,6 +1054,15 @@ fn sync_world_entities(
                     .context("cannot encode world entity movement")?
                     {
                         queue_encoded_movement(connection, movement, exit);
+                    }
+                    if previous.entity_data_payload != snapshot.entity_data_payload {
+                        connection.queue(
+                            PlayOutput::ProtocolPacket {
+                                kind: PacketKind::SetEntityData,
+                                payload: snapshot.entity_data_payload.clone(),
+                            },
+                            exit,
+                        );
                     }
                 }
             }

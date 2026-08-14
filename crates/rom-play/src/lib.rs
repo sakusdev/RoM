@@ -5,6 +5,7 @@
 mod block_interaction;
 mod chunk_stream;
 mod entity;
+mod entity_data;
 mod generic_entity;
 mod health;
 mod inventory;
@@ -21,6 +22,10 @@ pub use entity::{
     PlayerInfoEntry, encode_add_entity, encode_empty_entity_data, encode_entity_movement,
     encode_player_info_remove, encode_player_info_update, encode_remove_entities,
     encode_rotate_head, encode_teleport_entity,
+};
+pub use entity_data::{
+    ENTITY_DATA_TERMINATOR, EntityDataEncodeError, EntityDataEntry, MAX_ENTITY_DATA_ENTRIES,
+    MAX_ENTITY_DATA_VALUE_BYTES, encode_entity_data, encode_entity_data_varint_value,
 };
 pub use generic_entity::{GenericEntityEncodeError, encode_add_world_entity};
 pub use health::{HealthEncodeError, encode_set_health};
