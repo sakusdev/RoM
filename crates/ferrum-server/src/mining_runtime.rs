@@ -1,7 +1,7 @@
 use ferrum_game::{
     BlockMining, BlockPos, DurabilityError, GameEvent, GameMode, GameStateError, HOTBAR_START,
     MAX_MINING_TICKS, MiningContext, MiningSessionError, MiningTool, PlayerUuid, ToolClass,
-    ToolTier, correct_tool, damage_item, item_damage, ticks_to_break, vanilla_max_durability,
+    ToolTier, correct_tool, damage_item, ticks_to_break, vanilla_max_durability,
 };
 use thiserror::Error;
 
@@ -193,10 +193,8 @@ pub fn mining_tool_from_item(item: &str) -> Option<MiningTool> {
         (ToolTier::Iron, suffix)
     } else if let Some(suffix) = name.strip_prefix("diamond_") {
         (ToolTier::Diamond, suffix)
-    } else if let Some(suffix) = name.strip_prefix("netherite_") {
-        (ToolTier::Netherite, suffix)
     } else {
-        return None;
+        (ToolTier::Netherite, name.strip_prefix("netherite_")?)
     };
     let class = match suffix {
         "pickaxe" => ToolClass::Pickaxe,
@@ -218,7 +216,7 @@ pub fn mining_tool_from_item(item: &str) -> Option<MiningTool> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ferrum_game::{ItemStack, Transform};
+    use ferrum_game::{ItemStack, Transform, item_damage};
 
     fn spawn() -> Transform {
         Transform::new([0.5, 65.0, 0.5], 0.0, 0.0, true).unwrap()
