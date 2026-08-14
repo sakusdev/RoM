@@ -35,7 +35,11 @@ pub fn encode_add_world_entity(
         return Ok(None);
     };
 
-    if transform.position.into_iter().any(|value| !value.is_finite()) {
+    if transform
+        .position
+        .into_iter()
+        .any(|value| !value.is_finite())
+    {
         return Err(GenericEntityEncodeError::NonFinitePosition);
     }
     if !transform.yaw.is_finite() || !transform.pitch.is_finite() {
@@ -61,7 +65,10 @@ pub fn encode_add_world_entity(
     Ok(Some(output))
 }
 
-fn write_entity_id(output: &mut Vec<u8>, entity_id: EntityId) -> Result<(), GenericEntityEncodeError> {
+fn write_entity_id(
+    output: &mut Vec<u8>,
+    entity_id: EntityId,
+) -> Result<(), GenericEntityEncodeError> {
     let value = i32::try_from(entity_id.get())
         .map_err(|_| GenericEntityEncodeError::EntityIdOutOfRange(entity_id.get()))?;
     write_varint(output, value);
