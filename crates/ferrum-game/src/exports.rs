@@ -41,6 +41,7 @@ pub use crate::furnace::{
     DEFAULT_COOK_TIME_TICKS, Fuel, FurnaceError, FurnaceState, FurnaceTick, SmeltingRecipe,
     vanilla_fuel_burn_time,
 };
+pub use crate::gameplay_tick::{GameplayTickError, GameplayTickOutcome, GameplayTickStats};
 pub use crate::inventory::{
     EquipmentSlot, HOTBAR_END, HOTBAR_SLOTS, HOTBAR_START, Inventory, InventoryError, ItemStack,
     MAIN_INVENTORY_END, MAIN_INVENTORY_START, MAX_VANILLA_STACK_SIZE, OFFHAND_SLOT,
