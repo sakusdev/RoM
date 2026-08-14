@@ -123,11 +123,7 @@ pub fn ticks_to_break(
     if progress <= 0.0 || !progress.is_finite() {
         return None;
     }
-    Some(
-        (1.0 / progress)
-            .ceil()
-            .clamp(1.0, f64::from(u32::MAX)) as u32,
-    )
+    Some((1.0 / progress).ceil().clamp(1.0, f64::from(u32::MAX)) as u32)
 }
 #[must_use]
 pub const fn durability_cost(successful_break: bool, creative: bool) -> u32 {
