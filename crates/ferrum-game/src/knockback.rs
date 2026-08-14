@@ -1,6 +1,6 @@
 //! Authoritative knockback application for player entities.
 
-use crate::{knockback_vector, EntityId, GameState, GameStateError, PlayerUuid, Velocity};
+use crate::{EntityId, GameState, GameStateError, PlayerUuid, Velocity, knockback_vector};
 
 pub const MAX_KNOCKBACK_SPEED: f64 = 4.0;
 
@@ -63,7 +63,8 @@ impl GameState {
             (previous_velocity.0[1] + impulse[1]).clamp(-MAX_KNOCKBACK_SPEED, MAX_KNOCKBACK_SPEED),
             (previous_velocity.0[2] + impulse[2]).clamp(-MAX_KNOCKBACK_SPEED, MAX_KNOCKBACK_SPEED),
         ])?;
-        self.entities_mut().set_velocity(entity_id, current_velocity)?;
+        self.entities_mut()
+            .set_velocity(entity_id, current_velocity)?;
 
         Ok(KnockbackOutcome {
             entity_id,
@@ -110,12 +111,7 @@ mod tests {
             .unwrap()
             .gameplay
             .attributes
-            .insert(Attribute::new(
-                "minecraft:knockback_resistance",
-                0.75,
-                0.0,
-                1.0,
-            ).unwrap());
+            .insert(Attribute::new("minecraft:knockback_resistance", 0.75, 0.0, 1.0).unwrap());
         let outcome = state
             .knockback_player(uuid, [0.0, 65.0, 0.0], 0.4, 0.4)
             .unwrap();
@@ -132,7 +128,12 @@ mod tests {
         }
         let entity_id = state.player(uuid).unwrap().entity_id.unwrap();
         let velocity = state.entities().get(entity_id).unwrap().velocity;
-        assert!(velocity.0.into_iter().all(|value| value.abs() <= MAX_KNOCKBACK_SPEED));
+        assert!(
+            velocity
+                .0
+                .into_iter()
+                .all(|value| value.abs() <= MAX_KNOCKBACK_SPEED)
+        );
     }
 
     #[test]
@@ -146,12 +147,8 @@ mod tests {
             .get_mut("minecraft:knockback_resistance")
             .unwrap();
         attribute.insert_modifier(
-            AttributeModifier::new(
-                "rom:test_resistance",
-                0.5,
-                AttributeOperation::AddValue,
-            )
-            .unwrap(),
+            AttributeModifier::new("rom:test_resistance", 0.5, AttributeOperation::AddValue)
+                .unwrap(),
         );
         let outcome = state
             .knockback_player(uuid, [0.0, 65.0, 0.0], 1.0, 0.0)

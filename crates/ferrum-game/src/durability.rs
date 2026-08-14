@@ -73,7 +73,9 @@ pub fn damage_item(
         }
     }
     let prevented_damage = amount.saturating_sub(applied_damage);
-    let current_damage = previous_damage.saturating_add(applied_damage).min(max_damage);
+    let current_damage = previous_damage
+        .saturating_add(applied_damage)
+        .min(max_damage);
     let broken = current_damage >= max_damage;
     let stack = if broken {
         None
@@ -112,8 +114,11 @@ pub fn vanilla_max_durability(item: &str) -> Option<u32> {
         "golden_sword" | "golden_pickaxe" | "golden_axe" | "golden_shovel" | "golden_hoe" => 32,
         "stone_sword" | "stone_pickaxe" | "stone_axe" | "stone_shovel" | "stone_hoe" => 131,
         "iron_sword" | "iron_pickaxe" | "iron_axe" | "iron_shovel" | "iron_hoe" => 250,
-        "diamond_sword" | "diamond_pickaxe" | "diamond_axe" | "diamond_shovel" | "diamond_hoe" => 1561,
-        "netherite_sword" | "netherite_pickaxe" | "netherite_axe" | "netherite_shovel" | "netherite_hoe" => 2031,
+        "diamond_sword" | "diamond_pickaxe" | "diamond_axe" | "diamond_shovel" | "diamond_hoe" => {
+            1561
+        }
+        "netherite_sword" | "netherite_pickaxe" | "netherite_axe" | "netherite_shovel"
+        | "netherite_hoe" => 2031,
         "bow" => 384,
         "crossbow" => 465,
         "fishing_rod" => 64,
@@ -225,8 +230,14 @@ mod tests {
     #[test]
     fn vanilla_durability_covers_core_tools() {
         assert_eq!(vanilla_max_durability("minecraft:wooden_pickaxe"), Some(59));
-        assert_eq!(vanilla_max_durability("minecraft:diamond_pickaxe"), Some(1561));
-        assert_eq!(vanilla_max_durability("minecraft:netherite_sword"), Some(2031));
+        assert_eq!(
+            vanilla_max_durability("minecraft:diamond_pickaxe"),
+            Some(1561)
+        );
+        assert_eq!(
+            vanilla_max_durability("minecraft:netherite_sword"),
+            Some(2031)
+        );
         assert_eq!(vanilla_max_durability("minecraft:stone"), None);
     }
 

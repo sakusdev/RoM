@@ -115,19 +115,56 @@ impl ShapelessRecipe {
         if stacks.len() != self.ingredients.len() {
             return None;
         }
-        let mut used = vec![false; stacks.len()];
-        let mut plan = Vec::with_capacity(stacks.len());
-        for ingredient in &self.ingredients {
-            let position = stacks
+        let mut order = (0..self.ingredients.len()).collect::<Vec<_>>();
+        order.sort_by_key(|ingredient_index| {
+            stacks
                 .iter()
-                .enumerate()
-                .position(|(i, (_, stack))| !used[i] && ingredient.matches(stack))?;
-            used[position] = true;
-            plan.push(stacks[position].0);
+                .filter(|(_, stack)| self.ingredients[*ingredient_index].matches(stack))
+                .count()
+        });
+        let mut used = vec![false; stacks.len()];
+        let mut assignment = vec![usize::MAX; self.ingredients.len()];
+        if !assign_shapeless(
+            &self.ingredients,
+            &stacks,
+            &order,
+            0,
+            &mut used,
+            &mut assignment,
+        ) {
+            return None;
         }
-        plan.sort_unstable();
-        Some(plan)
+        assignment.sort_unstable();
+        Some(assignment)
     }
+}
+
+fn assign_shapeless(
+    ingredients: &[Ingredient],
+    stacks: &[(usize, &ItemStack)],
+    order: &[usize],
+    depth: usize,
+    used: &mut [bool],
+    assignment: &mut [usize],
+) -> bool {
+    if depth == order.len() {
+        return true;
+    }
+    let ingredient_index = order[depth];
+    let ingredient = &ingredients[ingredient_index];
+    for (stack_index, (slot, stack)) in stacks.iter().enumerate() {
+        if used[stack_index] || !ingredient.matches(stack) {
+            continue;
+        }
+        used[stack_index] = true;
+        assignment[ingredient_index] = *slot;
+        if assign_shapeless(ingredients, stacks, order, depth + 1, used, assignment) {
+            return true;
+        }
+        used[stack_index] = false;
+        assignment[ingredient_index] = usize::MAX;
+    }
+    false
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
