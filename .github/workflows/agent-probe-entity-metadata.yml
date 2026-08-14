@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '25'
@@ -26,10 +26,13 @@ jobs:
               if 'META-INF/versions.list' in names:
                   rows = z.read('META-INF/versions.list').decode().splitlines()
                   print('versions.list', rows)
-                  fields = rows[0].split('\t')
-                  candidate = fields[-1]
-                  data = z.read(candidate)
-                  pathlib.Path('game.jar').write_bytes(data)
+                  candidate = rows[0].split('\t')[-1]
+                  candidates = [candidate, 'META-INF/versions/' + candidate]
+                  selected = next((name for name in candidates if name in names), None)
+                  if selected is None:
+                      raise SystemExit('embedded game jar path not found')
+                  print('game_jar_entry', selected)
+                  pathlib.Path('game.jar').write_bytes(z.read(selected))
               else:
                   pathlib.Path('game.jar').write_bytes(outer.read_bytes())
       - name: Inspect entity data serializer registration
