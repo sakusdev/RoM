@@ -20,8 +20,8 @@ use rom_play::{
     encode_empty_entity_data, encode_entity_data, encode_entity_data_varint_value,
     encode_entity_movement, encode_hurt_animation, encode_item_stack, encode_player_combat_kill,
     encode_player_info_remove, encode_player_info_update, encode_remove_entities, encode_respawn,
-    encode_rotate_head, encode_set_equipment, encode_set_experience, encode_set_health,
-    encode_teleport_entity,
+    encode_rotate_head, encode_set_entity_motion, encode_set_equipment, encode_set_experience,
+    encode_set_health, encode_teleport_entity,
 };
 use rom_protocol::PacketKind;
 use rom_version_26_1_2::entity_metadata::{
@@ -682,6 +682,30 @@ fn dispatch_event(
                             }
                         }
                     }
+                }
+            }
+        }
+        GameEvent::PlayerVelocityChanged {
+            uuid,
+            entity_id,
+            velocity,
+        } => {
+            let payload = encode_set_entity_motion(entity_id, velocity)
+                .context("cannot encode player entity motion")?;
+            for (target, connection) in connections.iter_mut() {
+                if *target == uuid || connection.entities.contains_key(&uuid) {
+                    connection.queue(
+                        PlayOutput::ProtocolPacket {
+                            kind: PacketKind::SetEntityMotion,
+                            payload: payload.clone(),
+                        },
+                        exit,
+                    );
+                }
+                if let Some(tracked) = connection.entities.get_mut(&uuid)
+                    && tracked.entity_id == entity_id
+                {
+                    tracked.velocity = velocity;
                 }
             }
         }

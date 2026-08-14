@@ -103,6 +103,7 @@ pub enum PacketKind {
     TeleportEntity,
     RotateHead,
     SetEntityData,
+    SetEntityMotion,
     SetEquipment,
     SetExperience,
     SetHealth,
@@ -175,6 +176,7 @@ impl PacketKind {
         Self::TeleportEntity,
         Self::RotateHead,
         Self::SetEntityData,
+        Self::SetEntityMotion,
         Self::SetEquipment,
         Self::SetExperience,
         Self::SetHealth,
@@ -294,6 +296,7 @@ impl PacketKind {
             | Self::TeleportEntity
             | Self::RotateHead
             | Self::SetEntityData
+            | Self::SetEntityMotion
             | Self::SetEquipment
             | Self::SetExperience
             | Self::SetHealth

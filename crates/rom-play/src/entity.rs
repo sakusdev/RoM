@@ -213,6 +213,18 @@ pub fn encode_empty_entity_data(entity_id: EntityId) -> Result<Vec<u8>, EntityEn
     Ok(output)
 }
 
+pub fn encode_set_entity_motion(
+    entity_id: EntityId,
+    velocity: Velocity,
+) -> Result<Vec<u8>, EntityEncodeError> {
+    let mut output = Vec::with_capacity(11);
+    write_entity_id(&mut output, entity_id)?;
+    for component in velocity.0 {
+        output.extend_from_slice(&encode_velocity_component(component)?.to_be_bytes());
+    }
+    Ok(output)
+}
+
 pub fn encode_entity_movement(
     entity_id: EntityId,
     from: Transform,
@@ -547,6 +559,17 @@ mod tests {
             encode_empty_entity_data(entity_id()).unwrap(),
             vec![7, 0xff]
         );
+    }
+
+    #[test]
+    fn set_entity_motion_uses_vanilla_short_velocity_scale_and_clamp() {
+        let payload =
+            encode_set_entity_motion(entity_id(), Velocity::new([0.4, -0.25, 5.0]).unwrap())
+                .unwrap();
+        assert_eq!(payload[0], 7);
+        assert_eq!(&payload[1..3], &3200_i16.to_be_bytes());
+        assert_eq!(&payload[3..5], &(-2000_i16).to_be_bytes());
+        assert_eq!(&payload[5..7], &31200_i16.to_be_bytes());
     }
 
     #[test]

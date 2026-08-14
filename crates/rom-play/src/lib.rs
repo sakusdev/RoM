@@ -22,7 +22,7 @@ pub use entity::{
     EncodedEntityMovement, EntityEncodeError, EntityMovementKind, EntityProtocolRegistry,
     PlayerInfoEntry, encode_add_entity, encode_empty_entity_data, encode_entity_movement,
     encode_player_info_remove, encode_player_info_update, encode_remove_entities,
-    encode_rotate_head, encode_teleport_entity,
+    encode_rotate_head, encode_set_entity_motion, encode_teleport_entity,
 };
 pub use entity_data::{
     ENTITY_DATA_TERMINATOR, EntityDataEncodeError, EntityDataEntry, MAX_ENTITY_DATA_ENTRIES,

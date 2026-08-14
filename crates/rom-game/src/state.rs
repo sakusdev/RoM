@@ -6,7 +6,7 @@ use thiserror::Error;
 use crate::{
     ContainerClick, ContainerError, ContainerMutation, ContainerSnapshot, Difficulty, EntityError,
     EntityId, EntityStore, EntityType, EntityUuid, Experience, GameMode, InventoryError, ItemStack,
-    PlayerError, PlayerState, PlayerUuid, Transform, Vitals,
+    PlayerError, PlayerState, PlayerUuid, Transform, Velocity, Vitals,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -55,6 +55,11 @@ pub enum GameEvent {
         uuid: PlayerUuid,
         entity_id: EntityId,
         transform: Transform,
+    },
+    PlayerVelocityChanged {
+        uuid: PlayerUuid,
+        entity_id: EntityId,
+        velocity: Velocity,
     },
     PlayerGameModeChanged {
         uuid: PlayerUuid,

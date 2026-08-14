@@ -11,8 +11,8 @@ use std::{
 
 use rom_game::{
     CommandError, CommandOutcome, CommandSource, ContainerClick, GameEvent, GameSnapshot,
-    GameState, GameStateError, GameplayTickError, ItemStack, PersistenceError, PlayerUuid,
-    Transform, execute_command,
+    GameState, GameStateError, GameplayTickError, ItemStack, KnockbackOutcome, PersistenceError,
+    PlayerUuid, Transform, execute_command,
 };
 use thiserror::Error;
 
@@ -129,6 +129,27 @@ impl SharedGameRuntime {
         let events = self.write()?.damage_player(uuid, amount)?;
         self.finalize_events(&events)?;
         Ok(events)
+    }
+
+    pub fn knockback_player(
+        &self,
+        uuid: PlayerUuid,
+        attacker_position: [f64; 3],
+        horizontal_strength: f64,
+        vertical_strength: f64,
+    ) -> Result<KnockbackOutcome, GameRuntimeError> {
+        let outcome = self.write()?.knockback_player(
+            uuid,
+            attacker_position,
+            horizontal_strength,
+            vertical_strength,
+        )?;
+        self.finalize_events(&[GameEvent::PlayerVelocityChanged {
+            uuid,
+            entity_id: outcome.entity_id,
+            velocity: outcome.current_velocity,
+        }])?;
+        Ok(outcome)
     }
 
     pub fn heal_player(
@@ -436,6 +457,32 @@ mod tests {
         assert!(matches!(
             subscription.try_recv().unwrap(),
             GameEvent::PlayerKilled { .. }
+        ));
+    }
+
+    #[test]
+    fn knockback_publishes_authoritative_velocity_change() {
+        let runtime = SharedGameRuntime::vanilla_overworld();
+        let subscription = runtime.subscribe(NonZeroUsize::new(4).unwrap()).unwrap();
+        let uuid = PlayerUuid::new(0x51);
+        runtime.connect_player(uuid, "Steve", spawn()).unwrap();
+        assert!(matches!(
+            subscription.try_recv().unwrap(),
+            GameEvent::PlayerConnected { .. }
+        ));
+
+        let outcome = runtime
+            .knockback_player(uuid, [-2.0, 65.0, 0.5], 0.4, 0.4)
+            .unwrap();
+        assert!(matches!(
+            subscription.try_recv().unwrap(),
+            GameEvent::PlayerVelocityChanged {
+                uuid: event_uuid,
+                entity_id,
+                velocity,
+            } if event_uuid == uuid
+                && entity_id == outcome.entity_id
+                && velocity == outcome.current_velocity
         ));
     }
 

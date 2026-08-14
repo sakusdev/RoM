@@ -381,6 +381,9 @@ pub fn known_packet_kind(
         (ProtocolPhase::Play, PacketDirection::Clientbound, "set_entity_data") => {
             Some(PacketKind::SetEntityData)
         }
+        (ProtocolPhase::Play, PacketDirection::Clientbound, "set_entity_motion") => {
+            Some(PacketKind::SetEntityMotion)
+        }
         (ProtocolPhase::Play, PacketDirection::Clientbound, "set_equipment") => {
             Some(PacketKind::SetEquipment)
         }
@@ -470,6 +473,7 @@ pub const fn canonical_packet_name(kind: PacketKind) -> &'static str {
         PacketKind::TeleportEntity => "minecraft:teleport_entity",
         PacketKind::RotateHead => "minecraft:rotate_head",
         PacketKind::SetEntityData => "minecraft:set_entity_data",
+        PacketKind::SetEntityMotion => "minecraft:set_entity_motion",
         PacketKind::SetEquipment => "minecraft:set_equipment",
         PacketKind::SetExperience => "minecraft:set_experience",
         PacketKind::SetHealth => "minecraft:set_health",
@@ -610,6 +614,22 @@ mod tests {
         let table = catalog.typed_table().unwrap();
         assert_eq!(table.id(PacketKind::SystemChat), Some(121));
         assert_eq!(catalog.len(), 2);
+    }
+
+    #[test]
+    fn recognizes_set_entity_motion_as_optional_typed_packet() {
+        assert_eq!(
+            known_packet_kind(
+                ProtocolPhase::Play,
+                PacketDirection::Clientbound,
+                "set_entity_motion",
+            ),
+            Some(PacketKind::SetEntityMotion)
+        );
+        assert_eq!(
+            canonical_packet_name(PacketKind::SetEntityMotion),
+            "minecraft:set_entity_motion"
+        );
     }
 
     #[test]
