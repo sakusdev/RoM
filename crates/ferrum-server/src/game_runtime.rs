@@ -262,7 +262,10 @@ impl SharedGameRuntime {
     }
 
     fn finalize_events(&self, events: &[GameEvent]) -> Result<(), GameRuntimeError> {
-        if events.iter().any(|event| matches!(event, GameEvent::ItemsDropped { .. })) {
+        if events
+            .iter()
+            .any(|event| matches!(event, GameEvent::ItemsDropped { .. }))
+        {
             self.write()?.materialize_drop_events(events)?;
         }
         self.publish(events)?;
