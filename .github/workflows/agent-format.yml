@@ -37,7 +37,6 @@ jobs:
               "PlayerInfoEntry, Respawn, RespawnDataToKeep, encode_add_entity, encode_add_world_entity, encode_empty_entity_data,",
               1,
           )
-
           world_snapshot = '''#[derive(Debug, Clone)]
           struct WorldEntitySnapshot {
               entity_id: EntityId,
@@ -51,7 +50,6 @@ jobs:
           marker = "#[derive(Debug)]\nstruct ReplicationConnection"
           if "struct WorldEntitySnapshot" not in text:
               text = text.replace(marker, world_snapshot + marker, 1)
-
           if "world_entities: BTreeMap<EntityId, WorldEntitySnapshot>" not in text:
               text = text.replace(
                   "    entities: BTreeMap<PlayerUuid, PlayerEntitySnapshot>,\n    active: bool,",
@@ -68,7 +66,6 @@ jobs:
                   "            self.entities.clear();\n            self.world_entities.clear();\n            self.healthy = false;",
                   1,
               )
-
           sync_call = "        sync_world_entities(&runtime, &config, &mut connections, &mut exit)?;\n        flush_connections(&mut connections, &mut exit);"
           if sync_call not in text:
               text = text.replace(
@@ -76,7 +73,6 @@ jobs:
                   sync_call + "\n    }\n}\n\nfn process_commands(",
                   1,
               )
-
           helpers = r'''fn authoritative_world_entities(
               runtime: &SharedGameRuntime,
               registry: &EntityProtocolRegistry,
@@ -119,7 +115,6 @@ jobs:
                   if !connection.active || !connection.healthy {
                       continue;
                   }
-
                   let removed = connection
                       .world_entities
                       .keys()
@@ -136,7 +131,6 @@ jobs:
                           exit,
                       );
                   }
-
                   for (entity_id, snapshot) in &current {
                       match connection.world_entities.get(entity_id).cloned() {
                           None => {
@@ -180,7 +174,6 @@ jobs:
                           }
                       }
                   }
-
                   if connection.healthy {
                       connection.world_entities = current.clone();
                   }
@@ -192,8 +185,154 @@ jobs:
           helper_marker = "const fn protocol_game_mode(game_mode: GameMode) -> i8 {"
           if "fn sync_world_entities(" not in text:
               text = text.replace(helper_marker, helpers + helper_marker, 1)
-
           replication.write_text(text)
+
+          runtime = Path("crates/ferrum-server/src/play_runtime.rs")
+          text = runtime.read_text()
+          gameplay_helpers = r'''    fn selected_placement_state(self, world: &RomPackWorld) -> Result<Option<BlockStateId>> {
+              let Some(selected) = self.runtime.selected_item(self.player_uuid)? else {
+                  return Ok(None);
+              };
+              let raw = match selected.stack.item() {
+                  "minecraft:stone" => world.block_states.stone,
+                  "minecraft:dirt" => world.block_states.dirt,
+                  "minecraft:grass_block" => world.block_states.grass,
+                  "minecraft:bedrock" => world.block_states.bedrock,
+                  _ => return Ok(None),
+              };
+              Ok(Some(BlockStateId::new(raw)))
+          }
+
+          fn consume_placement_item(self) -> Result<()> {
+              self.runtime.consume_selected_item(self.player_uuid, 1)?;
+              Ok(())
+          }
+
+          fn spawn_block_drop(
+              self,
+              position: BlockPosition,
+              state: BlockStateId,
+              world: &RomPackWorld,
+          ) -> Result<()> {
+              let item = if state.get() == world.block_states.stone {
+                  Some("minecraft:cobblestone")
+              } else if state.get() == world.block_states.dirt
+                  || state.get() == world.block_states.grass
+              {
+                  Some("minecraft:dirt")
+              } else {
+                  None
+              };
+              if let Some(item) = item {
+                  self.runtime.spawn_world_item(
+                      self.player_uuid,
+                      [f64::from(position.x), f64::from(position.y), f64::from(position.z)],
+                      ferrum_game::ItemStack::new(item, 1)?,
+                  )?;
+              }
+              Ok(())
+          }
+
+          '''
+          helper_marker = "    fn set_creative_slot(self, payload: &[u8]) -> Result<()> {"
+          if "fn selected_placement_state(" not in text:
+              text = text.replace(helper_marker, gameplay_helpers + helper_marker, 1)
+
+          old_break = r'''                Some(PacketKind::PlayerAction) => {
+                      let action = decode_player_action(packet_reader.take_remaining())?;
+                      let sequence = action.sequence;
+                      if is_block_interaction_within_reach(&player, action.position)
+                          && let Some(event) = player_action_to_world_event(
+                              action,
+                              BlockStateId::new(shared_world.world_profile().block_states.air),
+                          )
+                          && is_break_target_mutable(shared_world, event)?
+                      {
+                          let applied = shared_world.apply_event(connection, event)?;
+                          send_world_updates(writer, profile, &applied, play_reader)?;
+                      }
+                      send_block_changed_ack(writer, profile, sequence, play_reader)?;
+                  }
+          '''
+          new_break = r'''                Some(PacketKind::PlayerAction) => {
+                      let action = decode_player_action(packet_reader.take_remaining())?;
+                      let sequence = action.sequence;
+                      let broken_state = if is_block_interaction_within_reach(&player, action.position) {
+                          shared_world.interaction_block_state(BlockPos {
+                              x: action.position.x,
+                              y: action.position.y,
+                              z: action.position.z,
+                          })?
+                      } else {
+                          None
+                      };
+                      if is_block_interaction_within_reach(&player, action.position)
+                          && let Some(event) = player_action_to_world_event(
+                              action,
+                              BlockStateId::new(shared_world.world_profile().block_states.air),
+                          )
+                          && is_break_target_mutable(shared_world, event)?
+                      {
+                          let applied = shared_world.apply_event(connection, event)?;
+                          send_world_updates(writer, profile, &applied, play_reader)?;
+                          if !applied.is_empty()
+                              && let Some(gameplay) = gameplay
+                              && let Some(state) = broken_state
+                          {
+                              gameplay.spawn_block_drop(
+                                  action.position,
+                                  state,
+                                  shared_world.world_profile(),
+                              )?;
+                          }
+                      }
+                      send_block_changed_ack(writer, profile, sequence, play_reader)?;
+                  }
+          '''
+          if old_break in text:
+              text = text.replace(old_break, new_break, 1)
+
+          old_place = r'''                Some(PacketKind::UseItemOn) => {
+                      let interaction = decode_use_item_on_block(packet_reader.take_remaining())?;
+                      let sequence = interaction.sequence;
+                      if is_block_interaction_within_reach(&player, interaction.position)
+                          && let Some(event) = use_item_on_block_to_world_event(
+                              interaction,
+                              BlockStateId::new(shared_world.world_profile().block_states.stone),
+                          )
+                          && is_placement_target_air(shared_world, event)?
+                      {
+                          let applied = shared_world.apply_event(connection, event)?;
+                          send_world_updates(writer, profile, &applied, play_reader)?;
+                      }
+                      send_block_changed_ack(writer, profile, sequence, play_reader)?;
+                  }
+          '''
+          new_place = r'''                Some(PacketKind::UseItemOn) => {
+                      let interaction = decode_use_item_on_block(packet_reader.take_remaining())?;
+                      let sequence = interaction.sequence;
+                      let placed_state = if let Some(gameplay) = gameplay {
+                          gameplay.selected_placement_state(shared_world.world_profile())?
+                      } else {
+                          Some(BlockStateId::new(shared_world.world_profile().block_states.stone))
+                      };
+                      if is_block_interaction_within_reach(&player, interaction.position)
+                          && let Some(placed_state) = placed_state
+                          && let Some(event) = use_item_on_block_to_world_event(interaction, placed_state)
+                          && is_placement_target_air(shared_world, event)?
+                      {
+                          let applied = shared_world.apply_event(connection, event)?;
+                          send_world_updates(writer, profile, &applied, play_reader)?;
+                          if !applied.is_empty() && let Some(gameplay) = gameplay {
+                              gameplay.consume_placement_item()?;
+                          }
+                      }
+                      send_block_changed_ack(writer, profile, sequence, play_reader)?;
+                  }
+          '''
+          if old_place in text:
+              text = text.replace(old_place, new_place, 1)
+          runtime.write_text(text)
       - name: Format workspace
         run: cargo fmt --all
       - name: Commit formatting
@@ -205,7 +344,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add --all
-          git commit -m "Wire generic world entity replication"
+          git commit -m "Wire authoritative block interaction gameplay"
           git push
       - uses: actions/upload-artifact@v4
         with:
