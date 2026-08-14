@@ -2,13 +2,15 @@
 //!
 //! `Vitals` remains the wire/persistence-friendly source of health and hunger
 //! numbers. This component owns the richer systems that need state across ticks:
-//! attributes, active status effects, hunger timing, and fall-distance tracking.
+//! attributes, active status effects, hunger timing, fall-distance tracking,
+//! and authoritative block-breaking sessions.
 
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AttributeMap, Difficulty, GameEvent, GameRuleValue, GameState, GameStateError, HungerState,
-    HungerTick, StatusEffect, StatusEffectStore, Vitals,
+    AttributeMap, BlockPos, Difficulty, GameEvent, GameRuleValue, GameState, GameStateError,
+    HungerState, HungerTick, MiningCompletion, MiningSession, MiningSessionError, StatusEffect,
+    StatusEffectStore, Vitals,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -21,6 +23,8 @@ pub struct PlayerGameplay {
     hunger_timer: u16,
     #[serde(default)]
     fall_distance: f32,
+    #[serde(default)]
+    mining_session: Option<MiningSession>,
 }
 
 impl Default for PlayerGameplay {
@@ -30,6 +34,7 @@ impl Default for PlayerGameplay {
             status_effects: StatusEffectStore::default(),
             hunger_timer: 0,
             fall_distance: 0.0,
+            mining_session: None,
         }
     }
 }
@@ -62,6 +67,47 @@ impl PlayerGameplay {
         self.fall_distance
     }
 
+    #[must_use]
+    pub const fn mining_session(&self) -> Option<MiningSession> {
+        self.mining_session
+    }
+
+    pub fn begin_mining(
+        &mut self,
+        position: BlockPos,
+        started_at_tick: u64,
+        required_ticks: u32,
+    ) -> Result<MiningSession, MiningSessionError> {
+        let session = MiningSession::new(position, started_at_tick, required_ticks)?;
+        self.mining_session = Some(session);
+        Ok(session)
+    }
+
+    pub fn abort_mining(&mut self, position: BlockPos) -> bool {
+        if self
+            .mining_session
+            .is_some_and(|session| session.position == position)
+        {
+            self.mining_session = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn finish_mining(
+        &mut self,
+        position: BlockPos,
+        current_tick: u64,
+    ) -> Result<MiningCompletion, MiningSessionError> {
+        let Some(session) = self.mining_session else {
+            return Err(MiningSessionError::NoActiveSession);
+        };
+        let completion = session.complete(position, current_tick)?;
+        self.mining_session = None;
+        Ok(completion)
+    }
+
     pub fn reset_fall_distance(&mut self) {
         self.fall_distance = 0.0;
     }
@@ -90,11 +136,6 @@ impl PlayerGameplay {
         self.status_effects.haste_multiplier() * self.status_effects.mining_fatigue_multiplier()
     }
 
-    /// Advances effects and hunger state by one server tick.
-    ///
-    /// The result describes health-side consequences; callers remain responsible
-    /// for applying damage through the normal authoritative damage path so death
-    /// drops and replication cannot be bypassed.
     pub fn tick(&mut self, vitals: &mut Vitals, natural_regeneration: bool) -> PlayerGameplayTick {
         let expired_effects = self.status_effects.tick();
         let mut hunger = HungerState {
@@ -129,9 +170,6 @@ impl PlayerGameplay {
 }
 
 impl GameState {
-    /// Advances persistent player-only gameplay systems after the world entity
-    /// tick. Health consequences are routed through the normal authoritative
-    /// heal/damage methods so death, inventory drops, and replication stay intact.
     pub fn tick_player_gameplay(&mut self) -> Result<Vec<GameEvent>, GameStateError> {
         let natural_regeneration = matches!(
             self.game_rules().get("naturalRegeneration"),
@@ -217,6 +255,27 @@ mod tests {
     fn defaults_have_vanilla_health_attribute() {
         let gameplay = PlayerGameplay::default();
         assert_eq!(gameplay.max_health(), 20.0);
+    }
+
+    #[test]
+    fn mining_session_lifecycle_is_authoritative() {
+        let mut gameplay = PlayerGameplay::default();
+        let position = BlockPos { x: 1, y: 64, z: 2 };
+        gameplay.begin_mining(position, 100, 5).unwrap();
+        assert!(gameplay.finish_mining(position, 104).is_err());
+        assert!(gameplay.mining_session().is_some());
+        let completion = gameplay.finish_mining(position, 105).unwrap();
+        assert_eq!(completion.elapsed_ticks, 5);
+        assert!(gameplay.mining_session().is_none());
+    }
+
+    #[test]
+    fn abort_only_cancels_matching_target() {
+        let mut gameplay = PlayerGameplay::default();
+        let position = BlockPos { x: 1, y: 64, z: 2 };
+        gameplay.begin_mining(position, 0, 1).unwrap();
+        assert!(!gameplay.abort_mining(BlockPos { x: 2, ..position }));
+        assert!(gameplay.abort_mining(position));
     }
 
     #[test]
