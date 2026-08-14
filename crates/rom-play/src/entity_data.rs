@@ -103,7 +103,9 @@ pub enum EntityDataEncodeError {
     NegativeSerializerId { serializer_id: i32 },
     #[error("entity metadata has {count} entries, exceeding {MAX_ENTITY_DATA_ENTRIES}")]
     TooManyEntries { count: usize },
-    #[error("entity metadata value at index {index} has {length} bytes, exceeding {MAX_ENTITY_DATA_VALUE_BYTES}")]
+    #[error(
+        "entity metadata value at index {index} has {length} bytes, exceeding {MAX_ENTITY_DATA_VALUE_BYTES}"
+    )]
     ValueTooLarge { index: u8, length: usize },
 }
 
