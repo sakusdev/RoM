@@ -1,7 +1,7 @@
 use ferrum_game::{
     BlockMining, BlockPos, DurabilityError, GameEvent, GameMode, GameStateError, HOTBAR_START,
     MAX_MINING_TICKS, MiningContext, MiningSessionError, MiningTool, PlayerUuid, ToolClass,
-    ToolTier, damage_item, item_damage, ticks_to_break, vanilla_max_durability,
+    ToolTier, correct_tool, damage_item, item_damage, ticks_to_break, vanilla_max_durability,
 };
 use thiserror::Error;
 
@@ -47,6 +47,20 @@ impl SharedGameRuntime {
             })
         })?
         .ok_or_else(|| GameRuntimeError::State(GameStateError::UnknownPlayer { uuid }).into())
+    }
+
+    pub fn can_harvest_block(
+        &self,
+        uuid: PlayerUuid,
+        block: BlockMining,
+    ) -> Result<bool, MiningRuntimeError> {
+        let mode = self
+            .with_state(|state| state.player(uuid).map(|player| player.game_mode))?
+            .ok_or(GameRuntimeError::State(GameStateError::UnknownPlayer { uuid }))?;
+        if mode == GameMode::Creative {
+            return Ok(true);
+        }
+        Ok(correct_tool(self.selected_mining_tool(uuid)?, block))
     }
 
     pub fn begin_mining(
@@ -236,6 +250,20 @@ mod tests {
         assert!(!runtime
             .finish_mining(uuid, BlockPos { x: 0, y: 64, z: 0 })
             .unwrap());
+    }
+
+    #[test]
+    fn stone_requires_a_pickaxe_to_harvest() {
+        let runtime = SharedGameRuntime::vanilla_overworld();
+        let uuid = PlayerUuid::new(46);
+        runtime.connect_player(uuid, "Miner", spawn()).unwrap();
+        let stone = BlockMining {
+            hardness: 1.5,
+            preferred_tool: ToolClass::Pickaxe,
+            required_tier: Some(ToolTier::Wood),
+            requires_correct_tool: true,
+        };
+        assert!(!runtime.can_harvest_block(uuid, stone).unwrap());
     }
 
     #[test]
