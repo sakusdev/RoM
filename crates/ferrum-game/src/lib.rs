@@ -4,18 +4,26 @@
 //! selected Minecraft wire format.
 
 pub mod attributes;
+pub mod block_interaction;
 pub mod command;
 pub mod container;
 pub mod crafting;
+pub mod damage;
 pub mod entity;
+pub mod entity_tracking;
 pub mod experience;
+pub mod experience_orb;
 mod exports;
+pub mod furnace;
 pub mod hunger;
 pub mod inventory;
 pub mod item_entity;
+pub mod loot;
 pub mod mining;
 pub mod persistence;
 pub mod player;
+pub mod raycast;
+pub mod scheduled_tick;
 pub mod spatial;
 mod state;
 pub mod status_effect;
@@ -46,6 +54,7 @@ pub(crate) fn validate_resource_location(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::validate_resource_location;
+
     #[test]
     fn resource_locations() {
         assert!(validate_resource_location("minecraft:stone"));
