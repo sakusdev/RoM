@@ -116,9 +116,9 @@ jobs:
           - platform: windows-x86_64
             os: windows-latest
             target: x86_64-pc-windows-msvc
-            source_binary: ferrum-server.exe
-            package_binary: ferrum-server.exe
-            raw_asset: ferrum-server-windows-x86_64.exe
+            source_binary: rom.exe
+            package_binary: rom.exe
+            raw_asset: rom-windows-x86_64.exe
             bootstrap_binary: rom-bootstrap.exe
             bootstrap_raw_asset: rom-bootstrap-windows-x86_64.exe
             archive: zip
@@ -127,9 +127,9 @@ jobs:
           - platform: linux-x86_64
             os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
-            source_binary: ferrum-server
-            package_binary: ferrum-server
-            raw_asset: ferrum-server-linux-x86_64
+            source_binary: rom
+            package_binary: rom
+            raw_asset: rom-linux-x86_64
             bootstrap_binary: rom-bootstrap
             bootstrap_raw_asset: rom-bootstrap-linux-x86_64
             archive: tar.gz
@@ -138,9 +138,9 @@ jobs:
           - platform: linux-aarch64
             os: ubuntu-24.04
             target: aarch64-unknown-linux-gnu
-            source_binary: ferrum-server
-            package_binary: ferrum-server
-            raw_asset: ferrum-server-linux-aarch64
+            source_binary: rom
+            package_binary: rom
+            raw_asset: rom-linux-aarch64
             bootstrap_binary: rom-bootstrap
             bootstrap_raw_asset: rom-bootstrap-linux-aarch64
             archive: tar.gz
@@ -149,9 +149,9 @@ jobs:
           - platform: android-aarch64
             os: ubuntu-24.04
             target: aarch64-linux-android
-            source_binary: ferrum-server
-            package_binary: ferrum-server
-            raw_asset: ferrum-server-android-aarch64
+            source_binary: rom
+            package_binary: rom
+            raw_asset: rom-android-aarch64
             bootstrap_binary: rom-bootstrap
             bootstrap_raw_asset: rom-bootstrap-android-aarch64
             archive: tar.gz
@@ -160,9 +160,9 @@ jobs:
           - platform: macos-x86_64
             os: macos-15-intel
             target: x86_64-apple-darwin
-            source_binary: ferrum-server
-            package_binary: ferrum-server
-            raw_asset: ferrum-server-macos-x86_64
+            source_binary: rom
+            package_binary: rom
+            raw_asset: rom-macos-x86_64
             bootstrap_binary: rom-bootstrap
             bootstrap_raw_asset: rom-bootstrap-macos-x86_64
             archive: tar.gz
@@ -171,9 +171,9 @@ jobs:
           - platform: macos-aarch64
             os: macos-15
             target: aarch64-apple-darwin
-            source_binary: ferrum-server
-            package_binary: ferrum-server
-            raw_asset: ferrum-server-macos-aarch64
+            source_binary: rom
+            package_binary: rom
+            raw_asset: rom-macos-aarch64
             bootstrap_binary: rom-bootstrap
             bootstrap_raw_asset: rom-bootstrap-macos-aarch64
             archive: tar.gz
@@ -209,14 +209,14 @@ jobs:
 
       - name: Build native server and Bootstrap
         if: matrix.target != 'aarch64-unknown-linux-gnu' && matrix.android == false
-        run: cargo build --locked --release -p ferrum-server -p rom-bootstrap --target ${{ matrix.target }}
+        run: cargo build --locked --release -p rom-server -p rom-bootstrap --target ${{ matrix.target }}
 
       - name: Build Linux ARM64 server and Bootstrap
         if: matrix.target == 'aarch64-unknown-linux-gnu'
         shell: bash
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-        run: cargo build --locked --release -p ferrum-server -p rom-bootstrap --target ${{ matrix.target }}
+        run: cargo build --locked --release -p rom-server -p rom-bootstrap --target ${{ matrix.target }}
 
       - name: Build Android ARM64 server and Bootstrap
         if: matrix.android
@@ -228,7 +228,7 @@ jobs:
           export CARGO_TARGET_AARCH64_LINUX_ANDROID_AR="${toolchain}/llvm-ar"
           export CC_aarch64_linux_android="${toolchain}/aarch64-linux-android24-clang"
           export AR_aarch64_linux_android="${toolchain}/llvm-ar"
-          cargo build --locked --release -p ferrum-server -p rom-bootstrap --target "${{ matrix.target }}"
+          cargo build --locked --release -p rom-server -p rom-bootstrap --target "${{ matrix.target }}"
 
       - name: Smoke-test Windows executables
         if: runner.os == 'Windows'
@@ -342,7 +342,7 @@ jobs:
           path: |
             dist/*.zip
             dist/*.tar.gz
-            dist/ferrum-server-*
+            dist/rom-*
             dist/rom-bootstrap-*
             dist/*.sha256
           if-no-files-found: error
@@ -422,7 +422,7 @@ jobs:
 
           This build includes the current authoritative inventory and container transaction implementation, synchronized registries, login and Configuration, world bootstrap, player synchronization, chat, and Keep Alive.
 
-          Standalone ferrum-server and rom-bootstrap executables are provided for Windows x86_64, Linux x86_64, Linux AArch64, Android/Termux AArch64, macOS x86_64, and macOS AArch64. Platform archives include configuration, documentation, VERSION, and BUILD_INFO files.
+          Standalone rom and rom-bootstrap executables are provided for Windows x86_64, Linux x86_64, Linux AArch64, Android/Termux AArch64, macOS x86_64, and macOS AArch64. Platform archives include configuration, documentation, VERSION, and BUILD_INFO files.
 
           Android users can download and run install-termux.sh. Pixel Terminal users can download and run install-pixel-terminal.sh. Verify all downloads with the per-file checksum or SHA256SUMS.
           EOF
