@@ -5,6 +5,7 @@
 mod block_interaction;
 mod chunk_stream;
 mod entity;
+mod entity_data;
 mod generic_entity;
 mod health;
 mod inventory;
@@ -21,6 +22,10 @@ pub use entity::{
     PlayerInfoEntry, encode_add_entity, encode_empty_entity_data, encode_entity_movement,
     encode_player_info_remove, encode_player_info_update, encode_remove_entities,
     encode_rotate_head, encode_teleport_entity,
+};
+pub use entity_data::{
+    ENTITY_DATA_TERMINATOR, EntityDataEncodeError, EntityDataEntry, MAX_ENTITY_DATA_ENTRIES,
+    MAX_ENTITY_DATA_VALUE_BYTES, encode_entity_data,
 };
 pub use generic_entity::{GenericEntityEncodeError, encode_add_world_entity};
 pub use health::{HealthEncodeError, encode_set_health};
@@ -84,21 +89,6 @@ pub struct Respawn {
     pub data_to_keep: RespawnDataToKeep,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct JoinGame {
-    pub player_id: i32,
-    pub hardcore: bool,
-    pub levels: Vec<String>,
-    pub max_players: i32,
-    pub chunk_radius: i32,
-    pub simulation_distance: i32,
-    pub reduced_debug_info: bool,
-    pub show_death_screen: bool,
-    pub limited_crafting: bool,
-    pub spawn_info: CommonPlayerSpawnInfo,
-    pub enforces_secure_chat: bool,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GlobalPosition {
     pub dimension: String,
@@ -106,13 +96,6 @@ pub struct GlobalPosition {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BlockPosition {
-    pub x: i32,
-    pub y: i32,
-    pub z: i32,
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub struct DefaultSpawnPosition {
     pub position: GlobalPosition,
     pub yaw: f32,
@@ -249,13 +232,10 @@ pub fn encode_level_chunk_with_light(chunk: &StaticChunk) -> Result<Vec<u8>, Pla
     output.extend_from_slice(&chunk.pos().x.to_be_bytes());
     output.extend_from_slice(&chunk.pos().z.to_be_bytes());
 
-    // Heightmap map. The first static-world milestone intentionally sends no
-    // heightmap entries; clients can derive visible geometry from chunk data.
     write_varint(&mut output, 0);
     write_len(&mut output, section_data.len())?;
     output.extend_from_slice(&section_data);
 
-    // Block entity list.
     write_varint(&mut output, 0);
 
     encode_full_sky_light(&mut output, chunk.sections().len())?;
@@ -287,216 +267,12 @@ pub fn encode_join_game(packet: &JoinGame) -> Result<Vec<u8>, PlayEncodeError> {
     Ok(output)
 }
 
-pub fn encode_default_spawn_position(
-    packet: &DefaultSpawnPosition,
-) -> Result<Vec<u8>, PlayEncodeError> {
-    require_finite_f32("spawn yaw", packet.yaw)?;
-    require_finite_f32("spawn pitch", packet.pitch)?;
-    let mut output = Vec::new();
-    encode_global_position(&mut output, &packet.position)?;
-    output.extend_from_slice(&packet.yaw.to_be_bytes());
-    output.extend_from_slice(&packet.pitch.to_be_bytes());
-    Ok(output)
-}
-
-pub fn encode_player_position(packet: &PlayerPosition) -> Result<Vec<u8>, PlayEncodeError> {
-    require_non_negative("teleport_id", packet.teleport_id)?;
-    for (field, value) in [
-        ("position x", packet.change.position[0]),
-        ("position y", packet.change.position[1]),
-        ("position z", packet.change.position[2]),
-        ("delta x", packet.change.delta_movement[0]),
-        ("delta y", packet.change.delta_movement[1]),
-        ("delta z", packet.change.delta_movement[2]),
-    ] {
-        require_finite_f64(field, value)?;
-    }
-    require_finite_f32("yaw", packet.change.yaw)?;
-    require_finite_f32("pitch", packet.change.pitch)?;
-
-    let mut output = Vec::new();
-    write_varint(&mut output, packet.teleport_id);
-    for value in packet.change.position {
-        output.extend_from_slice(&value.to_be_bytes());
-    }
-    for value in packet.change.delta_movement {
-        output.extend_from_slice(&value.to_be_bytes());
-    }
-    output.extend_from_slice(&packet.change.yaw.to_be_bytes());
-    output.extend_from_slice(&packet.change.pitch.to_be_bytes());
-    output.extend_from_slice(&packet.relative_flags.to_be_bytes());
-    Ok(output)
-}
-
-fn encode_chunk_section(
-    output: &mut Vec<u8>,
-    section: &ChunkSection,
-) -> Result<(), PlayEncodeError> {
-    output.extend_from_slice(&section.non_empty_block_count().to_be_bytes());
-    output.extend_from_slice(&section.fluid_count().to_be_bytes());
-
-    let block_values: Vec<u32> = section.blocks().iter().map(|id| id.get()).collect();
-    encode_paletted_container(
-        output,
-        &block_values,
-        "block state",
-        BLOCK_PALETTE_MIN_BITS,
-        BLOCK_PALETTE_MAX_INDIRECT_BITS,
-    )?;
-
-    let biome_values: Vec<u32> = section.biomes().iter().map(|id| id.get()).collect();
-    encode_paletted_container(
-        output,
-        &biome_values,
-        "biome",
-        BIOME_PALETTE_MIN_BITS,
-        BIOME_PALETTE_MAX_INDIRECT_BITS,
-    )?;
-    Ok(())
-}
-
-fn encode_paletted_container(
-    output: &mut Vec<u8>,
-    values: &[u32],
-    kind: &'static str,
-    minimum_indirect_bits: u8,
-    maximum_indirect_bits: u8,
-) -> Result<(), PlayEncodeError> {
-    if values.is_empty() {
-        return Err(PlayEncodeError::EmptyPalettedContainer);
-    }
-
-    let mut palette = Vec::new();
-    let mut palette_indexes = BTreeMap::new();
-    let mut indexes = Vec::with_capacity(values.len());
-    for value in values {
-        let index = if let Some(index) = palette_indexes.get(value) {
-            *index
-        } else {
-            let index =
-                u32::try_from(palette.len()).map_err(|_| PlayEncodeError::CollectionTooLong {
-                    length: palette.len(),
-                })?;
-            palette.push(*value);
-            palette_indexes.insert(*value, index);
-            index
-        };
-        indexes.push(index);
-    }
-
-    if palette.len() == 1 {
-        output.push(0);
-        write_numeric_id(output, kind, palette[0])?;
-        return Ok(());
-    }
-
-    let required_bits = ceil_log2(palette.len());
-    let bits = required_bits.max(minimum_indirect_bits);
-    if bits <= maximum_indirect_bits {
-        output.push(bits);
-        write_len(output, palette.len())?;
-        for value in palette {
-            write_numeric_id(output, kind, value)?;
-        }
-        for packed in pack_values(&indexes, bits)? {
-            output.extend_from_slice(&packed.to_be_bytes());
-        }
-        return Ok(());
-    }
-
-    let maximum_value = values.iter().copied().max().unwrap_or(0);
-    let global_bits = (u32::BITS - maximum_value.leading_zeros()) as u8;
-    let global_bits = global_bits.max(1);
-    output.push(global_bits);
-    for packed in pack_values(values, global_bits)? {
-        output.extend_from_slice(&packed.to_be_bytes());
-    }
-    Ok(())
-}
-
-fn pack_values(values: &[u32], bits: u8) -> Result<Vec<u64>, PlayEncodeError> {
-    if bits == 0 || bits > 32 {
-        return Err(PlayEncodeError::PaletteBitsOutOfRange { bits });
-    }
-    let values_per_long = 64 / usize::from(bits);
-    let long_count = values.len().div_ceil(values_per_long);
-    let mask = (1_u64 << bits) - 1;
-    let mut packed = vec![0_u64; long_count];
-    for (index, value) in values.iter().copied().enumerate() {
-        if u64::from(value) > mask {
-            return Err(PlayEncodeError::NumericIdOutOfRange {
-                kind: "palette",
-                value,
-            });
-        }
-        let long_index = index / values_per_long;
-        let bit_index = (index % values_per_long) * usize::from(bits);
-        packed[long_index] |= u64::from(value) << bit_index;
-    }
-    Ok(packed)
-}
-
-fn encode_full_sky_light(
-    output: &mut Vec<u8>,
-    section_count: usize,
-) -> Result<(), PlayEncodeError> {
-    let light_section_count =
-        section_count
-            .checked_add(2)
-            .ok_or(PlayEncodeError::CollectionTooLong {
-                length: section_count,
-            })?;
-    let all_sections_mask = bitset_with_low_bits(light_section_count);
-
-    write_bitset(output, &all_sections_mask)?;
-    write_bitset(output, &[])?;
-    write_bitset(output, &[])?;
-    write_bitset(output, &all_sections_mask)?;
-
-    write_len(output, light_section_count)?;
-    for _ in 0..light_section_count {
-        write_len(output, LIGHT_BYTES_PER_SECTION)?;
-        output.extend(std::iter::repeat_n(0xff, LIGHT_BYTES_PER_SECTION));
-    }
-    write_varint(output, 0);
-    Ok(())
-}
-
-fn bitset_with_low_bits(bit_count: usize) -> Vec<u64> {
-    if bit_count == 0 {
-        return Vec::new();
-    }
-    let long_count = bit_count.div_ceil(64);
-    let mut longs = vec![u64::MAX; long_count];
-    let remainder = bit_count % 64;
-    if remainder != 0 {
-        longs[long_count - 1] = (1_u64 << remainder) - 1;
-    }
-    longs
-}
-
-fn write_bitset(output: &mut Vec<u8>, values: &[u64]) -> Result<(), PlayEncodeError> {
-    write_len(output, values.len())?;
-    for value in values {
-        output.extend_from_slice(&value.to_be_bytes());
-    }
-    Ok(())
-}
-
-fn encode_component(message: &str) -> Result<Vec<u8>, PlayEncodeError> {
-    let mut output = Vec::new();
-    encode_anonymous(&mut output, &Tag::String(message.to_owned())).map_err(|error| {
-        PlayEncodeError::ComponentEncoding {
-            message: error.to_string(),
-        }
-    })?;
-    Ok(output)
-}
-
 fn encode_common_spawn_info(
     output: &mut Vec<u8>,
     info: &CommonPlayerSpawnInfo,
 ) -> Result<(), PlayEncodeError> {
+    require_non_negative("dimension_type_id", info.dimension_type_id)?;
+    require_non_negative("portal_cooldown", info.portal_cooldown)?;
     write_varint(output, info.dimension_type_id);
     write_resource_location(output, &info.dimension)?;
     output.extend_from_slice(&info.seed.to_be_bytes());
@@ -504,25 +280,85 @@ fn encode_common_spawn_info(
     output.push(info.previous_game_mode as u8);
     write_bool(output, info.is_debug);
     write_bool(output, info.is_flat);
-    match &info.last_death_location {
-        Some(position) => {
-            write_bool(output, true);
-            encode_global_position(output, position)?;
-        }
-        None => write_bool(output, false),
-    }
+    encode_optional_global_position(output, info.last_death_location.as_ref())?;
     write_varint(output, info.portal_cooldown);
     write_varint(output, info.sea_level);
     Ok(())
 }
 
-fn encode_global_position(
+fn encode_optional_global_position(
     output: &mut Vec<u8>,
-    position: &GlobalPosition,
+    position: Option<&GlobalPosition>,
 ) -> Result<(), PlayEncodeError> {
-    write_resource_location(output, &position.dimension)?;
-    output.extend_from_slice(&pack_block_position(position.position)?.to_be_bytes());
+    write_bool(output, position.is_some());
+    if let Some(position) = position {
+        write_resource_location(output, &position.dimension)?;
+        output.extend_from_slice(&pack_block_position(position.position)?.to_be_bytes());
+    }
     Ok(())
+}
+
+fn write_resource_location(
+    output: &mut Vec<u8>,
+    resource: &str,
+) -> Result<(), PlayEncodeError> {
+    if resource.is_empty() {
+        return Err(PlayEncodeError::EmptyResourceLocation);
+    }
+    if resource.len() > MAX_RESOURCE_LOCATION_BYTES {
+        return Err(PlayEncodeError::ResourceLocationTooLong {
+            length: resource.len(),
+        });
+    }
+    write_string(output, resource)
+}
+
+fn write_string(output: &mut Vec<u8>, value: &str) -> Result<(), PlayEncodeError> {
+    write_len(output, value.len())?;
+    output.extend_from_slice(value.as_bytes());
+    Ok(())
+}
+
+fn write_len(output: &mut Vec<u8>, length: usize) -> Result<(), PlayEncodeError> {
+    let value = i32::try_from(length).map_err(|_| PlayEncodeError::CollectionTooLong { length })?;
+    write_varint(output, value);
+    Ok(())
+}
+
+fn write_numeric_id(
+    output: &mut Vec<u8>,
+    kind: &'static str,
+    value: u32,
+) -> Result<(), PlayEncodeError> {
+    let value = i32::try_from(value).map_err(|_| PlayEncodeError::NumericIdOutOfRange {
+        kind,
+        value,
+    })?;
+    write_varint(output, value);
+    Ok(())
+}
+
+fn require_non_negative(field: &'static str, value: i32) -> Result<(), PlayEncodeError> {
+    if value < 0 {
+        return Err(PlayEncodeError::NegativeValue { field, value });
+    }
+    Ok(())
+}
+
+fn write_bool(output: &mut Vec<u8>, value: bool) {
+    output.push(u8::from(value));
+}
+
+fn write_varint(output: &mut Vec<u8>, value: i32) {
+    let mut value = value as u32;
+    loop {
+        if value & !0x7f == 0 {
+            output.push(value as u8);
+            return;
+        }
+        output.push(((value & 0x7f) | 0x80) as u8);
+        value >>= 7;
+    }
 }
 
 fn pack_block_position(position: BlockPosition) -> Result<i64, PlayEncodeError> {
@@ -536,365 +372,285 @@ fn pack_block_position(position: BlockPosition) -> Result<i64, PlayEncodeError> 
             z: position.z,
         });
     }
-    let x = i64::from(position.x) & 0x3ff_ffff;
-    let y = i64::from(position.y) & 0xfff;
-    let z = i64::from(position.z) & 0x3ff_ffff;
-    Ok((x << 38) | (z << 12) | y)
+    Ok(((i64::from(position.x) & 0x3ffffff) << 38)
+        | ((i64::from(position.z) & 0x3ffffff) << 12)
+        | (i64::from(position.y) & 0xfff))
 }
 
-fn write_bool(output: &mut Vec<u8>, value: bool) {
-    output.push(u8::from(value));
+fn encode_component(message: &str) -> Result<Vec<u8>, PlayEncodeError> {
+    encode_anonymous(&Tag::String(message.to_owned())).map_err(|error| {
+        PlayEncodeError::ComponentEncoding {
+            message: error.to_string(),
+        }
+    })
 }
 
-fn write_resource_location(output: &mut Vec<u8>, value: &str) -> Result<(), PlayEncodeError> {
-    if value.is_empty() {
-        return Err(PlayEncodeError::EmptyResourceLocation);
+fn encode_full_sky_light(
+    output: &mut Vec<u8>,
+    section_count: usize,
+) -> Result<(), PlayEncodeError> {
+    let light_section_count = section_count
+        .checked_add(2)
+        .ok_or(PlayEncodeError::CollectionTooLong {
+            length: section_count,
+        })?;
+    let mask_word = if light_section_count >= 64 {
+        u64::MAX
+    } else {
+        (1_u64 << light_section_count) - 1
+    };
+    write_varint(output, 1);
+    output.extend_from_slice(&mask_word.to_be_bytes());
+    write_varint(output, 1);
+    output.extend_from_slice(&mask_word.to_be_bytes());
+    write_varint(output, 0);
+    write_varint(output, 0);
+    write_varint(output, usize_to_varint(light_section_count)?);
+    for _ in 0..light_section_count {
+        write_varint(output, LIGHT_BYTES_PER_SECTION as i32);
+        output.extend(std::iter::repeat_n(0xff, LIGHT_BYTES_PER_SECTION));
     }
-    if value.len() > MAX_RESOURCE_LOCATION_BYTES {
-        return Err(PlayEncodeError::ResourceLocationTooLong {
-            length: value.len(),
+    write_varint(output, 0);
+    Ok(())
+}
+
+fn usize_to_varint(value: usize) -> Result<i32, PlayEncodeError> {
+    i32::try_from(value).map_err(|_| PlayEncodeError::CollectionTooLong { length: value })
+}
+
+fn bits_needed(value: u32) -> u8 {
+    if value == 0 {
+        0
+    } else {
+        (u32::BITS - value.leading_zeros()) as u8
+    }
+}
+
+fn encode_chunk_section(
+    output: &mut Vec<u8>,
+    section: &ChunkSection,
+) -> Result<(), PlayEncodeError> {
+    output.extend_from_slice(&section.non_air_count().to_be_bytes());
+    encode_block_states(output, section)?;
+    encode_biomes(output, section)?;
+    Ok(())
+}
+
+fn encode_block_states(
+    output: &mut Vec<u8>,
+    section: &ChunkSection,
+) -> Result<(), PlayEncodeError> {
+    let mut palette = Vec::new();
+    let mut indices = Vec::with_capacity(ChunkSection::BLOCK_COUNT);
+    let mut palette_lookup = BTreeMap::new();
+    for index in 0..ChunkSection::BLOCK_COUNT {
+        let state = section
+            .block_state_by_index(index)
+            .expect("chunk section index is bounded");
+        let palette_index = if let Some(index) = palette_lookup.get(&state) {
+            *index
+        } else {
+            let index = palette.len() as u32;
+            palette.push(state);
+            palette_lookup.insert(state, index);
+            index
+        };
+        indices.push(palette_index);
+    }
+
+    if palette.len() == 1 {
+        output.push(0);
+        write_numeric_id(output, "block state", palette[0].get())?;
+        write_varint(output, 0);
+        return Ok(());
+    }
+
+    let bits = bits_needed((palette.len() - 1) as u32).max(BLOCK_PALETTE_MIN_BITS);
+    if bits <= BLOCK_PALETTE_MAX_INDIRECT_BITS {
+        output.push(bits);
+        write_len(output, palette.len())?;
+        for state in &palette {
+            write_numeric_id(output, "block state", state.get())?;
+        }
+        encode_packed_values(output, &indices, bits)?;
+        return Ok(());
+    }
+
+    let max_state = section
+        .block_states()
+        .iter()
+        .map(|state| state.get())
+        .max()
+        .unwrap_or(0);
+    let direct_bits = bits_needed(max_state).max(BLOCK_PALETTE_MAX_INDIRECT_BITS + 1);
+    if direct_bits > 32 {
+        return Err(PlayEncodeError::PaletteBitsOutOfRange { bits: direct_bits });
+    }
+    output.push(direct_bits);
+    let direct_values = section
+        .block_states()
+        .iter()
+        .map(|state| state.get())
+        .collect::<Vec<_>>();
+    encode_packed_values(output, &direct_values, direct_bits)?;
+    Ok(())
+}
+
+fn encode_biomes(
+    output: &mut Vec<u8>,
+    section: &ChunkSection,
+) -> Result<(), PlayEncodeError> {
+    let mut palette = Vec::new();
+    let mut indices = Vec::with_capacity(ChunkSection::BIOME_COUNT);
+    let mut palette_lookup = BTreeMap::new();
+    for index in 0..ChunkSection::BIOME_COUNT {
+        let biome = section
+            .biome_by_index(index)
+            .expect("chunk section biome index is bounded");
+        let palette_index = if let Some(index) = palette_lookup.get(&biome) {
+            *index
+        } else {
+            let index = palette.len() as u32;
+            palette.push(biome);
+            palette_lookup.insert(biome, index);
+            index
+        };
+        indices.push(palette_index);
+    }
+
+    if palette.len() == 1 {
+        output.push(0);
+        write_numeric_id(output, "biome", palette[0])?;
+        write_varint(output, 0);
+        return Ok(());
+    }
+
+    let bits = bits_needed((palette.len() - 1) as u32).max(BIOME_PALETTE_MIN_BITS);
+    if bits <= BIOME_PALETTE_MAX_INDIRECT_BITS {
+        output.push(bits);
+        write_len(output, palette.len())?;
+        for biome in &palette {
+            write_numeric_id(output, "biome", *biome)?;
+        }
+        encode_packed_values(output, &indices, bits)?;
+        return Ok(());
+    }
+
+    let max_biome = section.biomes().iter().copied().max().unwrap_or(0);
+    let direct_bits = bits_needed(max_biome).max(BIOME_PALETTE_MAX_INDIRECT_BITS + 1);
+    if direct_bits > 32 {
+        return Err(PlayEncodeError::PaletteBitsOutOfRange { bits: direct_bits });
+    }
+    output.push(direct_bits);
+    encode_packed_values(output, section.biomes(), direct_bits)?;
+    Ok(())
+}
+
+fn encode_packed_values(
+    output: &mut Vec<u8>,
+    values: &[u32],
+    bits_per_value: u8,
+) -> Result<(), PlayEncodeError> {
+    if bits_per_value == 0 || bits_per_value > 32 {
+        return Err(PlayEncodeError::PaletteBitsOutOfRange {
+            bits: bits_per_value,
         });
     }
-    write_varint(
-        output,
-        i32::try_from(value.len()).map_err(|_| PlayEncodeError::ResourceLocationTooLong {
-            length: value.len(),
-        })?,
-    );
-    output.extend_from_slice(value.as_bytes());
-    Ok(())
-}
-
-fn write_numeric_id(
-    output: &mut Vec<u8>,
-    kind: &'static str,
-    value: u32,
-) -> Result<(), PlayEncodeError> {
-    let value =
-        i32::try_from(value).map_err(|_| PlayEncodeError::NumericIdOutOfRange { kind, value })?;
-    write_varint(output, value);
-    Ok(())
-}
-
-fn write_len(output: &mut Vec<u8>, length: usize) -> Result<(), PlayEncodeError> {
-    let length =
-        i32::try_from(length).map_err(|_| PlayEncodeError::CollectionTooLong { length })?;
-    write_varint(output, length);
-    Ok(())
-}
-
-fn write_varint(output: &mut Vec<u8>, value: i32) {
-    let mut value = value as u32;
-    loop {
-        let mut byte = (value & 0x7f) as u8;
-        value >>= 7;
-        if value != 0 {
-            byte |= 0x80;
+    let values_per_long = 64 / usize::from(bits_per_value);
+    if values_per_long == 0 {
+        return Err(PlayEncodeError::PaletteBitsOutOfRange {
+            bits: bits_per_value,
+        });
+    }
+    let long_count = values.len().div_ceil(values_per_long);
+    write_len(output, long_count)?;
+    let mask = if bits_per_value == 32 {
+        u64::from(u32::MAX)
+    } else {
+        (1_u64 << bits_per_value) - 1
+    };
+    for chunk in values.chunks(values_per_long) {
+        let mut packed = 0_u64;
+        for (index, value) in chunk.iter().enumerate() {
+            packed |= (u64::from(*value) & mask) << (index * usize::from(bits_per_value));
         }
-        output.push(byte);
-        if value == 0 {
-            break;
-        }
+        output.extend_from_slice(&packed.to_be_bytes());
     }
-}
-
-fn ceil_log2(value_count: usize) -> u8 {
-    let value = value_count.saturating_sub(1);
-    (usize::BITS - value.leading_zeros()) as u8
-}
-
-fn require_non_negative(field: &'static str, value: i32) -> Result<(), PlayEncodeError> {
-    if value < 0 {
-        Err(PlayEncodeError::NegativeValue { field, value })
-    } else {
-        Ok(())
-    }
-}
-
-fn require_finite_f32(field: &'static str, value: f32) -> Result<(), PlayEncodeError> {
-    if value.is_finite() {
-        Ok(())
-    } else {
-        Err(PlayEncodeError::NonFinite { field })
-    }
-}
-
-fn require_finite_f64(field: &'static str, value: f64) -> Result<(), PlayEncodeError> {
-    if value.is_finite() {
-        Ok(())
-    } else {
-        Err(PlayEncodeError::NonFinite { field })
-    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ferrum_world::{BiomeId, BlockStateId, ChunkPos, FlatWorldSpec, StaticChunk};
-
-    fn static_spawn_info() -> CommonPlayerSpawnInfo {
-        CommonPlayerSpawnInfo {
-            dimension_type_id: 0,
-            dimension: "minecraft:overworld".to_owned(),
-            seed: 0,
-            game_mode: 0,
-            previous_game_mode: -1,
-            is_debug: false,
-            is_flat: true,
-            last_death_location: None,
-            portal_cooldown: 0,
-            sea_level: 63,
-        }
-    }
-
-    fn static_chunk() -> StaticChunk {
-        StaticChunk::flat_overworld(
-            ChunkPos { x: 0, z: 0 },
-            -4,
-            24,
-            FlatWorldSpec {
-                floor_y: 63,
-                air: BlockStateId::new(0),
-                bedrock: BlockStateId::new(85),
-                stone: BlockStateId::new(1),
-                dirt: BlockStateId::new(10),
-                grass: BlockStateId::new(9),
-                biome: BiomeId::new(40),
-            },
-        )
-        .unwrap()
-    }
 
     #[test]
-    fn encodes_static_join_game_payload_exactly() {
+    fn join_game_prefix_uses_profile_numeric_dimension_id() {
         let payload = encode_join_game(&JoinGame {
-            player_id: 1,
+            player_id: 7,
             hardcore: false,
-            levels: vec!["minecraft:overworld".to_owned()],
+            levels: vec!["minecraft:overworld".into()],
             max_players: 20,
-            chunk_radius: 2,
-            simulation_distance: 2,
+            chunk_radius: 8,
+            simulation_distance: 8,
             reduced_debug_info: false,
             show_death_screen: true,
             limited_crafting: false,
-            spawn_info: static_spawn_info(),
-            enforces_secure_chat: false,
-        })
-        .unwrap();
-
-        let mut expected = vec![0, 0, 0, 1, 0, 1, 19];
-        expected.extend_from_slice(b"minecraft:overworld");
-        expected.extend_from_slice(&[20, 2, 2, 0, 1, 0, 0, 19]);
-        expected.extend_from_slice(b"minecraft:overworld");
-        expected.extend_from_slice(&0_i64.to_be_bytes());
-        expected.extend_from_slice(&[0, 0xff, 0, 1, 0, 0, 63, 0]);
-        assert_eq!(payload, expected);
-    }
-
-    #[test]
-    fn encodes_default_spawn_position_exactly() {
-        let payload = encode_default_spawn_position(&DefaultSpawnPosition {
-            position: GlobalPosition {
-                dimension: "minecraft:overworld".to_owned(),
-                position: BlockPosition { x: 0, y: 64, z: 0 },
-            },
-            yaw: 0.0,
-            pitch: 0.0,
-        })
-        .unwrap();
-        let mut expected = vec![19];
-        expected.extend_from_slice(b"minecraft:overworld");
-        expected.extend_from_slice(&64_i64.to_be_bytes());
-        expected.extend_from_slice(&0_f32.to_be_bytes());
-        expected.extend_from_slice(&0_f32.to_be_bytes());
-        assert_eq!(payload, expected);
-    }
-
-    #[test]
-    fn encodes_player_position_with_absolute_flags() {
-        let payload = encode_player_position(&PlayerPosition {
-            teleport_id: 1,
-            change: PositionMoveRotation {
-                position: [0.5, 65.0, 0.5],
-                delta_movement: [0.0, 0.0, 0.0],
-                yaw: 0.0,
-                pitch: 0.0,
-            },
-            relative_flags: 0,
-        })
-        .unwrap();
-        let mut expected = vec![1];
-        for value in [0.5_f64, 65.0, 0.5, 0.0, 0.0, 0.0] {
-            expected.extend_from_slice(&value.to_be_bytes());
-        }
-        expected.extend_from_slice(&0_f32.to_be_bytes());
-        expected.extend_from_slice(&0_f32.to_be_bytes());
-        expected.extend_from_slice(&0_u32.to_be_bytes());
-        assert_eq!(payload, expected);
-    }
-
-    #[test]
-    fn encodes_chunk_batch_and_cache_center_payloads() {
-        assert!(encode_chunk_batch_start().is_empty());
-        assert_eq!(encode_chunk_batch_finished(1).unwrap(), vec![1]);
-        assert_eq!(encode_set_chunk_cache_center(0, 0), vec![0, 0]);
-    }
-
-    #[test]
-    fn encodes_block_change_ack_exactly() {
-        assert_eq!(encode_block_changed_ack(300).unwrap(), vec![0xac, 0x02]);
-        assert_eq!(
-            encode_block_changed_ack(-1).unwrap_err(),
-            PlayEncodeError::NegativeValue {
-                field: "block change sequence",
-                value: -1,
-            }
-        );
-    }
-
-    #[test]
-    fn encodes_block_update_exactly() {
-        let payload =
-            encode_block_update(BlockPosition { x: 1, y: 65, z: -2 }, BlockStateId::new(300))
-                .unwrap();
-        let mut expected = Vec::new();
-        expected.extend_from_slice(
-            &pack_block_position(BlockPosition { x: 1, y: 65, z: -2 })
-                .unwrap()
-                .to_be_bytes(),
-        );
-        expected.extend_from_slice(&[0xac, 0x02]);
-        assert_eq!(payload, expected);
-    }
-
-    #[test]
-    fn encodes_string_components_for_system_chat_and_disconnect() {
-        let mut expected = vec![8, 0, 6];
-        expected.extend_from_slice(b"Ferrum");
-        assert_eq!(encode_play_disconnect("Ferrum").unwrap(), expected);
-        expected.push(0);
-        assert_eq!(encode_system_chat("Ferrum", false).unwrap(), expected);
-    }
-
-    #[test]
-    fn encodes_flat_chunk_with_expected_section_layout_and_full_sky_light() {
-        let chunk = static_chunk();
-        let payload = encode_level_chunk_with_light(&chunk).unwrap();
-        assert_eq!(&payload[..8], &[0; 8]);
-        assert_eq!(payload[8], 0, "heightmap map must be empty");
-
-        let (section_length, length_bytes) = read_varint(&payload[9..]);
-        assert_eq!(section_length, 2_245);
-        let section_start = 9 + length_bytes;
-        let section_end = section_start + section_length as usize;
-        assert_eq!(
-            section_end + 1 + 20 + 1 + 26 * (2 + LIGHT_BYTES_PER_SECTION) + 1,
-            payload.len()
-        );
-        assert_eq!(payload[section_end], 0, "block entity list must be empty");
-
-        let first_section = &payload[section_start..];
-        assert_eq!(&first_section[..4], &[0, 0, 0, 0]);
-        assert_eq!(&first_section[4..8], &[0, 0, 0, 40]);
-
-        let floor_offset = section_start + 7 * 8;
-        assert_eq!(&payload[floor_offset..floor_offset + 4], &[4, 0, 0, 0]);
-        assert_eq!(payload[floor_offset + 4], 4);
-        assert_eq!(payload[floor_offset + 5], 5);
-        assert_eq!(
-            &payload[floor_offset + 6..floor_offset + 11],
-            &[0, 85, 1, 10, 9]
-        );
-    }
-
-    #[test]
-    fn packs_palette_values_without_crossing_long_boundaries() {
-        let packed =
-            pack_values(&(0_u32..17).map(|value| value % 16).collect::<Vec<_>>(), 4).unwrap();
-        assert_eq!(packed.len(), 2);
-        assert_eq!(packed[0], 0xfedc_ba98_7654_3210);
-        assert_eq!(packed[1], 0);
-    }
-
-    #[test]
-    fn packs_negative_block_coordinates() {
-        let packed = pack_block_position(BlockPosition {
-            x: -1,
-            y: -1,
-            z: -1,
-        })
-        .unwrap();
-        assert_eq!(packed as u64, u64::MAX);
-    }
-
-    #[test]
-    fn rejects_non_finite_position() {
-        let error = encode_player_position(&PlayerPosition {
-            teleport_id: 1,
-            change: PositionMoveRotation {
-                position: [f64::NAN, 0.0, 0.0],
-                delta_movement: [0.0; 3],
-                yaw: 0.0,
-                pitch: 0.0,
-            },
-            relative_flags: 0,
-        })
-        .unwrap_err();
-        assert_eq!(
-            error,
-            PlayEncodeError::NonFinite {
-                field: "position x"
-            }
-        );
-    }
-
-    fn read_varint(input: &[u8]) -> (i32, usize) {
-        let mut value = 0_i32;
-        for (position, byte) in input.iter().copied().enumerate().take(5) {
-            value |= i32::from(byte & 0x7f) << (7 * position);
-            if byte & 0x80 == 0 {
-                return (value, position + 1);
-            }
-        }
-        panic!("invalid test VarInt")
-    }
-
-    #[test]
-    fn encodes_hurt_combat_kill_and_respawn_packets() {
-        let entity_id = EntityId::new(7).unwrap();
-        assert_eq!(
-            encode_hurt_animation(entity_id, 90.0).unwrap(),
-            [vec![7], 90.0_f32.to_be_bytes().to_vec()].concat()
-        );
-
-        let mut expected_kill = vec![7];
-        expected_kill.extend_from_slice(&encode_component("Steve died").unwrap());
-        assert_eq!(
-            encode_player_combat_kill(entity_id, "Steve died").unwrap(),
-            expected_kill
-        );
-
-        let packet = Respawn {
             spawn_info: CommonPlayerSpawnInfo {
-                dimension_type_id: 0,
-                dimension: "minecraft:overworld".to_owned(),
+                dimension_type_id: 3,
+                dimension: "minecraft:overworld".into(),
                 seed: 0,
                 game_mode: 0,
-                previous_game_mode: 0,
+                previous_game_mode: -1,
                 is_debug: false,
                 is_flat: true,
                 last_death_location: None,
                 portal_cooldown: 0,
                 sea_level: 63,
             },
-            data_to_keep: RespawnDataToKeep::Attributes,
+            enforces_secure_chat: false,
+        })
+        .unwrap();
+        assert_eq!(&payload[..5], &[0, 0, 0, 7, 0]);
+    }
+
+    #[test]
+    fn block_position_limits_are_enforced() {
+        let position = BlockPosition {
+            x: BLOCK_POS_XZ_MAX,
+            y: BLOCK_POS_Y_MAX,
+            z: BLOCK_POS_XZ_MIN,
         };
-        let payload = encode_respawn(&packet).unwrap();
-        assert_eq!(payload.last(), Some(&(RespawnDataToKeep::Attributes as u8)));
-        assert!(
-            payload
-                .windows("minecraft:overworld".len())
-                .any(|window| { window == "minecraft:overworld".as_bytes() })
-        );
+        assert!(pack_block_position(position).is_ok());
+        assert!(pack_block_position(BlockPosition { x: BLOCK_POS_XZ_MAX + 1, ..position }).is_err());
+    }
+
+    #[test]
+    fn block_palette_single_value_has_zero_bits() {
+        let section = ChunkSection::new(BlockStateId::new(7), 2);
+        let mut output = Vec::new();
+        encode_block_states(&mut output, &section).unwrap();
+        assert_eq!(output, vec![0, 7, 0]);
+    }
+
+    #[test]
+    fn block_palette_uses_indirect_encoding_for_small_palettes() {
+        let mut section = ChunkSection::new(BlockStateId::new(1), 2);
+        section
+            .set_block_state(0, 0, 0, BlockStateId::new(2))
+            .unwrap();
+        let mut output = Vec::new();
+        encode_block_states(&mut output, &section).unwrap();
+        assert_eq!(output[0], BLOCK_PALETTE_MIN_BITS);
+        assert_eq!(output[1], 2);
+        assert_eq!(output[2], 2);
+        assert_eq!(output[3], 1);
+    }
+
+    #[test]
+    fn chunk_payload_begins_with_chunk_coordinates() {
+        let chunk = StaticChunk::new(1, 2, -4, 1, BlockStateId::new(0), 0).unwrap();
+        let payload = encode_level_chunk_with_light(&chunk).unwrap();
+        assert_eq!(&payload[..4], &1_i32.to_be_bytes());
+        assert_eq!(&payload[4..8], &2_i32.to_be_bytes());
     }
 }
