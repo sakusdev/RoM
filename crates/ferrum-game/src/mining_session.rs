@@ -1,7 +1,9 @@
 //! Authoritative block-breaking sessions.
 //!
 //! A client may announce start/abort/stop actions, but only server game time
-//! decides whether a target has been mined for long enough to break.
+//! decides whether a target has been mined for long enough to break. Sessions
+//! also snapshot a version-neutral target token so a block replacement at the
+//! same coordinates cannot be harvested with stale mining progress.
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -13,6 +15,7 @@ pub const MAX_MINING_TICKS: u32 = 20 * 60 * 10;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MiningSession {
     pub position: BlockPos,
+    pub target_token: u64,
     pub started_at_tick: u64,
     pub required_ticks: u32,
 }
@@ -20,6 +23,7 @@ pub struct MiningSession {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MiningCompletion {
     pub position: BlockPos,
+    pub target_token: u64,
     pub started_at_tick: u64,
     pub completed_at_tick: u64,
     pub required_ticks: u32,
@@ -29,6 +33,7 @@ pub struct MiningCompletion {
 impl MiningSession {
     pub fn new(
         position: BlockPos,
+        target_token: u64,
         started_at_tick: u64,
         required_ticks: u32,
     ) -> Result<Self, MiningSessionError> {
@@ -37,6 +42,7 @@ impl MiningSession {
         }
         Ok(Self {
             position,
+            target_token,
             started_at_tick,
             required_ticks,
         })
@@ -60,12 +66,19 @@ impl MiningSession {
     pub fn complete(
         self,
         position: BlockPos,
+        target_token: u64,
         current_tick: u64,
     ) -> Result<MiningCompletion, MiningSessionError> {
         if position != self.position {
             return Err(MiningSessionError::WrongTarget {
                 expected: self.position,
                 actual: position,
+            });
+        }
+        if target_token != self.target_token {
+            return Err(MiningSessionError::TargetChanged {
+                expected: self.target_token,
+                actual: target_token,
             });
         }
         let elapsed_ticks = self.elapsed_ticks(current_tick);
@@ -77,6 +90,7 @@ impl MiningSession {
         }
         Ok(MiningCompletion {
             position,
+            target_token,
             started_at_tick: self.started_at_tick,
             completed_at_tick: current_tick,
             required_ticks: self.required_ticks,
@@ -96,6 +110,8 @@ pub enum MiningSessionError {
         expected: BlockPos,
         actual: BlockPos,
     },
+    #[error("mining target token changed from {expected} to {actual}")]
+    TargetChanged { expected: u64, actual: u64 },
     #[error("mining stopped after {elapsed_ticks} ticks but requires {required_ticks}")]
     TooEarly {
         required_ticks: u32,
@@ -113,7 +129,7 @@ mod tests {
 
     #[test]
     fn progress_is_server_tick_based_and_clamped() {
-        let session = MiningSession::new(pos(), 100, 20).unwrap();
+        let session = MiningSession::new(pos(), 7, 100, 20).unwrap();
         assert_eq!(session.progress(90), 0.0);
         assert_eq!(session.progress(110), 0.5);
         assert_eq!(session.progress(120), 1.0);
@@ -122,9 +138,9 @@ mod tests {
 
     #[test]
     fn early_stop_is_rejected() {
-        let session = MiningSession::new(pos(), 100, 5).unwrap();
+        let session = MiningSession::new(pos(), 7, 100, 5).unwrap();
         assert_eq!(
-            session.complete(pos(), 104).unwrap_err(),
+            session.complete(pos(), 7, 104).unwrap_err(),
             MiningSessionError::TooEarly {
                 required_ticks: 5,
                 elapsed_ticks: 4,
@@ -134,19 +150,32 @@ mod tests {
 
     #[test]
     fn completed_session_reports_elapsed_ticks() {
-        let session = MiningSession::new(pos(), 100, 5).unwrap();
-        let completion = session.complete(pos(), 106).unwrap();
+        let session = MiningSession::new(pos(), 7, 100, 5).unwrap();
+        let completion = session.complete(pos(), 7, 106).unwrap();
         assert_eq!(completion.elapsed_ticks, 6);
         assert_eq!(completion.required_ticks, 5);
+        assert_eq!(completion.target_token, 7);
     }
 
     #[test]
     fn target_swap_is_rejected() {
-        let session = MiningSession::new(pos(), 0, 1).unwrap();
+        let session = MiningSession::new(pos(), 7, 0, 1).unwrap();
         let other = BlockPos { x: 2, ..pos() };
         assert!(matches!(
-            session.complete(other, 1),
+            session.complete(other, 7, 1),
             Err(MiningSessionError::WrongTarget { .. })
         ));
+    }
+
+    #[test]
+    fn block_replacement_at_same_position_is_rejected() {
+        let session = MiningSession::new(pos(), 7, 0, 1).unwrap();
+        assert_eq!(
+            session.complete(pos(), 8, 1).unwrap_err(),
+            MiningSessionError::TargetChanged {
+                expected: 7,
+                actual: 8,
+            }
+        );
     }
 }
