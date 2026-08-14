@@ -14,24 +14,20 @@ pub enum ExperienceEncodeError {
 /// Encodes the 26.x clientbound Set Experience payload.
 ///
 /// The vanilla wire order is progress (Float), level (VarInt), total (VarInt).
-pub fn encode_set_experience(
-    experience: Experience,
-) -> Result<Vec<u8>, ExperienceEncodeError> {
+pub fn encode_set_experience(experience: Experience) -> Result<Vec<u8>, ExperienceEncodeError> {
     if !experience.progress.is_finite() || !(0.0..=1.0).contains(&experience.progress) {
         return Err(ExperienceEncodeError::InvalidProgress {
             value: experience.progress,
         });
     }
-    let level = i32::try_from(experience.level).map_err(|_| {
-        ExperienceEncodeError::LevelOutOfRange {
+    let level =
+        i32::try_from(experience.level).map_err(|_| ExperienceEncodeError::LevelOutOfRange {
             value: experience.level,
-        }
-    })?;
-    let total = i32::try_from(experience.total).map_err(|_| {
-        ExperienceEncodeError::TotalOutOfRange {
+        })?;
+    let total =
+        i32::try_from(experience.total).map_err(|_| ExperienceEncodeError::TotalOutOfRange {
             value: experience.total,
-        }
-    })?;
+        })?;
 
     let mut output = Vec::with_capacity(14);
     output.extend_from_slice(&experience.progress.to_be_bytes());
