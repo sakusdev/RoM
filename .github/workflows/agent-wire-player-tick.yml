@@ -15,19 +15,34 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - name: Wire player gameplay into authoritative tick
+      - name: Wire player gameplay into authoritative runtime tick
         shell: python
         run: |
           from pathlib import Path
 
-          path = Path("crates/ferrum-game/src/gameplay_tick.rs")
+          path = Path("crates/ferrum-server/src/game_runtime.rs")
           text = path.read_text()
-          needle = "        let mut outcome = GameplayTickOutcome::empty();\n"
-          replacement = needle + "        self.tick_player_gameplay(&mut outcome.events);\n"
-          if "self.tick_player_gameplay(&mut outcome.events);" not in text:
-              if needle not in text:
-                  raise SystemExit("gameplay tick insertion marker not found")
-              text = text.replace(needle, replacement, 1)
+          old = '''    pub fn tick(&self) -> Result<(), GameRuntimeError> {
+              let outcome = self.write()?.tick_gameplay()?;
+              self.publish(&outcome.events)?;
+              Ok(())
+          }
+          '''
+          new = '''    pub fn tick(&self) -> Result<(), GameRuntimeError> {
+              let events = {
+                  let mut state = self.write()?;
+                  let mut events = state.tick_player_gameplay()?;
+                  events.extend(state.tick_gameplay()?.events);
+                  events
+              };
+              self.publish(&events)?;
+              Ok(())
+          }
+          '''
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif "let mut events = state.tick_player_gameplay()?;" not in text:
+              raise SystemExit("game runtime tick insertion marker not found")
           path.write_text(text)
       - name: Format
         run: cargo fmt --all
@@ -44,5 +59,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add --all
-          git commit -m "Wire persistent player gameplay into tick"
+          git commit -m "Wire persistent player gameplay into runtime tick"
           git push
