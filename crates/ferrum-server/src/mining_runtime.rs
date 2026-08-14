@@ -56,7 +56,9 @@ impl SharedGameRuntime {
     ) -> Result<bool, MiningRuntimeError> {
         let mode = self
             .with_state(|state| state.player(uuid).map(|player| player.game_mode))?
-            .ok_or(GameRuntimeError::State(GameStateError::UnknownPlayer { uuid }))?;
+            .ok_or(GameRuntimeError::State(GameStateError::UnknownPlayer {
+                uuid,
+            }))?;
         if mode == GameMode::Creative {
             return Ok(true);
         }
@@ -73,7 +75,9 @@ impl SharedGameRuntime {
         let context = self.mining_context(uuid)?;
         let game_mode = self
             .with_state(|state| state.player(uuid).map(|player| player.game_mode))?
-            .ok_or(GameRuntimeError::State(GameStateError::UnknownPlayer { uuid }))?;
+            .ok_or(GameRuntimeError::State(GameStateError::UnknownPlayer {
+                uuid,
+            }))?;
 
         if game_mode == GameMode::Spectator || block.hardness < 0.0 {
             return Ok(None);
@@ -245,9 +249,11 @@ mod tests {
             .begin_mining(uuid, BlockPos { x: 0, y: 64, z: 0 }, block)
             .unwrap()
             .unwrap();
-        assert!(!runtime
-            .finish_mining(uuid, BlockPos { x: 0, y: 64, z: 0 })
-            .unwrap());
+        assert!(
+            !runtime
+                .finish_mining(uuid, BlockPos { x: 0, y: 64, z: 0 })
+                .unwrap()
+        );
     }
 
     #[test]

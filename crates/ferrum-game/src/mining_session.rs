@@ -92,7 +92,10 @@ pub enum MiningSessionError {
     #[error("required mining ticks {required_ticks} are outside 1..={MAX_MINING_TICKS}")]
     InvalidRequiredTicks { required_ticks: u32 },
     #[error("mining target changed from {expected:?} to {actual:?}")]
-    WrongTarget { expected: BlockPos, actual: BlockPos },
+    WrongTarget {
+        expected: BlockPos,
+        actual: BlockPos,
+    },
     #[error("mining stopped after {elapsed_ticks} ticks but requires {required_ticks}")]
     TooEarly {
         required_ticks: u32,
