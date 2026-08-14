@@ -137,13 +137,7 @@ pub fn difficulty_multiplier(kind: DamageKind, difficulty: u8) -> f32 {
             2 => 1.0,
             _ => 1.5,
         },
-        DamageKind::Starvation => {
-            if difficulty == 0 {
-                0.0
-            } else {
-                1.0
-            }
-        }
+        DamageKind::Starvation if difficulty == 0 => 0.0,
         _ => 1.0,
     }
 }
