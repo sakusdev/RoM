@@ -1,0 +1,65 @@
+name: Agent Validate Falling
+
+on:
+  push:
+    branches: [agent/item-entity-domain]
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Route runtime movement through fall gameplay
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path("crates/ferrum-server/src/game_runtime.rs")
+          text = path.read_text()
+          old = '''    pub fn move_player(
+              &self,
+              uuid: PlayerUuid,
+              transform: Transform,
+          ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+              let events = self.write()?.move_player(uuid, transform)?;
+              self.finalize_events(&events)?;
+              Ok(events)
+          }
+          '''
+          new = '''    pub fn move_player(
+              &self,
+              uuid: PlayerUuid,
+              transform: Transform,
+          ) -> Result<Vec<GameEvent>, GameRuntimeError> {
+              let events = self.write()?.move_player_with_gameplay(uuid, transform)?;
+              self.finalize_events(&events)?;
+              Ok(events)
+          }
+          '''
+          if old in text:
+              text = text.replace(old, new, 1)
+          elif "move_player_with_gameplay(uuid, transform)?" not in text:
+              raise SystemExit("runtime movement marker not found")
+          path.write_text(text)
+      - name: Format
+        run: cargo fmt --all
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test --workspace
+      - name: Commit validated fall integration
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add --all
+          git commit -m "Integrate authoritative fall damage"
+          git push
