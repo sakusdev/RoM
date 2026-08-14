@@ -193,9 +193,10 @@ mod tests {
                 state.give_item(uuid, ItemStack::new("minecraft:stone", 2).unwrap())?;
                 state.select_hotbar(uuid, 0)?;
                 let player = state.player_mut(uuid).unwrap();
-                player.inventory.swap_slots(9, HOTBAR_START).map_err(|error| {
-                    GameRuntimeError::State(GameStateError::Inventory(error))
-                })?;
+                player
+                    .inventory
+                    .swap_slots(9, HOTBAR_START)
+                    .map_err(|error| GameRuntimeError::State(GameStateError::Inventory(error)))?;
                 Ok(())
             })
             .unwrap();
@@ -220,9 +221,7 @@ mod tests {
                         HOTBAR_START,
                         Some(ItemStack::new("minecraft:stone", 1).unwrap()),
                     )
-                    .map_err(|error| {
-                        GameRuntimeError::State(GameStateError::Inventory(error))
-                    })?;
+                    .map_err(|error| GameRuntimeError::State(GameStateError::Inventory(error)))?;
                 Ok(())
             })
             .unwrap();
