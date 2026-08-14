@@ -61,6 +61,7 @@ pub use crate::persistence::{GameSnapshot, PersistenceError};
 pub use crate::player::{
     Abilities, Difficulty, Experience, GameMode, PlayerError, PlayerState, PlayerUuid, Vitals,
 };
+pub use crate::player_gameplay::{PlayerGameplay, PlayerGameplayTick};
 pub use crate::raycast::{
     MAX_RAYCAST_STEPS, Ray, RaycastError, RaycastVisit, direction_from_rotation, first_matching,
     traverse_voxels,
