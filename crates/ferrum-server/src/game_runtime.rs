@@ -200,8 +200,13 @@ impl SharedGameRuntime {
     }
 
     pub fn tick(&self) -> Result<(), GameRuntimeError> {
-        let outcome = self.write()?.tick_gameplay()?;
-        self.publish(&outcome.events)?;
+        let events = {
+            let mut state = self.write()?;
+            let mut events = state.tick_player_gameplay()?;
+            events.extend(state.tick_gameplay()?.events);
+            events
+        };
+        self.finalize_events(&events)?;
         Ok(())
     }
 

@@ -546,7 +546,8 @@ impl GameState {
                 return Err(GameStateError::PlayerDead { uuid });
             }
             let previous = player.vitals;
-            player.vitals.heal(amount)?;
+            let max_health = player.gameplay.max_health();
+            player.vitals.heal_to(amount, max_health)?;
             (previous, player.vitals)
         };
         if previous == current {

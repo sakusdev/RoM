@@ -46,9 +46,9 @@ impl SharedGameRuntime {
         }
 
         let events = self.with_state_mut(|state| {
-            let player = state
-                .player_mut(uuid)
-                .ok_or(GameRuntimeError::State(GameStateError::UnknownPlayer { uuid }))?;
+            let player = state.player_mut(uuid).ok_or(GameRuntimeError::State(
+                GameStateError::UnknownPlayer { uuid },
+            ))?;
             if player.game_mode == GameMode::Creative {
                 return Ok(Vec::new());
             }
