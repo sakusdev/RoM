@@ -163,6 +163,53 @@ impl<'a> GameplaySync<'a> {
         Ok(())
     }
 
+    fn selected_placement_state(self, world: &RomPackWorld) -> Result<Option<BlockStateId>> {
+        let Some(selected) = self.runtime.selected_item(self.player_uuid)? else {
+            return Ok(None);
+        };
+        let raw = match selected.stack.item() {
+            "minecraft:stone" => world.block_states.stone,
+            "minecraft:dirt" => world.block_states.dirt,
+            "minecraft:grass_block" => world.block_states.grass,
+            "minecraft:bedrock" => world.block_states.bedrock,
+            _ => return Ok(None),
+        };
+        Ok(Some(BlockStateId::new(raw)))
+    }
+
+    fn consume_placement_item(self) -> Result<()> {
+        self.runtime.consume_selected_item(self.player_uuid, 1)?;
+        Ok(())
+    }
+
+    fn spawn_block_drop(
+        self,
+        position: BlockPosition,
+        state: BlockStateId,
+        world: &RomPackWorld,
+    ) -> Result<()> {
+        let item = if state.get() == world.block_states.stone {
+            Some("minecraft:cobblestone")
+        } else if state.get() == world.block_states.dirt || state.get() == world.block_states.grass
+        {
+            Some("minecraft:dirt")
+        } else {
+            None
+        };
+        if let Some(item) = item {
+            self.runtime.spawn_world_item(
+                self.player_uuid,
+                [
+                    f64::from(position.x),
+                    f64::from(position.y),
+                    f64::from(position.z),
+                ],
+                ferrum_game::ItemStack::new(item, 1)?,
+            )?;
+        }
+        Ok(())
+    }
+
     fn set_creative_slot(self, payload: &[u8]) -> Result<()> {
         let (slot, stack) = decode_creative_slot_update(payload, self.items)?;
         self.runtime
