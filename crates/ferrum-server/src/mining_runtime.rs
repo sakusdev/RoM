@@ -69,6 +69,7 @@ impl SharedGameRuntime {
         &self,
         uuid: PlayerUuid,
         position: BlockPos,
+        target_token: u64,
         block: BlockMining,
     ) -> Result<Option<MiningStart>, MiningRuntimeError> {
         let tool = self.selected_mining_tool(uuid)?;
@@ -97,7 +98,7 @@ impl SharedGameRuntime {
             ))?;
             Ok(player
                 .gameplay
-                .begin_mining(position, started_at_tick, required_ticks)
+                .begin_mining(position, target_token, started_at_tick, required_ticks)
                 .map(|_| ()))
         })?;
         session_result?;
@@ -124,19 +125,23 @@ impl SharedGameRuntime {
         &self,
         uuid: PlayerUuid,
         position: BlockPos,
+        target_token: u64,
     ) -> Result<bool, MiningRuntimeError> {
         let current_tick = self.with_state(|state| state.time().game_time)?;
         let outcome = self.with_state_mut(|state| {
             let player = state.player_mut(uuid).ok_or(GameRuntimeError::State(
                 GameStateError::UnknownPlayer { uuid },
             ))?;
-            Ok(player.gameplay.finish_mining(position, current_tick))
+            Ok(player
+                .gameplay
+                .finish_mining(position, target_token, current_tick))
         })?;
         match outcome {
             Ok(_) => Ok(true),
             Err(
                 MiningSessionError::NoActiveSession
                 | MiningSessionError::WrongTarget { .. }
+                | MiningSessionError::TargetChanged { .. }
                 | MiningSessionError::TooEarly { .. },
             ) => Ok(false),
             Err(error) => Err(error.into()),
@@ -246,12 +251,12 @@ mod tests {
             requires_correct_tool: true,
         };
         runtime
-            .begin_mining(uuid, BlockPos { x: 0, y: 64, z: 0 }, block)
+            .begin_mining(uuid, BlockPos { x: 0, y: 64, z: 0 }, 1, block)
             .unwrap()
             .unwrap();
         assert!(
             !runtime
-                .finish_mining(uuid, BlockPos { x: 0, y: 64, z: 0 })
+                .finish_mining(uuid, BlockPos { x: 0, y: 64, z: 0 }, 1)
                 .unwrap()
         );
     }

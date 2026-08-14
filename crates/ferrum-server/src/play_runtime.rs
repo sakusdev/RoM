@@ -849,9 +849,13 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
                                 && let Some(gameplay) = gameplay
                                 && let Some(block) = block
                             {
+                                let target_token = broken_state
+                                    .map(|state| u64::from(state.get()))
+                                    .unwrap_or_default();
                                 let _ = gameplay.runtime.begin_mining(
                                     gameplay.player_uuid,
                                     game_position,
+                                    target_token,
                                     block,
                                 )?;
                             }
@@ -865,9 +869,14 @@ pub(super) fn run_play_loop_with_bridge<R: Read, W: Write>(
                         }
                         PlayerActionStatus::StopDestroyBlock => {
                             let completed = if let Some(gameplay) = gameplay {
-                                gameplay
-                                    .runtime
-                                    .finish_mining(gameplay.player_uuid, game_position)?
+                                let target_token = broken_state
+                                    .map(|state| u64::from(state.get()))
+                                    .unwrap_or_default();
+                                gameplay.runtime.finish_mining(
+                                    gameplay.player_uuid,
+                                    game_position,
+                                    target_token,
+                                )?
                             } else {
                                 true
                             };

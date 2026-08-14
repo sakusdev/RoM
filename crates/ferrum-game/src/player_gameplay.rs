@@ -75,10 +75,11 @@ impl PlayerGameplay {
     pub fn begin_mining(
         &mut self,
         position: BlockPos,
+        target_token: u64,
         started_at_tick: u64,
         required_ticks: u32,
     ) -> Result<MiningSession, MiningSessionError> {
-        let session = MiningSession::new(position, started_at_tick, required_ticks)?;
+        let session = MiningSession::new(position, target_token, started_at_tick, required_ticks)?;
         self.mining_session = Some(session);
         Ok(session)
     }
@@ -98,12 +99,13 @@ impl PlayerGameplay {
     pub fn finish_mining(
         &mut self,
         position: BlockPos,
+        target_token: u64,
         current_tick: u64,
     ) -> Result<MiningCompletion, MiningSessionError> {
         let Some(session) = self.mining_session else {
             return Err(MiningSessionError::NoActiveSession);
         };
-        let completion = session.complete(position, current_tick)?;
+        let completion = session.complete(position, target_token, current_tick)?;
         self.mining_session = None;
         Ok(completion)
     }
@@ -261,10 +263,10 @@ mod tests {
     fn mining_session_lifecycle_is_authoritative() {
         let mut gameplay = PlayerGameplay::default();
         let position = BlockPos { x: 1, y: 64, z: 2 };
-        gameplay.begin_mining(position, 100, 5).unwrap();
-        assert!(gameplay.finish_mining(position, 104).is_err());
+        gameplay.begin_mining(position, 7, 100, 5).unwrap();
+        assert!(gameplay.finish_mining(position, 7, 104).is_err());
         assert!(gameplay.mining_session().is_some());
-        let completion = gameplay.finish_mining(position, 105).unwrap();
+        let completion = gameplay.finish_mining(position, 7, 105).unwrap();
         assert_eq!(completion.elapsed_ticks, 5);
         assert!(gameplay.mining_session().is_none());
     }
@@ -273,7 +275,7 @@ mod tests {
     fn abort_only_cancels_matching_target() {
         let mut gameplay = PlayerGameplay::default();
         let position = BlockPos { x: 1, y: 64, z: 2 };
-        gameplay.begin_mining(position, 0, 1).unwrap();
+        gameplay.begin_mining(position, 7, 0, 1).unwrap();
         assert!(!gameplay.abort_mining(BlockPos { x: 2, ..position }));
         assert!(gameplay.abort_mining(position));
     }
