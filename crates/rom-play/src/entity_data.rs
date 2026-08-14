@@ -79,10 +79,6 @@ pub fn encode_entity_data_varint_value(value: i32) -> Vec<u8> {
     output
 }
 
-pub fn encode_empty_entity_data(entity_id: EntityId) -> Result<Vec<u8>, EntityDataEncodeError> {
-    encode_entity_data(entity_id, &[])
-}
-
 fn write_varint(output: &mut Vec<u8>, value: i32) {
     let mut value = value as u32;
     loop {
@@ -136,7 +132,7 @@ mod tests {
     #[test]
     fn empty_metadata_keeps_protocol_terminator() {
         let id = EntityId::new(128).unwrap();
-        assert_eq!(encode_empty_entity_data(id).unwrap(), vec![0x80, 0x01, 0xff]);
+        assert_eq!(encode_entity_data(id, &[]).unwrap(), vec![0x80, 0x01, 0xff]);
     }
 
     #[test]
