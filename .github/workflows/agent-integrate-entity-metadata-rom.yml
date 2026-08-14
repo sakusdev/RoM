@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/scripts/agent_integrate_entity_metadata_rom.py'
       - '.github/workflows/agent-integrate-entity-metadata-rom.yml'
+      - 'crates/rom-play/src/entity_data.rs'
   workflow_dispatch:
 
 permissions:
