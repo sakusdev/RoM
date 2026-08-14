@@ -15,6 +15,7 @@ pub mod experience;
 pub mod experience_orb;
 mod exports;
 pub mod furnace;
+pub mod gameplay_tick;
 pub mod hunger;
 pub mod inventory;
 pub mod item_entity;
