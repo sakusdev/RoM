@@ -25,7 +25,9 @@ jobs:
         run: python .github/scripts/agent_rename_ferrum_to_rom.py
       - name: Regenerate lockfile
         run: cargo generate-lockfile
-      - name: Format
+      - name: Format renamed sources
+        run: cargo fmt --all
+      - name: Verify formatting
         run: cargo fmt --all --check
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
