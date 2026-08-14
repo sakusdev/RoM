@@ -84,8 +84,7 @@ impl PlayerGameplay {
 
     #[must_use]
     pub fn mining_haste_multiplier(&self) -> f64 {
-        self.status_effects.haste_multiplier()
-            * self.status_effects.mining_fatigue_multiplier()
+        self.status_effects.haste_multiplier() * self.status_effects.mining_fatigue_multiplier()
     }
 
     /// Advances effects and hunger state by one server tick.
@@ -168,9 +167,9 @@ mod tests {
     #[test]
     fn max_health_uses_attribute_value() {
         let mut gameplay = PlayerGameplay::default();
-        gameplay.attributes.insert(
-            Attribute::new("minecraft:max_health", 40.0, 1.0, 1024.0).unwrap(),
-        );
+        gameplay
+            .attributes
+            .insert(Attribute::new("minecraft:max_health", 40.0, 1.0, 1024.0).unwrap());
         assert_eq!(gameplay.max_health(), 40.0);
     }
 
