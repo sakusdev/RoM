@@ -31,8 +31,29 @@ jobs:
         run: cargo fmt --all --check
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Test
-        run: cargo test --workspace
+      - name: Test and capture output
+        shell: bash
+        run: |
+          set +e
+          cargo test --workspace --no-fail-fast 2>&1 | tee test-output.log
+          echo "${PIPESTATUS[0]}" > test-status.txt
+          exit 0
+      - name: Upload test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rom-rename-test-output
+          path: |
+            test-output.log
+            test-status.txt
+      - name: Fail on test errors
+        shell: bash
+        run: |
+          status=$(cat test-status.txt)
+          if [ "$status" != "0" ]; then
+            tail -n 200 test-output.log
+            exit "$status"
+          fi
       - name: Verify public server binary name
         run: cargo metadata --no-deps --format-version 1 | python -c 'import json,sys; d=json.load(sys.stdin); p=next(p for p in d["packages"] if p["name"]=="rom-server"); assert any(t["name"]=="rom" and "bin" in t["kind"] for t in p["targets"])'
       - name: Commit validated rename
