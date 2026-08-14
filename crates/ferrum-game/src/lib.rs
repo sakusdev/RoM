@@ -9,6 +9,7 @@ pub mod command;
 pub mod container;
 pub mod crafting;
 pub mod damage;
+pub mod durability;
 pub mod entity;
 pub mod entity_tracking;
 pub mod experience;
