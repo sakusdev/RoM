@@ -4,9 +4,7 @@
 //! packet encoding. Health changes are emitted as regular game events so the
 //! server replicator can reuse the same paths as commands and combat.
 
-use crate::{
-    Difficulty, GameEvent, GameRuleValue, GameState, PlayerUuid, Vitals,
-};
+use crate::{Difficulty, GameEvent, GameRuleValue, GameState, PlayerUuid, Vitals};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PlayerTickStats {
@@ -30,7 +28,9 @@ impl GameState {
         let uuids = self
             .players
             .iter()
-            .filter_map(|(uuid, player)| (player.connected && !player.vitals.is_dead()).then_some(*uuid))
+            .filter_map(|(uuid, player)| {
+                (player.connected && !player.vitals.is_dead()).then_some(*uuid)
+            })
             .collect::<Vec<_>>();
 
         let mut stats = PlayerTickStats::default();
@@ -41,9 +41,10 @@ impl GameState {
             stats.players_ticked = stats.players_ticked.saturating_add(1);
 
             let previous = player.vitals;
-            let tick = player
-                .gameplay
-                .tick(&mut player.vitals, natural_regeneration && difficulty != Difficulty::Peaceful);
+            let tick = player.gameplay.tick(
+                &mut player.vitals,
+                natural_regeneration && difficulty != Difficulty::Peaceful,
+            );
             stats.effects_expired = stats
                 .effects_expired
                 .saturating_add(tick.expired_effects.len());
@@ -125,10 +126,12 @@ mod tests {
         let mut events = Vec::new();
         let stats = state.tick_player_gameplay(&mut events);
         assert_eq!(stats.effects_expired, 1);
-        assert!(!state.players[&uuid]
-            .gameplay
-            .status_effects
-            .contains("minecraft:speed"));
+        assert!(
+            !state.players[&uuid]
+                .gameplay
+                .status_effects
+                .contains("minecraft:speed")
+        );
     }
 
     #[test]
