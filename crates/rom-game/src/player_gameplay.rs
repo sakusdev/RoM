@@ -25,6 +25,8 @@ pub struct PlayerGameplay {
     fall_distance: f32,
     #[serde(default)]
     mining_session: Option<MiningSession>,
+    #[serde(default)]
+    last_attack_tick: Option<u64>,
 }
 
 impl Default for PlayerGameplay {
@@ -35,6 +37,7 @@ impl Default for PlayerGameplay {
             hunger_timer: 0,
             fall_distance: 0.0,
             mining_session: None,
+            last_attack_tick: None,
         }
     }
 }
@@ -70,6 +73,28 @@ impl PlayerGameplay {
     #[must_use]
     pub const fn mining_session(&self) -> Option<MiningSession> {
         self.mining_session
+    }
+
+    #[must_use]
+    pub const fn last_attack_tick(&self) -> Option<u64> {
+        self.last_attack_tick
+    }
+
+    #[must_use]
+    pub fn attack_strength_scale(&self, current_tick: u64, attack_speed: f32) -> f32 {
+        if !attack_speed.is_finite() || attack_speed <= 0.0 {
+            return 1.0;
+        }
+        let Some(last_attack_tick) = self.last_attack_tick else {
+            return 1.0;
+        };
+        let elapsed = current_tick.saturating_sub(last_attack_tick) as f32;
+        let cooldown_ticks = 20.0 / attack_speed;
+        ((elapsed + 0.5) / cooldown_ticks).clamp(0.0, 1.0)
+    }
+
+    pub fn record_attack(&mut self, current_tick: u64) {
+        self.last_attack_tick = Some(current_tick);
     }
 
     pub fn begin_mining(

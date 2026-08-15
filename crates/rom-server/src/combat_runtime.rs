@@ -10,6 +10,8 @@ pub const PLAYER_ATTACK_VERTICAL_KNOCKBACK: f64 = 0.4;
 pub struct PlayerAttackOutcome {
     pub target: PlayerUuid,
     pub damage: f32,
+    pub attack_strength: f32,
+    pub critical: bool,
     pub killed: bool,
 }
 
@@ -59,15 +61,46 @@ impl SharedGameRuntime {
                 .ok()
                 .flatten()
                 .map(|stack| stack.item());
+            let current_tick = state.time().game_time;
+            let attack_speed = attack_speed_for_item(item);
+            let attack_strength = attacker
+                .gameplay
+                .attack_strength_scale(current_tick, attack_speed);
+            let base_damage = attack_damage_for_item(item);
+            let charged_damage = base_damage * (0.2 + attack_strength * attack_strength * 0.8);
+            let critical = attack_strength > 0.9
+                && !state.entities().get(attacker_entity)?.transform.on_ground
+                && attacker.gameplay.fall_distance() > 0.0;
+            let damage = if critical {
+                charged_damage * 1.5
+            } else {
+                charged_damage
+            };
             Some((
                 *target_uuid,
                 attacker_position,
-                attack_damage_for_item(item),
+                current_tick,
+                attack_strength,
+                critical,
+                damage,
             ))
         })?;
-        let Some((target_uuid, attacker_position, damage)) = snapshot else {
+        let Some((target_uuid, attacker_position, current_tick, attack_strength, critical, damage)) =
+            snapshot
+        else {
             return Ok(None);
         };
+
+        self.with_state_mut(|state| {
+            let attacker =
+                state
+                    .player_mut(attacker_uuid)
+                    .ok_or(rom_game::GameStateError::UnknownPlayer {
+                        uuid: attacker_uuid,
+                    })?;
+            attacker.gameplay.record_attack(current_tick);
+            Ok(())
+        })?;
 
         let events = self.damage_player(target_uuid, damage)?;
         let killed = events.iter().any(
@@ -84,8 +117,25 @@ impl SharedGameRuntime {
         Ok(Some(PlayerAttackOutcome {
             target: target_uuid,
             damage,
+            attack_strength,
+            critical,
             killed,
         }))
+    }
+}
+
+#[must_use]
+pub fn attack_speed_for_item(item: Option<&str>) -> f32 {
+    match item {
+        Some(
+            "minecraft:wooden_sword"
+            | "minecraft:golden_sword"
+            | "minecraft:stone_sword"
+            | "minecraft:iron_sword"
+            | "minecraft:diamond_sword"
+            | "minecraft:netherite_sword",
+        ) => 1.6,
+        _ => 4.0,
     }
 }
 
@@ -145,6 +195,8 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(outcome.damage, 7.0);
+        assert_eq!(outcome.attack_strength, 1.0);
+        assert!(!outcome.critical);
         assert!(!outcome.killed);
         let (health, velocity) = runtime
             .with_state(|state| {
@@ -159,6 +211,49 @@ mod tests {
             .unwrap();
         assert_eq!(health, 13.0);
         assert_ne!(velocity, Velocity::default());
+    }
+
+    #[test]
+    fn repeated_sword_attack_is_cooldown_scaled() {
+        let runtime = SharedGameRuntime::vanilla_overworld();
+        let attacker = PlayerUuid::new(120);
+        let target = PlayerUuid::new(121);
+        runtime
+            .connect_player(attacker, "Attacker", transform(0.5))
+            .unwrap();
+        runtime
+            .connect_player(target, "Target", transform(2.5))
+            .unwrap();
+        runtime
+            .with_state_mut(|state| {
+                state
+                    .player_mut(attacker)
+                    .unwrap()
+                    .inventory
+                    .set_slot(
+                        HOTBAR_START,
+                        Some(ItemStack::with_max_count("minecraft:diamond_sword", 1, 1).unwrap()),
+                    )
+                    .map_err(|error| {
+                        GameRuntimeError::State(rom_game::GameStateError::Inventory(error))
+                    })?;
+                Ok(())
+            })
+            .unwrap();
+        let target_entity = runtime
+            .with_state(|state| state.player(target).unwrap().entity_id.unwrap())
+            .unwrap();
+        let first = runtime
+            .attack_player_entity(attacker, target_entity.get())
+            .unwrap()
+            .unwrap();
+        let second = runtime
+            .attack_player_entity(attacker, target_entity.get())
+            .unwrap()
+            .unwrap();
+        assert_eq!(first.attack_strength, 1.0);
+        assert!(second.attack_strength < 0.1);
+        assert!(second.damage < 2.0);
     }
 
     #[test]
